@@ -38,6 +38,24 @@ Open items only. Done work is in `git log` / closed PRs.
       columns, indexes, constraints, and FKs. Without it, every
       rename emits `DROP + CREATE` which destroys data. Pistachio's
       design is the reference.
+- [ ] **`--alter-extra` flag** to append free-form text to every
+      generated `ALTER TABLE …` statement and every standalone
+      `CREATE INDEX …` (e.g. `ALGORITHM=INPLACE, LOCK=NONE`). The diff
+      currently emits index drops as `ALTER TABLE … DROP INDEX` (not
+      standalone), so the ALTER TABLE branch already covers them; index
+      adds are standalone `CREATE INDEX` and need their own append.
+      MySQL-specific (no pistachio analogue): pg has CONCURRENTLY for
+      indexes only; MySQL ties online DDL to per-statement
+      ALGORITHM/LOCK hints with a non-trivial support matrix. A generic
+      suffix flag lets users opt into "online-or-fail-fast" without
+      myschema having to track the matrix itself — MySQL rejects
+      unsupported combinations at apply time, so CI catches non-online
+      migrations. Also covers future hint syntax additions (e.g.
+      `WITH VALIDATION`) without code changes. Implementation is a
+      string-append in diff output. A future per-statement
+      `-- myschema:alter-extra=...` directive could follow for cases
+      where a single migration mixes online-safe and online-unsafe
+      operations.
 
 ## Medium — silent diffs / fidelity gaps
 
