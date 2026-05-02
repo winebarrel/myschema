@@ -387,7 +387,7 @@ func TestDiffRenameSourceAlsoDeclaredErrors(t *testing.T) {
 }
 
 func TestDiffRenameDuplicateSourceErrors(t *testing.T) {
-	// Two desired columns claim the same RenameFrm source. Without
+	// Two desired columns claim the same RenameFrom source. Without
 	// the pre-validation, the second one would surface as a confusing
 	// "source not found" after the first rename mutated current.
 	current := orderedmap.New[string, *model.Table]()

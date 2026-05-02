@@ -46,12 +46,29 @@ var (
 // `-- myschema:renamed-from db.tbl` (qualified, unsupported) or
 // `-- myschema:renamed-from` (missing arg) fail loudly instead of being
 // silently ignored downstream.
+//
+// Lines are pre-processed the same way the extractors process them:
+// leading `/* … */` blocks (and multi-line block state) are stripped so
+// a directive after `/* header */` or after a block-close on the same
+// line still gets validated — keeping validator and extractor in
+// agreement on what counts as a "directive line".
 func ValidateDirectives(rawSQL string) error {
-	// Walk lines so we can match the *whole* directive line against the
-	// directive's required syntax — a partial match anywhere in the
-	// line wouldn't tell us about trailing junk or missing arguments.
+	var inBlock bool
 	for line := range strings.SplitSeq(rawSQL, "\n") {
-		m := anyDirectivePattern.FindStringSubmatch(line)
+		if inBlock {
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
+			}
+			inBlock = false
+			line = line[idx+2:]
+		}
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
+		m := anyDirectivePattern.FindStringSubmatch(trim)
 		if m == nil {
 			continue
 		}
@@ -61,8 +78,8 @@ func ValidateDirectives(rawSQL string) error {
 		}
 		switch name {
 		case "renamed-from":
-			if !renameDirectivePattern.MatchString(line) {
-				return fmt.Errorf("malformed -- myschema:renamed-from directive: %q (expected exactly one bareword or `backticked` identifier; schema-qualified names are not supported)", strings.TrimSpace(line))
+			if !renameDirectivePattern.MatchString(trim) {
+				return fmt.Errorf("malformed -- myschema:renamed-from directive: %q (expected exactly one bareword or `backticked` identifier; schema-qualified names are not supported)", strings.TrimSpace(trim))
 			}
 		}
 	}
@@ -91,10 +108,15 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 			break
 		}
 		if inBlock {
-			if strings.Contains(line, "*/") {
-				inBlock = false
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
 			}
-			continue
+			inBlock = false
+			// Re-process anything after the closing `*/` so a
+			// directive like `*/ -- myschema:renamed-from old`
+			// still attaches.
+			line = line[idx+2:]
 		}
 		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
 		if opened {
@@ -186,10 +208,15 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 	var inBlock bool
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
 		if inBlock {
-			if strings.Contains(line, "*/") {
-				inBlock = false
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
 			}
-			continue
+			inBlock = false
+			// Re-process anything after the closing `*/` so a
+			// directive like `*/ -- myschema:renamed-from old`
+			// still attaches.
+			line = line[idx+2:]
 		}
 		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
 		if opened {

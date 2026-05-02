@@ -134,6 +134,55 @@ func TestExtractInlineRenamesSkipsMultiLineBlockComment(t *testing.T) {
 	assert.Empty(t, got.Unsupported)
 }
 
+func TestValidateDirectivesAfterLeadingBlockComment(t *testing.T) {
+	// A malformed directive after a single-line `/* … */` on the same
+	// line must still error — extractors process this shape, so the
+	// validator has to as well or typos slip through.
+	err := parser.ValidateDirectives("/* header */ -- myschema:renamed-form old\nCREATE TABLE t (id INT);\n")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown")
+}
+
+func TestValidateDirectivesAfterMultiLineBlockClose(t *testing.T) {
+	// Multi-line block closes on the same line as the directive:
+	// `*/ -- myschema:renamed-form old` — the validator must
+	// re-scan after `*/`.
+	err := parser.ValidateDirectives(`/*
+multi
+line
+*/ -- myschema:renamed-form old
+CREATE TABLE t (id INT);
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown")
+}
+
+func TestExtractStmtRenameFromMultiLineBlockCloseSameLineAsDirective(t *testing.T) {
+	// `*/ -- myschema:renamed-from old` — the closing `*/` ends a
+	// multi-line block and the directive on the rest of the line
+	// must still attach.
+	got, err := parser.ExtractStmtRenameFrom(`/*
+header
+*/ -- myschema:renamed-from old_users
+CREATE TABLE users (id INT);`)
+	require.NoError(t, err)
+	assert.Equal(t, "old_users", got)
+}
+
+func TestExtractInlineRenamesMultiLineBlockCloseSameLineAsDirective(t *testing.T) {
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    /*
+    multi-line
+    note
+    */ -- myschema:renamed-from old_name
+    name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (id)
+);`)
+	assert.Equal(t, "old_name", got.Columns["name"])
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractStmtRenameFromBlockCommentBeforeDirectiveSameLine(t *testing.T) {
 	// `/* header */ -- myschema:renamed-from old` — the directive
 	// follows a single-line block comment on the same line. The
