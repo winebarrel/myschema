@@ -84,7 +84,11 @@ identical to the standalone repo's API.
 
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 
-- Views, triggers, routines (procedures / functions)
+- Views (`CREATE VIEW`, `ALTER VIEW`, `DROP VIEW`)
+
+(Triggers, stored procedures / functions, and events are deliberately
+out of scope, not deferred — they are imperative, version-tagged code
+rather than declarative schema. Manage them out of band.)
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
 - Renaming via directives (pistachio's `-- pist:renamed-from`)
@@ -94,8 +98,6 @@ identical to the standalone repo's API.
   is also being created in the same plan (currently the FK adds run after
   all CREATE TABLEs, so this works for that case; FKs that point at tables
   in databases myschema is not managing are not handled)
-- `--with-tx` actually wraps in BEGIN / COMMIT — currently a no-op flag,
-  documented as such, because MySQL auto-commits DDL anyway
 - Database-name remap (the MySQL analogue of pistachio's `--schema-map`):
   let the desired SQL use database `foo` while applying to database `bar`.
   Today the DSN's database is the single source of truth; if you point it

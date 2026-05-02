@@ -11,8 +11,7 @@ import (
 type ApplyOptions struct {
 	FilterOptions
 	DropPolicy
-	Files  []string `arg:"" help:"Path to the desired schema SQL file(s)."`
-	WithTx bool     `help:"Wrap apply in a transaction (DDL is auto-committed in MySQL; this only wraps preflight checks)."`
+	Files []string `arg:"" help:"Path to the desired schema SQL file(s)."`
 }
 
 // ApplyResult mirrors PlanResult but reports what was actually executed.

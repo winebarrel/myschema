@@ -8,15 +8,18 @@ by area; ordering inside a group is not significant.
 
 - [ ] Views (`CREATE VIEW`, `ALTER VIEW`, `DROP VIEW`) including
       `SQL SECURITY` / `DEFINER` / `WITH … CHECK OPTION`
-- [ ] Triggers (`CREATE TRIGGER` / `DROP TRIGGER`)
-- [ ] Stored procedures and functions (`CREATE PROCEDURE` / `CREATE FUNCTION`)
-- [ ] Events (`CREATE EVENT`)
 - [ ] Sequences (MySQL 8.0+ does not have native sequences; treat as out of
       scope unless TiDB compatibility is desired)
 - [ ] Partitioning: `PARTITION BY` clause, sub-partitions, partition
       operations (`ADD/DROP/TRUNCATE/REORGANIZE PARTITION`)
 - [ ] Generated column expression diff (currently the expression is captured
       but `equalGeneratedExpr` is a literal string compare)
+
+> Triggers, stored procedures / functions, and events are intentionally
+> out of scope: they are imperative, version-tagged code rather than
+> declarative schema, and trying to diff them inside a schema-management
+> tool tends to produce more confusion than value. Manage them out of
+> band.
 
 ## Column / type fidelity
 
@@ -42,18 +45,15 @@ by area; ordering inside a group is not significant.
 - [ ] Cross-database FK ordering
 - [ ] `DROP TABLE` ordering when one being-dropped table is referenced by an
       FK on another being-dropped table
-- [ ] `--with-tx` actually wraps the apply in `BEGIN` / `COMMIT`. Today it
-      is a no-op flag. MySQL auto-commits DDL, so the value is mostly for
-      pre-SQL / arbitrary-SQL execution; document or remove
 
 ## CLI features
 
 - [ ] `--include` / `--exclude` glob already works for tables; extend to
-      indexes / FKs once view / trigger objects land
+      indexes / FKs once views land
 - [ ] `--enable` / `--disable` flag to restrict the object types
-      considered (`table`, `view`, `trigger`, …), mirroring pistachio
+      considered (`table`, `view`), mirroring pistachio
 - [ ] `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars)
-- [ ] `--split` for `dump` (one file per table / view / trigger)
+- [ ] `--split` for `dump` (one file per table / view)
 - [ ] `--omit-database` for `dump` (mirror of pistachio's `--omit-schema`)
 - [ ] Database-name remap (`-m old=new`), the MySQL analogue of pistachio's
       `--schema-map`. Useful when the dump target uses a different DB name
@@ -68,8 +68,10 @@ by area; ordering inside a group is not significant.
       `DROP + CREATE`. Without directives, intent inference is brittle in
       MySQL because `information_schema` does not record rename history
 - [ ] `-- myschema:execute <check-sql>` arbitrary-SQL escape hatch for
-      objects we do not model (functions, triggers, grants), with the
-      pistachio "evaluate check-SQL during apply" semantics
+      objects we do not model (triggers, routines, events, grants),
+      with the pistachio "evaluate check-SQL during apply" semantics —
+      the only sanctioned way to manage trigger/routine/event SQL
+      alongside myschema-managed tables
 - [ ] `-- myschema:invisible` shortcut so an index can be added invisible
       first (lock-friendly) and made visible in a follow-up apply
 
@@ -113,8 +115,6 @@ by area; ordering inside a group is not significant.
 
 ## Cleanup
 
-- [ ] `--with-tx` flag: either implement or remove; current state is a
-      misleading no-op
 - [ ] `applyAlterTable` accepts `ADD CONSTRAINT` only; either support more
       `ALTER TABLE` clauses in desired-side SQL or raise a clear error
 - [ ] `parseOne` test helper in `diff/tables_test.go` is unused once the
