@@ -1,135 +1,99 @@
 # TODO
 
-Tracking the gap between v1 (current) and feature parity with
-[pistachio](https://github.com/winebarrel/pistachio). Items are roughly grouped
-by area; ordering inside a group is not significant.
+Open items only. Done work is in `git log` / closed PRs. Triggers,
+stored procedures / functions, events, and TiDB sequences are
+intentionally **out of scope** — they're imperative, version-tagged
+code rather than declarative schema. Manage them out of band, or use
+the planned `-- myschema:execute` directive.
 
-## Object coverage
+## High — correctness bugs
 
-- [x] Views (`CREATE VIEW` / `DROP VIEW`) — emitted as
-      `CREATE OR REPLACE VIEW` on apply, diffed via
-      `parser.NormalizeViewDefinition` (parse-then-restore via vitess plus
-      AST visitors that strip schema/table qualifiers from column refs and
-      drop redundant `SELECT col AS col` aliases).
-- [ ] View `DEFINER` and `SQL SECURITY` diffing (catalogued but not acted on)
-- [ ] Sequences (MySQL 8.0+ does not have native sequences; treat as out of
-      scope unless TiDB compatibility is desired)
-- [ ] Partitioning: `PARTITION BY` clause, sub-partitions, partition
-      operations (`ADD/DROP/TRUNCATE/REORGANIZE PARTITION`)
-- [x] Generated column expression diff — `Generated` field now goes
-      through `equalExprPtr` (silent-diff-fixes PR), and `Stored` was
-      fixed (was inverted: VIRTUAL columns were marked Stored=true).
+- [ ] **`--allow-drop=all` emits redundant `DROP INDEX` for
+      column-dependent indexes.** When a column with a single-column
+      index is dropped, MySQL auto-removes the index, then myschema's
+      explicit `DROP INDEX` fails with `Error 1091`. Repro: column +
+      same-column KEY → desired drops both → apply fails.
+- [ ] **`DROP TABLE` ordering when one being-dropped table is
+      FK-referenced by another being-dropped table.** Currently the
+      drop order is alphabetical by `TABLE_NAME`; if the parent comes
+      first the apply errors. The `FKDropStmts → DropStmts` bucket
+      separation handles the simple case but not all variants. Needs
+      a topo-sort pass, mirror of the view-side fix.
 
-> Triggers, stored procedures / functions, and events are intentionally
-> out of scope: they are imperative, version-tagged code rather than
-> declarative schema, and trying to diff them inside a schema-management
-> tool tends to produce more confusion than value. Manage them out of
-> band.
+## High — production gates
 
-## Column / type fidelity
+- [ ] **`-- myschema:renamed-from <old>` directive** on tables,
+      columns, indexes, constraints, and FKs. Without it, every
+      rename emits `DROP + CREATE` which destroys data. Pistachio's
+      design is the reference.
+- [ ] **`--strict-drop` (or non-zero exit) when drops are suppressed.**
+      Today suppressed drops only show as `-- skipped:` comments;
+      CI gates can't catch them.
 
-- [ ] `ENUM` / `SET` element-list diff (parse the type, compare element order
-      and whether values were appended vs. reordered)
-- [x] Default-value normalisation (`diff.equalExprPtr`): both sides
-      pass through vitess parse → restore, so `CURRENT_TIMESTAMP` vs
-      `current_timestamp()`, `(1+2)` vs `1+2`, and `a > 0` vs `a>0`
-      compare equal. Quoted-vs-bareword stays a real diff.
-- [x] `CHECK` constraint definition normalisation
-      (`diff.equalCheckDef`): the inner expression goes through the same
-      `equalExpr` pipeline; the trailing `NOT ENFORCED` is compared
-      case-insensitively. The old loose `lower+strip` lives on as
-      `looseEqual` for `(col1, col2)` style constraint bodies that
-      don't need a real parse.
-- [ ] Character set / collation diff at the **table** and **column** levels
-      (read currently, but not surfaced as `ALTER TABLE … CONVERT TO` or
-      `MODIFY COLUMN … CHARACTER SET`)
-- [ ] Column position (`AFTER`, `FIRST`) when adding new columns
+## Medium — silent diffs / fidelity gaps
 
-## Diff ordering and safety
+- [ ] **Character set / collation diff at the table and column level.**
+      Currently read but not surfaced: a `CHARACTER SET` change is
+      silently ignored. Needs care with table-default propagation
+      (every column would otherwise look "different" after a table
+      charset change).
+- [ ] **`ENUM` / `SET` element-list diff.** Today the type is compared
+      as one string, so reordered values trigger MODIFY COLUMN even
+      when the visible behaviour is identical. Want explicit
+      "appended" vs "reordered" detection.
+- [ ] **Topological ordering of new tables when a new table FK-references
+      another new table created in the same plan.** Currently FK adds
+      run after all `CREATE TABLE`s, which works for the common case
+      but is fragile.
+- [ ] **Cross-database FK ordering** — out of scope for our single-DB
+      invariant but documenting the gap.
+- [ ] **Column position (`AFTER`, `FIRST`)** when adding new columns.
 
-- [ ] Topological ordering of DDL when a new table FK-references another new
-      table being created in the same plan (currently FK adds run after all
-      `CREATE TABLE`s, which works for single-DB cases but is fragile)
-- [x] Topological ordering of **views** that reference other views.
-      `parser.ViewReferences` collects every TableName ref via an AST
-      visitor; `diff.topoSortViews` runs Kahn's algorithm with
-      alphabetical tie-breaking. CreateStmts come out in dependency order,
-      DropStmts in reverse. Verified by `make load-employees` →
-      drop / re-apply → no drift.
-- [ ] Cross-database FK ordering
-- [ ] `DROP TABLE` ordering when one being-dropped table is referenced by an
-      FK on another being-dropped table
+## Medium — object coverage
 
-## CLI features
+- [ ] **View `DEFINER` and `SQL SECURITY` diffing.** Catalogued but
+      `DiffViews` doesn't act on changes.
+- [ ] **Partitioning** — `PARTITION BY`, sub-partitions,
+      `ADD/DROP/TRUNCATE/REORGANIZE PARTITION`.
 
-- [ ] `--include` / `--exclude` glob already works for tables and views;
-      extend to indexes / FKs
-- [ ] `--enable` / `--disable` flag to restrict the object types
-      considered (`table`, `view`), mirroring pistachio
-- [ ] `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars)
-- [ ] `--split` for `dump` (one file per table / view)
-- [ ] `--omit-database` for `dump` (mirror of pistachio's `--omit-schema`)
-- [ ] Database-name remap (`-m old=new`), the MySQL analogue of pistachio's
-      `--schema-map`. Useful when the dump target uses a different DB name
-      from the source schema
-- [ ] `dump --quote-style` (backtick vs. ANSI double-quote) so output can be
-      consumed by tools that toggle `ANSI_QUOTES`
+## Low — CLI ergonomics
 
-## Directive support (pistachio parity)
+- [ ] `--enable` / `--disable` flag to scope a run to specific object
+      types (`table`, `view`).
+- [ ] `--include` / `--exclude` extension to indexes / FKs (currently
+      tables and views only).
+- [ ] `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars).
+- [ ] `--split` for `dump` (one file per table / view).
+- [ ] `--omit-database` for `dump` (mirror of pistachio's `--omit-schema`).
+- [ ] Database-name remap (`-m old=new`), the MySQL analogue of
+      pistachio's `--schema-map`.
+- [ ] `dump --quote-style` (backtick vs. ANSI double-quote) for tools
+      that toggle `ANSI_QUOTES`.
 
-- [ ] `-- myschema:renamed-from <old_name>` directive on tables, columns,
-      indexes, constraints, and FKs. Currently any rename is emitted as
-      `DROP + CREATE`. Without directives, intent inference is brittle in
-      MySQL because `information_schema` does not record rename history
-- [ ] `-- myschema:execute <check-sql>` arbitrary-SQL escape hatch for
-      objects we do not model (triggers, routines, events, grants),
-      with the pistachio "evaluate check-SQL during apply" semantics —
-      the only sanctioned way to manage trigger/routine/event SQL
-      alongside myschema-managed tables
-- [ ] `-- myschema:invisible` shortcut so an index can be added invisible
-      first (lock-friendly) and made visible in a follow-up apply
+## Low — directives
 
-## Drop policy
+- [ ] **`-- myschema:execute <check-sql>`** arbitrary-SQL escape hatch
+      for objects we don't model (triggers, routines, events, grants).
+      The only sanctioned way to manage that SQL alongside
+      myschema-managed tables.
+- [ ] **`-- myschema:invisible`** shortcut so an index can be added
+      invisible first (lock-friendly) and made visible in a follow-up
+      apply.
 
-- [ ] Per-category `--allow-drop` flags already exist; surface
-      "drops were suppressed" as a non-zero exit code option
-      (`--strict-drop` or similar) for CI usage
-- [ ] FK drops emitted because the owning table is being dropped should
-      follow the table-drop policy (already implemented this way; add a
-      regression test once the YAML harness lands)
+## Low — tests / docs / release
 
-## Tests / fixtures
-
-- [x] YAML-driven test harness for plan, apply, dump
-      (`testdata/{plan,apply,dump}/*.yml`; the parser / diff suites still
-      use Go table tests). Extending to parser / diff is the remaining
-      bullet.
-- [ ] YAML harness for parser and diff
-- [x] `apply_test.go` integration suite (YAML-driven, requires
-      `MYSCHEMA_TEST_DSN` MySQL)
-- [x] `dump_test.go` integration suite (YAML-driven)
-- [x] `plan_test.go` integration suite (YAML-driven)
-- [x] CLI scenario tests under `test/scenario/`
-- [x] `compose.yaml` for a local MySQL 8.x test container
-
-## Documentation
-
-- [ ] `README.md` (currently only "# myschema" header from the bootstrap)
-- [ ] `getting-started.md`
-- [ ] `CHANGELOG.md`
-- [ ] Demo asciinema or gif similar to pistachio
-
-## Build / release
-
-- [x] `Makefile` with `build`, `test`, `lint`, `fix`, `schema` targets
-- [x] `.golangci.yml`
-- [x] CI workflow under `.github/workflows/ci.yml` (+ auto-merge)
-- [ ] `.goreleaser.yml`
-- [ ] Renovate / dependabot config
+- [ ] YAML harness extended to parser and diff (currently Go table tests).
+- [ ] `README.md` — currently just `# myschema`.
+- [ ] `getting-started.md`.
+- [ ] `CHANGELOG.md`.
+- [ ] Demo asciinema or gif (pistachio-style).
+- [ ] `.goreleaser.yml`.
+- [ ] Renovate / dependabot config.
 
 ## Cleanup
 
-- [ ] `applyAlterTable` accepts `ADD CONSTRAINT` only; either support more
-      `ALTER TABLE` clauses in desired-side SQL or raise a clear error
-- [ ] `parseOne` test helper in `diff/tables_test.go` is unused once the
-      YAML harness lands
+- [ ] `applyAlterTable` already handles `ADD CONSTRAINT` and
+      `AddIndexDefinition` (the vitess shape for `CREATE INDEX`).
+      Other `ALTER TABLE` clauses are silently ignored — raise a clear
+      error so users learn that the desired state should be expressed
+      via `CREATE TABLE`.
