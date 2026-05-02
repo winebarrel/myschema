@@ -21,34 +21,29 @@ jobs:
       matrix:
         include:
           - mysql_label: "8.0"
-            mysql_service: mysql
-            mysql_profile: ""
             mysql_port: 3306
             upload_codecov: true
           - mysql_label: "9.4"
-            mysql_service: mysql9
-            mysql_profile: mysql9
             mysql_port: 3307
             upload_codecov: false
     name: test (mysql ${{ matrix.mysql_label }})
     env:
       MYSQL_PORT: ${{ matrix.mysql_port }}
       MYSCHEMA_TEST_DSN: "root@tcp(127.0.0.1:${{ matrix.mysql_port }})/"
-      # Empty for the 8.0 leg, "mysql9" for the 9.4 leg. Empty
-      # COMPOSE_PROFILES means "no extra profiles enabled", under
-      # which a profile-less service like `mysql` still starts when
-      # named, so a single `docker compose up -d <service>` works
-      # for both legs.
-      COMPOSE_PROFILES: ${{ matrix.mysql_profile }}
+      # Both 8.0 and 9.x services come up on every leg; the matrix
+      # only differs in which port the test points at. Enabling the
+      # `mysql9` profile activates the 9.x service alongside the
+      # always-on 8.0 one.
+      COMPOSE_PROFILES: mysql9
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
-      - name: Start MySQL ${{ matrix.mysql_label }}
+      - name: Start MySQL
         run: |
-          for i in {1..60}; do docker compose up -d --quiet-pull "${{ matrix.mysql_service }}" && break; sleep 1; done
+          for i in {1..60}; do docker compose up -d --quiet-pull && break; sleep 1; done
           for i in {1..60}; do
             mysqladmin ping -h 127.0.0.1 -P "${{ matrix.mysql_port }}" -u root --silent && break
             sleep 2
