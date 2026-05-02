@@ -37,24 +37,10 @@ func (c *connection) Close() error {
 	return derr
 }
 
-// Database returns the database name baked into the DSN. Returns an error if
-// the DSN is malformed or omits the database, since myschema operates on
-// exactly one database per invocation.
-func (c *Client) Database() (string, error) {
-	cfg, err := mysqldrv.ParseDSN(c.DSN)
-	if err != nil {
-		return "", fmt.Errorf("myschema: parse DSN: %w", err)
-	}
-	if cfg.DBName == "" {
-		return "", fmt.Errorf("myschema: MYSCHEMA_DSN must include a database name (e.g. root@tcp(127.0.0.1:3306)/mydb)")
-	}
-	return cfg.DBName, nil
-}
-
-// connect opens a *sql.DB, immediately reserves a single dedicated connection,
-// and returns it. The pool is sized to one so no other code path can borrow
-// a second connection by accident.
-func (c *Client) connect(ctx context.Context) (*connection, error) {
+// dsnConfig parses Options.DSN, applies the optional Password override, and
+// validates that the DSN names a database. Used by both Database() and
+// connect() so the parse / validation happens in one place.
+func (c *Client) dsnConfig() (*mysqldrv.Config, error) {
 	cfg, err := mysqldrv.ParseDSN(c.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("myschema: parse DSN: %w", err)
@@ -65,7 +51,28 @@ func (c *Client) connect(ctx context.Context) (*connection, error) {
 	if c.Password != "" {
 		cfg.Passwd = c.Password
 	}
-	cfg.MultiStatements = true
+	return cfg, nil
+}
+
+// Database returns the database name baked into the DSN.
+func (c *Client) Database() (string, error) {
+	cfg, err := c.dsnConfig()
+	if err != nil {
+		return "", err
+	}
+	return cfg.DBName, nil
+}
+
+// connect opens a *sql.DB, immediately reserves a single dedicated connection,
+// and returns it. The pool is sized to one so no other code path can borrow
+// a second connection by accident. We do NOT enable MultiStatements here;
+// apply runs each statement individually and a single-statement-per-Exec
+// surface area is safer (e.g. against operator paste of `;`-laden input).
+func (c *Client) connect(ctx context.Context) (*connection, error) {
+	cfg, err := c.dsnConfig()
+	if err != nil {
+		return nil, err
+	}
 	cfg.ParseTime = true
 
 	db, err := sql.Open("mysql", cfg.FormatDSN())

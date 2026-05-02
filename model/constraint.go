@@ -6,13 +6,18 @@ type ConstraintType byte
 
 const (
 	PrimaryKeyConstraint ConstraintType = 'p'
-	UniqueConstraint     ConstraintType = 'u'
 	CheckConstraint      ConstraintType = 'c'
-	ForeignKeyConstraint ConstraintType = 'f'
 )
 
-// Constraint covers PRIMARY KEY, UNIQUE, and CHECK.
-// Foreign keys live in their own struct because they carry a reference target.
+// ConstraintType also has 'u' (UNIQUE) and 'f' (FK) historically, but
+// myschema models UNIQUE indexes via *Index and FKs via *ForeignKey, so
+// neither value ever appears in a *Constraint produced by parser/catalog.
+// They are intentionally not declared here to keep the type space honest.
+
+// Constraint covers PRIMARY KEY and CHECK.
+// UNIQUE constraints live in *Index (catalogued via
+// information_schema.STATISTICS), and foreign keys live in *ForeignKey
+// because they carry a reference target.
 type Constraint struct {
 	Name       string
 	Type       ConstraintType

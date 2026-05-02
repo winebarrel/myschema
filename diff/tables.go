@@ -163,6 +163,12 @@ func columnEqual(a, b *model.Column) bool {
 	if !ptrEq(a.Comment, b.Comment) {
 		return false
 	}
+	// CharacterSet / Collation are intentionally NOT compared here: the
+	// table's default charset/collation propagates to every column at the
+	// catalog level, so a column with no explicit `CHARACTER SET` in the
+	// user's SQL would always look "different" from the catalog's
+	// table-default-inherited value. Surfacing column-level charset diffs
+	// requires resolving that inheritance — see TODO.md.
 	return true
 }
 
@@ -176,38 +182,14 @@ func ptrEq[T comparable](a, b *T) bool {
 	return *a == *b
 }
 
+// addColumnSQL / modifyColumnSQL share model.ColumnDefSQL with CREATE TABLE
+// so that ALTER also carries CHARACTER SET / COLLATE / GENERATED clauses.
 func addColumnSQL(fqtn string, c *model.Column) string {
-	return "ALTER TABLE " + fqtn + " ADD COLUMN " + columnDefSQL(c) + ";"
+	return "ALTER TABLE " + fqtn + " ADD COLUMN " + model.ColumnDefSQL(c) + ";"
 }
 
 func modifyColumnSQL(fqtn string, c *model.Column) string {
-	return "ALTER TABLE " + fqtn + " MODIFY COLUMN " + columnDefSQL(c) + ";"
-}
-
-func columnDefSQL(c *model.Column) string {
-	var b strings.Builder
-	b.WriteString(model.Ident(c.Name))
-	b.WriteString(" ")
-	b.WriteString(c.TypeName)
-	if c.NotNull {
-		b.WriteString(" NOT NULL")
-	}
-	if c.Default != nil {
-		b.WriteString(" DEFAULT ")
-		b.WriteString(*c.Default)
-	}
-	if c.OnUpdate != nil {
-		b.WriteString(" ON UPDATE ")
-		b.WriteString(*c.OnUpdate)
-	}
-	if c.AutoIncrement {
-		b.WriteString(" AUTO_INCREMENT")
-	}
-	if c.Comment != nil {
-		b.WriteString(" COMMENT ")
-		b.WriteString(model.QuoteLiteral(*c.Comment))
-	}
-	return b.String()
+	return "ALTER TABLE " + fqtn + " MODIFY COLUMN " + model.ColumnDefSQL(c) + ";"
 }
 
 func diffConstraints(fqtn string, current, desired *orderedmap.Map[string, *model.Constraint], dc DropChecker) (stmts, disallowed []string) {
@@ -233,7 +215,6 @@ func diffConstraints(fqtn string, current, desired *orderedmap.Map[string, *mode
 		}
 		stmts = append(stmts, addConstraintSQL(fqtn, dcon))
 	}
-	_ = stmts
 	return
 }
 

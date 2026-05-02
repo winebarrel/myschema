@@ -1,0 +1,19 @@
+# Regression test for the duplicate-CHECK bug: con.Definition is already
+# `CHECK (...)`, so constraintInlineSQL must not prepend another CHECK.
+init: ""
+
+desired: |
+  CREATE TABLE products (
+      id BIGINT NOT NULL,
+      price DECIMAL(10,2),
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price > 0)
+  );
+
+applied: |
+  CREATE TABLE myschema_test.products (
+      id bigint NOT NULL,
+      price decimal(10,2),
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price > 0)
+  );

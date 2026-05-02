@@ -72,6 +72,15 @@ func (t *Table) SQL() string {
 	return b.String()
 }
 
+// ColumnDefSQL renders the post-name body of a column definition
+// (`<type> [CHARACTER SET …] [COLLATE …] [GENERATED …] [NOT NULL]
+// [DEFAULT …] [ON UPDATE …] [AUTO_INCREMENT] [COMMENT …]`) prefixed by
+// the column name formatted via Ident (back-tick quoted only when
+// required by MySQL syntax). Used by `(*Table).SQL()` for the
+// `CREATE TABLE` body and by `diff/tables.go` for `ALTER TABLE
+// ADD/MODIFY COLUMN`, so both contexts emit the same set of attributes.
+func ColumnDefSQL(col *Column) string { return columnDefSQL(col) }
+
 func columnDefSQL(col *Column) string {
 	var b strings.Builder
 	b.WriteString(Ident(col.Name))
@@ -120,10 +129,11 @@ func constraintInlineSQL(con *Constraint) string {
 	switch con.Type {
 	case PrimaryKeyConstraint:
 		return "PRIMARY KEY " + con.Definition
-	case UniqueConstraint:
-		return "CONSTRAINT " + Ident(con.Name) + " UNIQUE " + con.Definition
 	case CheckConstraint:
-		return "CONSTRAINT " + Ident(con.Name) + " CHECK " + con.Definition
+		// con.Definition is already `CHECK (<expr>)` — see parser
+		// addTableConstraint and catalog loadCheckConstraints. Don't
+		// prepend another CHECK keyword.
+		return "CONSTRAINT " + Ident(con.Name) + " " + con.Definition
 	}
 	return con.Definition
 }
