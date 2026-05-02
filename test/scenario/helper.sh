@@ -16,7 +16,10 @@ esac
 # `mysql` CLI invocation used to set up / tear down test databases.
 # Override MYSQL_BIN if your client is not on $PATH (e.g. mysql-shell).
 : "${MYSQL_BIN:=mysql}"
-_mysql_args=(--protocol=TCP -h 127.0.0.1 -P 3306 -u root)
+: "${MYSQL_HOST:=127.0.0.1}"
+: "${MYSQL_PORT:=3306}"
+: "${MYSQL_USER:=root}"
+_mysql_args=(--protocol=TCP -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER")
 
 _pass=0
 _fail=0
