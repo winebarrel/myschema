@@ -25,6 +25,13 @@ assert_not_contains "01b --include=users hides logs" \
   "$MYSCHEMA" plan --allow-drop all -I users "$DATA/desired.sql" \
   -- 'DROP TABLE myschema_test.logs'
 
+# 01c: positively assert "No changes" overall — without this, an
+# unrelated ALTER on `users` could slip through alongside the
+# absence-of-DROPs the previous two checks pin.
+assert_contains "01c --include=users sees no diff" \
+  "$MYSCHEMA" plan --allow-drop all -I users "$DATA/desired.sql" \
+  -- 'No changes'
+
 # 02: --exclude='log*' (glob) — sessions still drops, logs is hidden.
 assert_contains "02 --exclude=log* still drops sessions" \
   "$MYSCHEMA" plan --allow-drop all -E 'log*' "$DATA/desired.sql" \

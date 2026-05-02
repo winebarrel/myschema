@@ -119,6 +119,82 @@ myschema_dump() {
   "$MYSCHEMA" dump "$@"
 }
 
+# _assert_substring is the shared implementation behind
+# assert_contains / assert_not_contains. Mode is "contains" or
+# "not_contains"; everything else (arg parsing, validation, command
+# execution, output capture, grep) is identical. Centralising here
+# keeps the two wrappers from drifting on diagnostics or behaviour.
+_assert_substring() {
+  local mode="$1"
+  shift
+  # Validate $# before referencing $1 / shifting so a malformed call
+  # under `set -u` fails loudly via fail() instead of aborting the
+  # whole script with "unbound variable".
+  if [ $# -lt 1 ]; then
+    fail "assert_${mode}: missing step name (usage: <step> <cmd...> -- <substring>)"
+    return 1
+  fi
+  local step_name="$1"
+  shift
+  step "$step_name"
+
+  local cmd=()
+  local found_sep=0
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--" ]; then
+      found_sep=1
+      shift
+      break
+    fi
+    cmd+=("$1")
+    shift
+  done
+  if [ "$found_sep" -ne 1 ]; then
+    fail "assert_${mode}: missing '--' separator (cmd... -- substring)"
+    return 1
+  fi
+  if [ ${#cmd[@]} -eq 0 ]; then
+    fail "assert_${mode}: no command before '--'"
+    return 1
+  fi
+  if [ $# -eq 0 ]; then
+    fail "assert_${mode}: no expected substring after '--'"
+    return 1
+  fi
+  if [ $# -ne 1 ]; then
+    fail "assert_${mode}: too many arguments after '--' (got $#); quote the substring"
+    return 1
+  fi
+  local needle="$1"
+
+  local out
+  out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
+  # printf rather than echo so output starting with `-n` or
+  # backslash escapes doesn't get re-interpreted on the way to grep.
+  local found=1
+  printf '%s\n' "$out" | grep -qF -- "$needle" || found=0
+
+  if [ "$mode" = "contains" ]; then
+    if [ "$found" -eq 1 ]; then
+      pass
+    else
+      fail "expected substring not found"
+      echo "    expected: $needle" >&2
+      echo "    actual:   $out" >&2
+      return 1
+    fi
+  else
+    if [ "$found" -eq 0 ]; then
+      pass
+    else
+      fail "unexpected substring present"
+      echo "    unexpected: $needle" >&2
+      echo "    actual:     $out" >&2
+      return 1
+    fi
+  fi
+}
+
 # Assert that a step's command output (stdout + stderr) contains an
 # expected substring.
 # Usage: assert_contains <step-name> <command...> -- <expected substring>
@@ -129,111 +205,15 @@ myschema_dump() {
 #
 # The "--" separator is required so the helper can find the boundary
 # between cmd args and the expected substring; missing separator,
-# missing command, or missing substring all fail loudly with a clear
-# message rather than letting bash run a malformed command.
+# missing command, missing/multiple substrings all fail loudly with
+# a clear message rather than letting bash run a malformed command.
 assert_contains() {
-  # Validate $# before referencing $1 / shifting so a malformed call
-  # under `set -u` fails loudly via fail() instead of aborting the
-  # whole script with "unbound variable".
-  if [ $# -lt 1 ]; then
-    fail "assert_contains: missing step name (usage: <step> <cmd...> -- <substring>)"
-    return 1
-  fi
-  local step_name="$1"
-  shift
-  step "$step_name"
-
-  local cmd=()
-  local found_sep=0
-  while [ $# -gt 0 ]; do
-    if [ "$1" = "--" ]; then
-      found_sep=1
-      shift
-      break
-    fi
-    cmd+=("$1")
-    shift
-  done
-  if [ "$found_sep" -ne 1 ]; then
-    fail "assert_contains: missing '--' separator (cmd... -- substring)"
-    return 1
-  fi
-  if [ ${#cmd[@]} -eq 0 ]; then
-    fail "assert_contains: no command before '--'"
-    return 1
-  fi
-  if [ $# -eq 0 ]; then
-    fail "assert_contains: no expected substring after '--'"
-    return 1
-  fi
-  if [ $# -ne 1 ]; then
-    fail "assert_contains: too many arguments after '--' (got $#); quote the substring"
-    return 1
-  fi
-  local expected="$1"
-
-  local out
-  out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
-  # printf rather than echo so output starting with `-n` or
-  # backslash escapes doesn't get re-interpreted on the way to grep.
-  if printf '%s\n' "$out" | grep -qF -- "$expected"; then
-    pass
-  else
-    fail "expected substring not found"
-    echo "    expected: $expected" >&2
-    echo "    actual:   $out" >&2
-    return 1
-  fi
+  _assert_substring contains "$@"
 }
 
 # Same shape as assert_contains, but the substring must NOT appear.
 assert_not_contains() {
-  if [ $# -lt 1 ]; then
-    fail "assert_not_contains: missing step name (usage: <step> <cmd...> -- <substring>)"
-    return 1
-  fi
-  local step_name="$1"
-  shift
-  step "$step_name"
-
-  local cmd=()
-  local found_sep=0
-  while [ $# -gt 0 ]; do
-    if [ "$1" = "--" ]; then
-      found_sep=1
-      shift
-      break
-    fi
-    cmd+=("$1")
-    shift
-  done
-  if [ "$found_sep" -ne 1 ]; then
-    fail "assert_not_contains: missing '--' separator (cmd... -- substring)"
-    return 1
-  fi
-  if [ ${#cmd[@]} -eq 0 ]; then
-    fail "assert_not_contains: no command before '--'"
-    return 1
-  fi
-  if [ $# -eq 0 ]; then
-    fail "assert_not_contains: no expected substring after '--'"
-    return 1
-  fi
-  if [ $# -ne 1 ]; then
-    fail "assert_not_contains: too many arguments after '--' (got $#); quote the substring"
-    return 1
-  fi
-  local unexpected="$1"
-
-  local out
-  out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
-  if printf '%s\n' "$out" | grep -qF -- "$unexpected"; then
-    fail "unexpected substring present"
-    echo "    unexpected: $unexpected" >&2
-    echo "    actual:     $out" >&2
-    return 1
-  fi
-  pass
+  _assert_substring not_contains "$@"
 }
 
 # Run a step that should produce no diff at all.
