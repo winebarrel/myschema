@@ -29,13 +29,16 @@ by area; ordering inside a group is not significant.
 
 - [ ] `ENUM` / `SET` element-list diff (parse the type, compare element order
       and whether values were appended vs. reordered)
-- [ ] Default-value normalisation (parse → restore) so `'1'` vs `1`,
-      `CURRENT_TIMESTAMP(6)` vs `current_timestamp(6)`, and the
-      `(expression)` wrapper for non-literal defaults compare equal across
-      parser side and `information_schema` side
-- [ ] `CHECK` constraint definition normalisation. `diff.normalizeDef` is
-      currently `lower + strip whitespace + strip backticks`; replace with
-      a parse/restore pass so semantically equal CHECKs don't diff
+- [x] Default-value normalisation (`diff.equalExprPtr`): both sides
+      pass through vitess parse → restore, so `CURRENT_TIMESTAMP` vs
+      `current_timestamp()`, `(1+2)` vs `1+2`, and `a > 0` vs `a>0`
+      compare equal. Quoted-vs-bareword stays a real diff.
+- [x] `CHECK` constraint definition normalisation
+      (`diff.equalCheckDef`): the inner expression goes through the same
+      `equalExpr` pipeline; the trailing `NOT ENFORCED` is compared
+      case-insensitively. The old loose `lower+strip` lives on as
+      `looseEqual` for `(col1, col2)` style constraint bodies that
+      don't need a real parse.
 - [ ] Character set / collation diff at the **table** and **column** levels
       (read currently, but not surfaced as `ALTER TABLE … CONVERT TO` or
       `MODIFY COLUMN … CHARACTER SET`)
@@ -118,9 +121,9 @@ by area; ordering inside a group is not significant.
 ## Build / release
 
 - [x] `Makefile` with `build`, `test`, `lint`, `fix`, `schema` targets
-- [ ] `.golangci.yml`
+- [x] `.golangci.yml`
+- [x] CI workflow under `.github/workflows/ci.yml` (+ auto-merge)
 - [ ] `.goreleaser.yml`
-- [ ] CI workflow under `.github/workflows/ci.yml`
 - [ ] Renovate / dependabot config
 
 ## Cleanup
