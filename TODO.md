@@ -1,10 +1,13 @@
 # TODO
 
-Open items only. Done work is in `git log` / closed PRs. Triggers,
-stored procedures / functions, events, and TiDB sequences are
-intentionally **out of scope** — they're imperative, version-tagged
-code rather than declarative schema. Manage them out of band, or use
-the planned `-- myschema:execute` directive.
+Open items only. Done work is in `git log` / closed PRs.
+
+**Out of scope** for myschema, with different reasons:
+- *Triggers, stored procedures / functions, events.* Imperative,
+  version-tagged code rather than declarative schema. Manage out of
+  band, or use the planned `-- myschema:execute` directive.
+- *Sequences.* MySQL has no sequence object; TiDB does, but myschema
+  is MySQL-targeted. A TiDB profile could lift this later.
 
 ## High — correctness bugs
 
@@ -38,15 +41,15 @@ the planned `-- myschema:execute` directive.
       (every column would otherwise look "different" after a table
       charset change).
 - [ ] **`ENUM` / `SET` element-list diff.** Today the type is compared
-      as one string, so reordered values trigger MODIFY COLUMN even
-      when the visible behaviour is identical. Want explicit
-      "appended" vs "reordered" detection.
-- [ ] **Topological ordering of new tables when a new table FK-references
-      another new table created in the same plan.** Currently FK adds
-      run after all `CREATE TABLE`s, which works for the common case
-      but is fragile.
-- [ ] **Cross-database FK ordering** — out of scope for our single-DB
-      invariant but documenting the gap.
+      as one string, so the diff fires on any element-list change. ENUM
+      ordering matters in MySQL (it backs the internal numeric mapping
+      and ORDER BY result), so reordering is a real change — but
+      *appending* a new value at the end is online-safe and could be
+      surfaced as a hint or skipped from `--allow-drop` accounting.
+- [ ] **FK to a table outside the managed database** — myschema only
+      reads / orders the tables it manages, so an FK whose target lives
+      in another database is treated as a black box. Apply will fail
+      if the referenced table doesn't already exist; plan can't help.
 - [ ] **Column position (`AFTER`, `FIRST`)** when adding new columns.
 
 ## Medium — object coverage
