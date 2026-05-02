@@ -72,20 +72,26 @@ func ValidateDirectives(rawSQL string) error {
 // ExtractStmtRenameFrom returns the old name from a leading
 // `-- myschema:renamed-from <old>` comment block at the top of stmtSQL,
 // or "" if no such directive is present. The "leading block" includes
-// blank lines, `--` line comments, `#` line comments, and single-line
-// `/* … */` block comments — stopping only at the first real SQL line.
-// Without skipping `#` / `/* … */` a stray comment between such a line
-// and the directive would defeat the scan and the directive would be
-// silently ignored (validator sees it as known, but extractor never
-// reaches it). Multi-line `/* … */` is not unwound; same caveat as in
-// ExtractInlineRenames.
+// blank lines, `--` line comments, `#` line comments, and `/* … */`
+// block comments — both single-line and multi-line — stopping only at
+// the first real SQL line. Without that, a stray comment between such
+// a line and the directive would defeat the scan and the directive
+// would be silently ignored (validator sees it as known, but extractor
+// never reaches it).
 //
 // Returns an error if more than one renamed-from directive appears in
 // the leading block — multiple sources is ambiguous and almost always
 // a typo, and silently letting the last one win would mask the mistake.
 func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 	var oldName string
+	var inBlock bool
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
+		if inBlock {
+			if strings.Contains(line, "*/") {
+				inBlock = false
+			}
+			continue
+		}
 		trim := strings.TrimSpace(line)
 		if trim == "" {
 			continue
@@ -100,7 +106,13 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 			}
 			continue
 		}
-		if strings.HasPrefix(trim, "#") || (strings.HasPrefix(trim, "/*") && strings.HasSuffix(trim, "*/")) {
+		if strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.HasPrefix(trim, "/*") {
+			if !strings.Contains(trim[2:], "*/") {
+				inBlock = true
+			}
 			continue
 		}
 		break
@@ -140,11 +152,9 @@ type UnsupportedRename struct {
 // ExtractStmtRenameFrom, not here, so this function ignores them.
 //
 // Comment skipping covers `--` line comments, `# ...` line comments,
-// and `/* ... */` block comments contained on a single line. A
-// block comment that spans multiple lines is not unwound here; if a
-// directive is followed by a multi-line `/* ... */` block before the
-// real target line, the directive will mis-attach. This is rare in
-// hand-written CREATE TABLE bodies.
+// and `/* ... */` block comments — both single-line and multi-line.
+// A pending directive is preserved across skipped comment lines so it
+// still attaches to the next real target line.
 func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 	out := &InlineRenames{
 		Columns: map[string]string{},
@@ -152,7 +162,14 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 	}
 	var pending string
 	var sawSQL bool
+	var inBlock bool
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
+		if inBlock {
+			if strings.Contains(line, "*/") {
+				inBlock = false
+			}
+			continue
+		}
 		trim := strings.TrimSpace(line)
 		if trim == "" {
 			continue
@@ -177,10 +194,16 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 			continue
 		}
 		// Non-myschema comment line: skip without disturbing pending.
-		// Covers `#` line comments and single-line `/* … */` blocks
-		// that the line-by-line scanner sees as one unit. Multi-line
-		// `/* … */` is not unwound — see func doc.
-		if strings.HasPrefix(trim, "#") || (strings.HasPrefix(trim, "/*") && strings.HasSuffix(trim, "*/")) {
+		// Covers `#` line comments and `/* … */` blocks (single-line
+		// and multi-line — for multi-line we flip `inBlock` and resume
+		// skipping until we see `*/`).
+		if strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.HasPrefix(trim, "/*") {
+			if !strings.Contains(trim[2:], "*/") {
+				inBlock = true
+			}
 			continue
 		}
 		if !sawSQL {

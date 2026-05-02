@@ -103,6 +103,37 @@ func TestExtractStmtRenameFromBacktickedReservedWord(t *testing.T) {
 	assert.Equal(t, "select", got)
 }
 
+func TestExtractStmtRenameFromSkipsMultiLineBlockComment(t *testing.T) {
+	// A multi-line `/* … */` block in the leading comment block must
+	// not stop the scan. The directive after the closing `*/` line
+	// has to still be picked up as statement-level.
+	got, err := parser.ExtractStmtRenameFrom(`/*
+ * generated header
+ * spans multiple lines
+ */
+-- myschema:renamed-from old_users
+CREATE TABLE users (id INT);`)
+	require.NoError(t, err)
+	assert.Equal(t, "old_users", got)
+}
+
+func TestExtractInlineRenamesSkipsMultiLineBlockComment(t *testing.T) {
+	// A multi-line block comment between the directive and the
+	// target column must not clear `pending` — the directive should
+	// still attach to the column on the line after `*/`.
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    -- myschema:renamed-from old_name
+    /* this header
+       spans multiple
+       lines */
+    name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (id)
+);`)
+	assert.Equal(t, "old_name", got.Columns["name"])
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractStmtRenameFromSkipsLeadingHashAndBlockComments(t *testing.T) {
 	// `#` and single-line `/* … */` lines in the leading block must
 	// not stop the scan. Without skipping them, the directive after
