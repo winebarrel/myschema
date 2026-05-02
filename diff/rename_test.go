@@ -259,6 +259,56 @@ func TestDiffRenameColumnAlsoRewritesCrossTableFKRefCols(t *testing.T) {
 	assert.NotContains(t, allFK, "ADD CONSTRAINT", "FK on referencing table must not be re-added after parent column rename")
 }
 
+func TestDiffRenameColumnAlsoRewritesSelfReferentialFK(t *testing.T) {
+	// Self-referential FK: `users.parent_id` references `users.id`
+	// (same table). When `users.id` is renamed to `users.user_id`,
+	// rewriteFKColumnRefs must rewrite both fk.Columns (child side)
+	// and fk.RefCols (parent side, which here is the same table).
+	// Without the self-ref guard, fkEqual would diff RefCols and
+	// surface a destructive DROP+ADD.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("parent_id", col("parent_id", "bigint"))
+	cur.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(id)", Columns: []string{"id"},
+	})
+	cur.ForeignKeys.Set("fk_parent", &model.ForeignKey{
+		Name: "fk_parent", Database: "shop", Table: "users",
+		Columns: []string{"parent_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.users", cur)
+
+	from := "id"
+	want := tbl("shop", "users")
+	wc := col("user_id", "bigint")
+	wc.RenameFrom = &from
+	want.Columns.Set("user_id", wc)
+	want.Columns.Set("parent_id", col("parent_id", "bigint"))
+	want.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(user_id)", Columns: []string{"user_id"},
+	})
+	want.ForeignKeys.Set("fk_parent", &model.ForeignKey{
+		Name: "fk_parent", Database: "shop", Table: "users",
+		Columns: []string{"parent_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"user_id"},
+	})
+	desired.Set("shop.users", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
+	assert.Contains(t, got, "RENAME COLUMN id TO user_id")
+	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "self-referential FK must not be dropped")
+	assert.NotContains(t, allFK, "ADD CONSTRAINT", "self-referential FK must not be re-added")
+}
+
 func TestDiffRenameTableMissingSourceErrors(t *testing.T) {
 	current := orderedmap.New[string, *model.Table]()
 	desired := orderedmap.New[string, *model.Table]()

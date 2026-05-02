@@ -169,10 +169,12 @@ func rewriteConstraintColumnRefs(constraints *orderedmap.Map[string, *model.Cons
 // under `--allow-drop=foreign_key` unset, since the FK drop is suppressed
 // while the new ADD CONSTRAINT runs alone (a half-applied state).
 //
-// This handles only the *child* side (the FK's own columns). For the
-// *parent* side (RefCols on FKs in other tables that point at the
-// renamed column), see rewriteCrossTableFKRefCols.
-func rewriteFKColumnRefs(fks *orderedmap.Map[string, *model.ForeignKey], renames map[string]string) {
+// (db, name) identifies the table whose columns are being renamed.
+// Self-referential FKs — those whose (RefDB, RefTable) points back at
+// (db, name) — also have RefCols rewritten, which the cross-table pass
+// in DiffTables explicitly skips because it short-circuits the renamed
+// table itself.
+func rewriteFKColumnRefs(fks *orderedmap.Map[string, *model.ForeignKey], db, name string, renames map[string]string) {
 	if len(renames) == 0 {
 		return
 	}
@@ -180,6 +182,13 @@ func rewriteFKColumnRefs(fks *orderedmap.Map[string, *model.ForeignKey], renames
 		for i, col := range fk.Columns {
 			if newName, ok := renames[col]; ok {
 				fk.Columns[i] = newName
+			}
+		}
+		if fk.RefDB == db && fk.RefTable == name {
+			for i, col := range fk.RefCols {
+				if newName, ok := renames[col]; ok {
+					fk.RefCols[i] = newName
+				}
 			}
 		}
 	}

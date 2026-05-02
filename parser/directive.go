@@ -66,11 +66,18 @@ func ValidateDirectives(rawSQL string) error {
 
 // ExtractStmtRenameFrom returns the old name from a leading
 // `-- myschema:renamed-from <old>` comment block at the top of stmtSQL,
-// or "" if no such directive is present. Scans only contiguous comment /
-// blank lines at the start; stops at the first SQL line. Returns an
-// error if more than one renamed-from directive appears in the leading
-// block — multiple sources is ambiguous and almost always a typo, and
-// silently letting the last one win would mask the mistake.
+// or "" if no such directive is present. The "leading block" includes
+// blank lines, `--` line comments, `#` line comments, and single-line
+// `/* … */` block comments — stopping only at the first real SQL line.
+// Without skipping `#` / `/* … */` a stray comment between such a line
+// and the directive would defeat the scan and the directive would be
+// silently ignored (validator sees it as known, but extractor never
+// reaches it). Multi-line `/* … */` is not unwound; same caveat as in
+// ExtractInlineRenames.
+//
+// Returns an error if more than one renamed-from directive appears in
+// the leading block — multiple sources is ambiguous and almost always
+// a typo, and silently letting the last one win would mask the mistake.
 func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 	var oldName string
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
@@ -78,16 +85,20 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 		if trim == "" {
 			continue
 		}
-		if !strings.HasPrefix(trim, "--") {
-			break
-		}
-		if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
-			candidate := stripBackticks(m[1])
-			if oldName != "" {
-				return "", fmt.Errorf("multiple -- myschema:renamed-from directives on the same statement (%q then %q); only one is allowed", oldName, candidate)
+		if strings.HasPrefix(trim, "--") {
+			if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
+				candidate := stripBackticks(m[1])
+				if oldName != "" {
+					return "", fmt.Errorf("multiple -- myschema:renamed-from directives on the same statement (%q then %q); only one is allowed", oldName, candidate)
+				}
+				oldName = candidate
 			}
-			oldName = candidate
+			continue
 		}
+		if strings.HasPrefix(trim, "#") || (strings.HasPrefix(trim, "/*") && strings.HasSuffix(trim, "*/")) {
+			continue
+		}
+		break
 	}
 	return oldName, nil
 }
