@@ -29,6 +29,7 @@ func init() {
 // ParseResult holds everything the parser produces.
 type ParseResult struct {
 	Tables *orderedmap.Map[string, *model.Table]
+	Views  *orderedmap.Map[string, *model.View]
 }
 
 // ReadSQLFile reads a SQL file (or "-" for stdin).
@@ -71,6 +72,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 	}
 
 	tables := orderedmap.New[string, *model.Table]()
+	views := orderedmap.New[string, *model.View]()
 
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
@@ -94,6 +96,16 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				return nil, err
 			}
 
+		case *ast.CreateViewStmt:
+			v, err := parseCreateView(s, defaultDB)
+			if err != nil {
+				return nil, err
+			}
+			if _, dup := views.GetOk(v.FQVN()); dup {
+				return nil, fmt.Errorf("duplicate view: %s", v.FQVN())
+			}
+			views.Set(v.FQVN(), v)
+
 		default:
 			// Skip statements we don't model (CREATE DATABASE, COMMENT,
 			// SET, GRANT, etc). Unknown DDL is silently ignored; future work
@@ -101,7 +113,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		}
 	}
 
-	return &ParseResult{Tables: tables}, nil
+	return &ParseResult{Tables: tables, Views: views}, nil
 }
 
 func dbName(schema, defaultDB string) string {

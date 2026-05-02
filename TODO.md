@@ -6,8 +6,16 @@ by area; ordering inside a group is not significant.
 
 ## Object coverage
 
-- [ ] Views (`CREATE VIEW`, `ALTER VIEW`, `DROP VIEW`) including
-      `SQL SECURITY` / `DEFINER` / `WITH … CHECK OPTION`
+- [x] Views (`CREATE VIEW` / `DROP VIEW`) — emitted as
+      `CREATE OR REPLACE VIEW` on apply, diffed via
+      `parser.NormalizeViewDefinition` (parse-then-restore canonicalisation
+      via pingcap with `RestoreWithoutSchemaName` /
+      `RestoreWithoutTableName`, plus AST visitors that strip redundant
+      `SELECT col AS col` aliases and unwrap `ParenthesesExpr`).
+- [ ] View `WITH CHECK OPTION` fidelity: pingcap's AST collapses
+      "no clause" and "WITH CASCADED" into the same value, so we treat
+      them as identical. `WITH LOCAL` is preserved.
+- [ ] View `DEFINER` and `SQL SECURITY` diffing (catalogued but not acted on)
 - [ ] Sequences (MySQL 8.0+ does not have native sequences; treat as out of
       scope unless TiDB compatibility is desired)
 - [ ] Partitioning: `PARTITION BY` clause, sub-partitions, partition
@@ -48,8 +56,8 @@ by area; ordering inside a group is not significant.
 
 ## CLI features
 
-- [ ] `--include` / `--exclude` glob already works for tables; extend to
-      indexes / FKs once views land
+- [ ] `--include` / `--exclude` glob already works for tables and views;
+      extend to indexes / FKs
 - [ ] `--enable` / `--disable` flag to restrict the object types
       considered (`table`, `view`), mirroring pistachio
 - [ ] `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars)

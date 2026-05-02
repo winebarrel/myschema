@@ -38,11 +38,35 @@ func (c *Client) Dump(ctx context.Context, options *DumpOptions) (*DumpResult, e
 	if err != nil {
 		return nil, err
 	}
+	views, err := cat.Views(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	tables = filterTables(tables, &options.FilterOptions)
+	views = filterViews(views, &options.FilterOptions)
+
+	parts := []string{model.TablesToSQL(tables)}
+	if views.Len() > 0 {
+		parts = append(parts, model.ViewsToSQL(views))
+	}
+	sql := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if sql != "" {
+			sql += "\n\n"
+		}
+		sql += p
+	}
 
 	return &DumpResult{
-		SQL:   model.TablesToSQL(tables),
-		Count: ObjectCount{Database: database, Tables: tables.Len()},
+		SQL: sql,
+		Count: ObjectCount{
+			Database: database,
+			Tables:   tables.Len(),
+			Views:    views.Len(),
+		},
 	}, nil
 }
