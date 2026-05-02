@@ -320,6 +320,23 @@ func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {
 	require.Len(t, got.Unsupported, 1)
 }
 
+func TestExtractInlineRenamesUnnamedTwoWordIndexIsUnsupported(t *testing.T) {
+	// Same guard for the two-word index keyword forms (UNIQUE KEY,
+	// FULLTEXT INDEX, SPATIAL KEY, etc.). Without the guard,
+	// tokens[2] would be "(col)" and the directive would mis-attach
+	// to a name of "(col)", later surfacing as "target index not found".
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    name VARCHAR(64) NOT NULL,
+    -- myschema:renamed-from old_uq
+    UNIQUE KEY (name),
+    -- myschema:renamed-from old_ft
+    FULLTEXT INDEX (name)
+);`)
+	assert.Empty(t, got.Indexes)
+	require.Len(t, got.Unsupported, 2)
+}
+
 func TestExtractInlineRenamesColumnIndexNameCollision(t *testing.T) {
 	// MySQL auto-names an unnamed KEY after the first column: `KEY (col)`
 	// becomes `KEY col (col)`. If a user has a column also called `col`,

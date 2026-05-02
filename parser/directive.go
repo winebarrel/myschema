@@ -252,6 +252,8 @@ func classifyInlineLine(line string) (inlineKind, string) {
 
 	// Two-word index keywords: UNIQUE KEY, UNIQUE INDEX, FULLTEXT KEY,
 	// FULLTEXT INDEX, SPATIAL KEY, SPATIAL INDEX. The name is tokens[2].
+	// Unnamed forms (`UNIQUE KEY (col)` etc.) put a "(" in tokens[2] —
+	// mirror the unnamed guard from the plain KEY / INDEX branch below.
 	switch upper {
 	case "UNIQUE", "FULLTEXT", "SPATIAL":
 		if len(tokens) < 3 {
@@ -259,6 +261,9 @@ func classifyInlineLine(line string) (inlineKind, string) {
 		}
 		w2 := strings.ToUpper(tokens[1])
 		if w2 != "KEY" && w2 != "INDEX" {
+			return inlineKindUnknown, ""
+		}
+		if strings.HasPrefix(tokens[2], "(") {
 			return inlineKindUnknown, ""
 		}
 		return inlineKindIndex, stripBackticks(tokens[2])
@@ -324,8 +329,9 @@ func leadingBacktickedIdent(line string) (string, bool) {
 }
 
 // tokenize splits `s` into whitespace-separated tokens, then peels off
-// trailing punctuation (",", "(", "(") from each so that strict prefix /
-// equality checks work on names regardless of formatting. Backticks on
+// any trailing "," and "(" characters from each so that strict prefix /
+// equality checks work on names regardless of formatting (a column-list
+// opener stuck to the name like `name(` becomes `name`). Backticks on
 // names are kept so the caller can decide whether to strip them.
 func tokenize(s string) []string {
 	raw := strings.Fields(s)
