@@ -110,6 +110,62 @@ run_step() {
   pass
 }
 
+# Run myschema dump against the test database.
+myschema_dump() {
+  "$MYSCHEMA" dump "$@" 2>&1
+}
+
+# Assert that a step's command output contains an expected substring.
+# Usage: assert_contains <step-name> <command...> -- <expected substring>
+# Example: assert_contains "table is filtered" myschema_plan -I 'users*' "$DATA/schema.sql" -- 'CREATE TABLE myschema_test.users'
+assert_contains() {
+  local step_name="$1"
+  shift
+  local cmd=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+    cmd+=("$1")
+    shift
+  done
+  shift # consume "--"
+  local expected="$1"
+
+  step "$step_name"
+  local out
+  out=$("${cmd[@]}") || { fail "command failed: $out"; return 1; }
+  if echo "$out" | grep -qF "$expected"; then
+    pass
+  else
+    fail "expected substring not found"
+    echo "    expected: $expected" >&2
+    echo "    actual:   $out" >&2
+    return 1
+  fi
+}
+
+# Same shape as assert_contains, but the substring must NOT appear.
+assert_not_contains() {
+  local step_name="$1"
+  shift
+  local cmd=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+    cmd+=("$1")
+    shift
+  done
+  shift # consume "--"
+  local unexpected="$1"
+
+  step "$step_name"
+  local out
+  out=$("${cmd[@]}") || { fail "command failed: $out"; return 1; }
+  if echo "$out" | grep -qF "$unexpected"; then
+    fail "unexpected substring present"
+    echo "    unexpected: $unexpected" >&2
+    echo "    actual:     $out" >&2
+    return 1
+  fi
+  pass
+}
+
 # Run a step that should produce no diff at all.
 run_step_no_diff() {
   local step_name="$1"
