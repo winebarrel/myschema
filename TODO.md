@@ -50,6 +50,12 @@ by area; ordering inside a group is not significant.
 - [ ] Topological ordering of DDL when a new table FK-references another new
       table being created in the same plan (currently FK adds run after all
       `CREATE TABLE`s, which works for single-DB cases but is fragile)
+- [ ] Topological ordering of **views** that reference other views.
+      Reproducer: `make load-employees`, then drop / re-apply — the
+      `current_dept_emp` view fails to create because it references
+      `dept_emp_latest_date`, which the alphabetical (catalog-order) loop
+      hasn't created yet. Sort views by referenced-view dependency before
+      emitting `CREATE OR REPLACE VIEW`.
 - [ ] Cross-database FK ordering
 - [ ] `DROP TABLE` ordering when one being-dropped table is referenced by an
       FK on another being-dropped table
