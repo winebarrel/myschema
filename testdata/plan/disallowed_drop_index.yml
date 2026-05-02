@@ -1,0 +1,19 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255),
+      PRIMARY KEY (id),
+      KEY idx_email (email)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255),
+      PRIMARY KEY (id)
+  );
+
+# allow_drop omitted → DROP INDEX suppressed.
+plan: ""
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.users DROP INDEX idx_email;

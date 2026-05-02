@@ -1,0 +1,21 @@
+# Verifies the FK-drop-before-table-drop ordering when both tables in an
+# FK relationship are dropped in the same plan. Without this ordering,
+# MySQL would reject `DROP TABLE users` with a foreign-key-constraint error.
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+desired: ""
+
+allow_drop:
+  - table
+
+plan: |
+  ALTER TABLE myschema_test.posts DROP FOREIGN KEY fk;
+  DROP TABLE myschema_test.posts;
+  DROP TABLE myschema_test.users;

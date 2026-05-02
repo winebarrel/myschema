@@ -1,0 +1,9 @@
+init: |
+  CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));
+
+desired: ""
+
+# allow_drop omitted → DROP TABLE suppressed.
+plan: ""
+disallowed_drops: |
+  -- skipped: DROP TABLE myschema_test.legacy;

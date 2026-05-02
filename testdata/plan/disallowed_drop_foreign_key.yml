@@ -1,0 +1,24 @@
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+desired: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+# allow_drop omitted → both the FK and the auto-created index that MySQL
+# materialises alongside the FK get suppressed (information_schema lists
+# the FK as a same-named secondary index, hence the second comment).
+plan: ""
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.posts DROP INDEX fk;
+  -- skipped: ALTER TABLE myschema_test.posts DROP FOREIGN KEY fk;
