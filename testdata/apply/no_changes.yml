@@ -1,0 +1,14 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+# Empty applied → nothing emitted, drift check confirms idempotency.
+applied: ""

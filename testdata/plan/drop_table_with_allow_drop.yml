@@ -1,0 +1,10 @@
+init: |
+  CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));
+
+desired: ""
+
+allow_drop:
+  - table
+
+plan: |
+  DROP TABLE myschema_test.legacy;

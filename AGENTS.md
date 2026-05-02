@@ -139,18 +139,25 @@ Inherited from pistachio. The MySQL-specific bits sit at the bottom.
   catalog_test`, `package model_test`). Use same-package tests only when
   access to unexported identifiers is required (e.g. `package diff` to
   hit `normalizeDef`).
-- Root-level integration tests use `package myschema_test` once they exist.
-- Test fixtures should land as YAML files in `testdata/` once the harness
-  ships (TODO.md). Required fields will vary per suite (`apply` vs `plan`
-  vs `dump`); the authoritative list will be the `*TestCase` struct at the
-  top of each `_test.go` — when fixture YAML lacks a field you want to
-  assert, prefer extending the `*TestCase` struct with one optional field
-  (defaulting to nil/zero so existing fixtures keep passing) over writing
-  the test in Go.
-- Until the YAML harness lands, prefer Go table tests over scenario
-  scripts for unit-level assertions. CLI scenario tests under
-  `test/scenario/` are for end-to-end flows (plan → apply → drift check)
-  that hit a real MySQL.
+- Root-level integration tests live in `package myschema_test`
+  (`apply_test.go` / `plan_test.go` / `dump_test.go`) and consume YAML
+  fixtures under `testdata/{apply,plan,dump}/*.yml`. Required fields vary
+  per suite — the authoritative list is the `*TestCase` struct at the top
+  of each `_test.go` (`applyTestCase` / `planTestCase` / `dumpTestCase`).
+  Common shape: `init` seeds the test DB; `desired` is what the operation
+  receives; the suite-specific assertion field is `applied` / `plan` /
+  `dump`. Optional fields include `allow_drop`, `include`, `exclude`, and
+  (apply-only) `verify_no_drift`.
+- Add a YAML fixture whenever the test is purely SQL-input → SQL-output.
+  Reach for a Go test only when the scenario can't be expressed that way
+  (multi-database setups, error-path assertions on internal state, file-IO
+  failures). When the harness lacks a field for a behaviour you want to
+  assert in a fixture, **extend the `*TestCase` struct with one optional
+  field** (defaulting to nil/zero so existing fixtures keep passing) rather
+  than rewriting the test in Go.
+- CLI scenario tests under `test/scenario/` cover end-to-end flows
+  (plan → apply → drift check) that exercise the binary, not the library
+  surface.
 - `orderedmap.Map` is used throughout for deterministic iteration order of
   schema objects; reach for it any time iteration order matters for output.
 - Identifiers go through `model.Ident`, which back-tick-quotes anything

@@ -1,0 +1,18 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY users_email_key (email)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY users_email_key (email)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+# empty plan → "" → asserted as no diff
+plan: ""

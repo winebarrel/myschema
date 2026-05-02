@@ -1,0 +1,13 @@
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE tmp_log (id BIGINT NOT NULL, PRIMARY KEY (id));
+
+include:
+  - "users"
+
+dump: |
+  -- myschema_test.users
+  CREATE TABLE myschema_test.users (
+      id bigint NOT NULL,
+      PRIMARY KEY (id)
+  ) ENGINE=InnoDB COLLATE=utf8mb4_0900_ai_ci;
