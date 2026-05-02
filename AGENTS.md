@@ -131,14 +131,22 @@ them off.
   rename; inline (line above the column / index) inside the
   parenthesised body for column / index rename. Drives
   `ALTER TABLE … RENAME TO`, `ALTER TABLE … RENAME COLUMN`, and
-  `ALTER TABLE … RENAME INDEX`. Index parts referencing renamed
-  columns are rewritten in place so the index isn't also marked for
-  DROP+CREATE. Errors fail the plan when the source object isn't
-  present (typo'd old name shouldn't silently become a destructive
-  DROP+CREATE); idempotent if the rename has already been applied.
-  Constraint and FK renames are not yet supported — MySQL has no
-  in-place RENAME CONSTRAINT, so DROP+ADD is the only path and the
-  diff already does that.
+  `ALTER TABLE … RENAME INDEX` (all MySQL 8.0+ syntax — same baseline
+  as the rest of myschema, which already requires 8.0 for INVISIBLE
+  indexes and CHECK constraints). Index parts referencing renamed
+  columns are rewritten in place — including child-side FK Columns,
+  parent-side cross-table FK RefCols, self-referential FK RefCols,
+  and PRIMARY KEY constraint columns — so the index / FK / PK isn't
+  also marked for DROP+CREATE. Functional / expression index parts
+  are not rewritten (would need a real SQL expression parser); a
+  rename that affects an expression index surfaces as DROP+CREATE
+  on that one index. Errors fail the plan when the source object
+  isn't present (typo'd old name shouldn't silently become a
+  destructive DROP+CREATE); idempotent if the rename has already
+  been applied. Constraint and FK *names* (`fk_x` → `fk_y`) aren't
+  renameable in place by MySQL, so the directive isn't supported on
+  those targets — DROP+ADD is the only path and the diff already
+  does that.
 
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 

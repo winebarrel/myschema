@@ -78,6 +78,13 @@ func rewriteFKRefTable(tables *orderedmap.Map[string, *model.Table], oldDB, oldN
 // applyColumnRenames does the same trick at the column level. Returns the
 // rename ALTER statements; the caller threads them in front of the normal
 // column diff so any later MODIFY COLUMN sees the renamed column.
+//
+// Emits `ALTER TABLE … RENAME COLUMN`, which is MySQL 8.0+ syntax. This
+// is consistent with the rest of myschema, which already requires 8.0
+// for INVISIBLE indexes, CHECK constraints (8.0.16+), and other catalog
+// features it reads (see AGENTS.md). Apply against an older server will
+// fail at execution time with a syntax error, not silently — the user
+// will see the offending RENAME COLUMN statement in the plan output.
 func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Column]) ([]string, error) {
 	var stmts []string
 	for newName, dc := range desired.All() {
@@ -112,6 +119,15 @@ func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *m
 // which columns the index covers — without this, indexEqual sees an
 // (old col vs new col) mismatch and the index would be needlessly
 // dropped + recreated.
+//
+// Functional / expression index parts (IndexPart.Expr) are NOT rewritten
+// here: rewriting embedded column references inside an arbitrary SQL
+// expression requires a real parser, and getting it subtly wrong is more
+// dangerous than the alternative. An expression index that references a
+// renamed column will surface as DROP+CREATE in the plan, which is
+// functionally correct (the expression is unchanged metadata; the
+// index entries are recomputed) and rare enough that the documented
+// limitation suffices.
 func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renames map[string]string) {
 	if len(renames) == 0 {
 		return
