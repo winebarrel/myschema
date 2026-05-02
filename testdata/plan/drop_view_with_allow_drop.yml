@@ -1,0 +1,12 @@
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE VIEW legacy_view AS SELECT id FROM users;
+
+desired: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+
+allow_drop:
+  - view
+
+plan: |
+  DROP VIEW myschema_test.legacy_view;

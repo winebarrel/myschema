@@ -1,0 +1,18 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  );
+  CREATE VIEW active_users AS SELECT id, name FROM users;
+
+dump: |
+  -- myschema_test.users
+  CREATE TABLE myschema_test.users (
+      id bigint NOT NULL,
+      name varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
+      PRIMARY KEY (id)
+  ) ENGINE=InnoDB COLLATE=utf8mb4_0900_ai_ci;
+
+  -- myschema_test.active_users
+  CREATE OR REPLACE VIEW myschema_test.active_users AS select `myschema_test`.`users`.`id` AS `id`,`myschema_test`.`users`.`name` AS `name` from `myschema_test`.`users`;

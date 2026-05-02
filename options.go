@@ -58,7 +58,7 @@ func (f *FilterOptions) AfterApply() error {
 
 // DropPolicy decides which DROP categories the diff is allowed to emit.
 type DropPolicy struct {
-	AllowDrop []string `env:"MYSCHEMA_ALLOW_DROP" enum:"all,table,column,constraint,foreign_key,index" help:"Comma-separated drop categories to allow."`
+	AllowDrop []string `env:"MYSCHEMA_ALLOW_DROP" enum:"all,table,view,column,constraint,foreign_key,index" help:"Comma-separated drop categories to allow."`
 }
 
 // IsDropAllowed reports whether kind is in the allow list. The "all" wildcard
@@ -76,10 +76,11 @@ func (p *DropPolicy) IsDropAllowed(kind string) bool {
 type ObjectCount struct {
 	Database string
 	Tables   int
+	Views    int
 }
 
 func (c ObjectCount) Summary() string {
-	return fmt.Sprintf("%d table(s)", c.Tables)
+	return fmt.Sprintf("%d table(s), %d view(s)", c.Tables, c.Views)
 }
 
 func (c ObjectCount) DBLabel() string {

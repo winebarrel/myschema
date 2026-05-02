@@ -74,21 +74,28 @@ identical to the standalone repo's API.
   inline column-level PK / UNIQUE / REFERENCES, AUTO_INCREMENT, DEFAULT,
   ON UPDATE, COMMENT, generated columns)
 - `CREATE INDEX` and `ALTER TABLE … ADD CONSTRAINT` in desired-side SQL
+- `CREATE VIEW` (with optional column-alias list) — emitted as
+  `CREATE OR REPLACE VIEW` on apply
 - Catalog reader: tables, columns, PRIMARY / secondary indexes (incl.
-  prefix length, DESC, INVISIBLE), CHECK constraints, foreign keys
+  prefix length, DESC, INVISIBLE), CHECK constraints, foreign keys, views
 - Diff: CREATE / DROP TABLE, ADD / MODIFY / DROP COLUMN,
-  ADD / DROP CONSTRAINT (PK / CHECK), ADD / DROP INDEX, ADD / DROP FK
-- `--allow-drop` policy with `all,table,column,constraint,foreign_key,index`
+  ADD / DROP CONSTRAINT (PK / CHECK), ADD / DROP INDEX, ADD / DROP FK,
+  CREATE OR REPLACE / DROP VIEW
+- `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index`
 - `--include` / `--exclude` glob filtering on table names
 - CLI: `plan`, `apply`, `dump`
 
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 
-- Views (`CREATE VIEW`, `ALTER VIEW`, `DROP VIEW`)
-
 (Triggers, stored procedures / functions, and events are deliberately
 out of scope, not deferred — they are imperative, version-tagged code
 rather than declarative schema. Manage them out of band.)
+- View `WITH CHECK OPTION` fidelity: pingcap's AST cannot distinguish
+  "no WITH clause" from "WITH CASCADED CHECK OPTION", so the parser
+  collapses both to `NONE`. Users who explicitly write `WITH CASCADED`
+  see it dropped on round-trip. `WITH LOCAL CHECK OPTION` is preserved.
+- View `DEFINER` and `SQL SECURITY` clauses are catalogued but not
+  diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
 - Renaming via directives (pistachio's `-- pist:renamed-from`)
