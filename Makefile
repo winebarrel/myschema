@@ -33,13 +33,13 @@ test:
 	go test -p 1 -v ./... $(TEST_OPTS)
 
 # test-mysql9 runs the full integration suite against the MySQL 9.x
-# compose service on port 3307. Only MYSQL_PORT is overridden; the
-# DSN template in MYSCHEMA_TEST_DSN at the top of this file picks up
-# the new port automatically, so MYSQL_HOST / MYSQL_USER customisations
-# carry through.
+# compose service on port 3307. Both MYSQL_PORT and MYSCHEMA_TEST_DSN
+# are overridden explicitly so a caller with MYSCHEMA_TEST_DSN already
+# set in the environment doesn't accidentally hit the 8.0 instance.
 .PHONY: test-mysql9
 test-mysql9:
-	$(MAKE) test MYSQL_PORT=3307
+	$(MAKE) test MYSQL_PORT=3307 \
+	  MYSCHEMA_TEST_DSN='$(MYSQL_USER)@tcp($(MYSQL_HOST):3307)/'
 
 .PHONY: clean-schema-mysql9
 clean-schema-mysql9:
