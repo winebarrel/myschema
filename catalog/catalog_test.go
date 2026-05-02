@@ -251,6 +251,39 @@ CREATE TABLE defs (
 	assert.Contains(t, *created.Default, "CURRENT_TIMESTAMP", "expression default left bare")
 }
 
+// TestColumnDefaultEmptyStringNormalisation pins the type-aware
+// normalisation of `DEFAULT ”`. Without it, the catalog reads the
+// empty literal back as the bare empty string, parser produces `”`
+// (quoted), and every post-apply plan re-emits MODIFY COLUMN. For
+// string-shaped types we normalise to `”` so catalog and parser
+// agree.
+func TestColumnDefaultEmptyStringNormalisation(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE empty_defs (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    s_var VARCHAR(64) NOT NULL DEFAULT '',
+    s_char CHAR(8) NOT NULL DEFAULT '',
+    s_enum ENUM('a','b','') NOT NULL DEFAULT '',
+    s_set SET('x','y') NOT NULL DEFAULT '',
+    PRIMARY KEY (id)
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	defs, ok := tables.GetOk("myschema_test.empty_defs")
+	require.True(t, ok)
+
+	for _, c := range []string{"s_var", "s_char", "s_enum", "s_set"} {
+		col, ok := defs.Columns.GetOk(c)
+		require.True(t, ok, "%s should be loaded", c)
+		require.NotNil(t, col.Default, "%s should have a default", c)
+		assert.Equal(t, "''", *col.Default, "%s empty-string default should be quoted", c)
+	}
+}
+
 // TestViewsRoundTrip is the catalog-side companion to the view fixtures:
 // confirms VIEW_DEFINITION + DEFINER + SECURITY are surfaced.
 func TestViewsRoundTrip(t *testing.T) {

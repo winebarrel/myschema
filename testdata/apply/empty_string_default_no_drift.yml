@@ -1,0 +1,29 @@
+# Regression for the catalog empty-string-DEFAULT round-trip drift:
+# columns declared with `DEFAULT ''` previously made every post-apply
+# plan re-emit MODIFY COLUMN because the catalog returned the bare
+# empty string while the parser stored `''` (quoted). Catalog now
+# normalises the empty string to `''` for string-shaped types, so
+# verify_no_drift below proves the round-trip closes.
+init: ""
+
+desired: |
+  CREATE TABLE empty_defs (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      s_var VARCHAR(64) NOT NULL DEFAULT '',
+      s_char CHAR(8) NOT NULL DEFAULT '',
+      s_enum ENUM('a','b','') NOT NULL DEFAULT '',
+      s_set SET('x','y') NOT NULL DEFAULT '',
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  CREATE TABLE myschema_test.empty_defs (
+      id bigint NOT NULL AUTO_INCREMENT,
+      s_var varchar(64) NOT NULL DEFAULT '',
+      s_char char(8) NOT NULL DEFAULT '',
+      s_enum enum('a','b','') NOT NULL DEFAULT '',
+      s_set set('x','y') NOT NULL DEFAULT '',
+      PRIMARY KEY (id)
+  );
+
+verify_no_drift: true
