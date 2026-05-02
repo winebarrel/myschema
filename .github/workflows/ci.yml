@@ -40,10 +40,9 @@ jobs:
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
       - name: Start MySQL
         run: |
-          for i in {1..60}; do docker compose up -d --quiet-pull "${{ matrix.mysql_service }}" && break; sleep 1; done
-          # Use bash's standard timeout idiom instead of a fixed-iteration
-          # loop: if the server never comes up, `timeout` returns non-zero
-          # and the step fails.
+          docker compose up -d --quiet-pull "${{ matrix.mysql_service }}"
+          # Use bash's standard timeout idiom: if the server never comes
+          # up, `timeout` returns non-zero and the step fails.
           timeout 120 bash -c 'until mysqladmin ping -h 127.0.0.1 -P "${{ matrix.mysql_port }}" -u root --silent; do sleep 2; done'
       - run: make TEST_OPTS='-coverprofile=coverage.txt'
       - run: make test-scenario
