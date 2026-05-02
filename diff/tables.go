@@ -145,16 +145,16 @@ func columnEqual(a, b *model.Column) bool {
 	if a.NotNull != b.NotNull {
 		return false
 	}
-	if !ptrEq(a.Default, b.Default) {
+	if !equalExprPtr(a.Default, b.Default) {
 		return false
 	}
-	if !ptrEq(a.OnUpdate, b.OnUpdate) {
+	if !equalExprPtr(a.OnUpdate, b.OnUpdate) {
 		return false
 	}
 	if a.AutoIncrement != b.AutoIncrement {
 		return false
 	}
-	if !ptrEq(a.Generated, b.Generated) {
+	if !equalExprPtr(a.Generated, b.Generated) {
 		return false
 	}
 	if a.Stored != b.Stored {
@@ -260,17 +260,31 @@ func constraintEqual(a, b *model.Constraint) bool {
 	if a.Type != b.Type {
 		return false
 	}
-	if normalizeDef(a.Definition) != normalizeDef(b.Definition) {
-		return false
+	if a.Type == model.CheckConstraint {
+		if !equalCheckDef(a.Definition, b.Definition) {
+			return false
+		}
+		if a.Enforced != b.Enforced {
+			return false
+		}
+		return true
 	}
-	if a.Type == model.CheckConstraint && a.Enforced != b.Enforced {
-		return false
-	}
-	return true
+	// PRIMARY KEY / UNIQUE definitions are simple `(col1, col2)` lists; the
+	// loose normaliser below tolerates the casing / spacing / backtick
+	// jitter we see between catalog and parser sides.
+	return looseEqual(a.Definition, b.Definition)
 }
 
-func normalizeDef(s string) string {
-	return strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(s, " ", ""), "`", ""))
+// looseEqual is the textual fallback comparison used for non-expression
+// constraint definitions (PRIMARY KEY / UNIQUE column lists). It folds
+// case, drops whitespace, and strips backticks — enough for the
+// `(col1, col2)` shape the catalog and parser both produce, without
+// needing a full SQL parse.
+func looseEqual(a, b string) bool {
+	norm := func(s string) string {
+		return strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(s, " ", ""), "`", ""))
+	}
+	return norm(a) == norm(b)
 }
 
 func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.Index], dc DropChecker) (stmts, disallowed []string) {
