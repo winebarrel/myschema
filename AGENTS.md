@@ -35,9 +35,12 @@ MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/sakila'    ./myschema dump
 ```
 
 Chinook and employees round-trip cleanly (`dump` → `plan` against the
-output reports `-- No changes`). Sakila currently fails to round-trip
-through `plan` because pingcap's parser does not recognise the
-`geometry` column type — see TODO.md.
+output reports `-- No changes`, and a full `dump` → `drop` → `apply` →
+`re-dump` cycle reproduces the original). Employees in particular
+exercises the view-on-view dependency path because `current_dept_emp`
+references `dept_emp_latest_date`. Sakila currently fails to round-trip
+because pingcap's parser does not recognise the `geometry` column type —
+see TODO.md.
 
 Tests against MySQL connect to the DSN in `MYSCHEMA_TEST_DSN`
 (default `root@tcp(127.0.0.1:3306)/`) via `internal/testutil.ConnectDB`. If
