@@ -13,9 +13,15 @@ import (
 	"github.com/winebarrel/orderedmap"
 )
 
-// mysqlErrNoSuchTable is MySQL's ER_NO_SUCH_TABLE; we treat it as "this
-// MySQL is too old to have CHECK_CONSTRAINTS" rather than a hard error.
-const mysqlErrNoSuchTable = 1146
+// MySQL surfaces "the information_schema view doesn't exist on this server
+// version" via two distinct error codes — historically as ER_UNKNOWN_TABLE
+// (1109, "Unknown table 'X' in information_schema") and on newer servers
+// as ER_NO_SUCH_TABLE (1146). We treat both as "this MySQL is too old to
+// have CHECK_CONSTRAINTS" rather than a hard error.
+const (
+	mysqlErrUnknownTable = 1109
+	mysqlErrNoSuchTable  = 1146
+)
 
 // Tables loads every table in the configured databases plus its columns,
 // constraints, foreign keys, and indexes.
@@ -275,8 +281,11 @@ WHERE  tc.TABLE_SCHEMA    = ?
 	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
 		var mErr *mysqldrv.MySQLError
-		if errors.As(err, &mErr) && mErr.Number == mysqlErrNoSuchTable {
-			return nil
+		if errors.As(err, &mErr) {
+			switch mErr.Number {
+			case mysqlErrNoSuchTable, mysqlErrUnknownTable:
+				return nil
+			}
 		}
 		return fmt.Errorf("catalog: list check constraints for %s: %w", t.FQTN(), err)
 	}
