@@ -1,0 +1,29 @@
+# Replace path of dependent-index suppression: the index keeps the
+# same name but moves to different columns, AND the original columns
+# go away. MySQL auto-removes the old index during DROP COLUMN, so
+# the explicit DROP INDEX would error 1091 — must be suppressed
+# even though the index also exists in desired (just with a different
+# definition). The CREATE INDEX for the new shape still fires.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i (a)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i (b)
+  );
+
+allow_drop:
+  - all
+
+applied: |
+  ALTER TABLE myschema_test.t DROP COLUMN a;
+  CREATE INDEX i ON myschema_test.t (b);

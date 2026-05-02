@@ -290,6 +290,25 @@ func TestDiffDropAllColumnsSuppressesCombinedIndex(t *testing.T) {
 	assert.NotContains(t, body, "DROP INDEX i", "combined-index DROP should be suppressed when all its columns are dropped")
 }
 
+// TestDiffReplaceIndexSuppressesDependentDrop: the suppression must
+// also catch the DROP+CREATE replacement path. If an index keeps the
+// same name but moves to different columns, AND the original columns
+// are being dropped, MySQL auto-removes the old index during DROP
+// COLUMN — the explicit DROP INDEX would still error 1091. The
+// CREATE INDEX for the new shape must still fire.
+func TestDiffReplaceIndexSuppressesDependentDrop(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE t (id INT NOT NULL, a VARCHAR(64), b VARCHAR(64), PRIMARY KEY (id), KEY i (a));`,
+		`CREATE TABLE t (id INT NOT NULL, b VARCHAR(64), PRIMARY KEY (id), KEY i (b));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("all"))
+	require.NoError(t, err)
+	body := strings.Join(r.Stmts, "\n")
+	assert.Contains(t, body, "DROP COLUMN a")
+	assert.NotContains(t, body, "DROP INDEX i", "DROP INDEX must be suppressed even on the replace path when all current parts are dropped columns")
+	assert.Contains(t, body, "CREATE INDEX i ON app.t (b)", "the new index shape still gets created")
+}
+
 // TestDiffDropIndexNotSuppressedWhenColumnDropDisallowed: the
 // suppression must respect drop-policy gating. If the user allows
 // `index` drops but NOT `column` drops, the column won't actually go

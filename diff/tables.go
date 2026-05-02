@@ -304,10 +304,14 @@ func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.In
 		if ok && indexEqual(ci, di) {
 			continue
 		}
-		// Pure removal whose every part is a column also being dropped:
-		// MySQL automatically removes the index when the column drops, so
-		// emitting an explicit DROP INDEX would error 1091. Skip silently.
-		if !ok && allPartsDropped(ci, droppedCols) {
+		// MySQL automatically removes any index whose every column is
+		// dropped in the same ALTER TABLE flow. An explicit DROP INDEX
+		// after that errors 1091. This holds for both pure removals and
+		// for the DROP+CREATE replacement path (where the desired index
+		// keeps the same name but on different columns) — skip the DROP
+		// in either case; the desired-side loop below still emits the
+		// fresh CREATE INDEX for the replacement variant.
+		if allPartsDropped(ci, droppedCols) {
 			continue
 		}
 		drop := "ALTER TABLE " + fqtn + " DROP INDEX " + model.Ident(name) + ";"
