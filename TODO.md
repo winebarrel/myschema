@@ -22,9 +22,10 @@ Open items only. Done work is in `git log` / closed PRs.
       and parser never compare equal. Surfaced while writing the
       evolution scenario in PR #31 (worked around there by dropping
       the explicit DEFAULT). Fix needs an explicit mapping: when
-      `def == ""` and the column type is one where MySQL preserves
-      an empty literal (varchar / char / text / enum / set / etc.),
-      normalise to `''`. (Simply dropping the short-circuit and
+      `def == ""` and the column type is one where MySQL accepts a
+      literal `DEFAULT ''` (CHAR / VARCHAR / BINARY / VARBINARY /
+      ENUM / SET — TEXT / BLOB are excluded since MySQL doesn't
+      allow a literal default on those types), normalise to `''`. (Simply dropping the short-circuit and
       letting the vitess-parse path classify it doesn't work —
       vitess can't parse `SELECT ` and returns a syntax error.)
       The current `normalizeColumnDefault` ignores `typeName`; the
