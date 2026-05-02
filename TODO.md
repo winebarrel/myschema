@@ -21,11 +21,14 @@ Open items only. Done work is in `git log` / closed PRs.
       The parser side stores `''` (quoted empty string), so catalog
       and parser never compare equal. Surfaced while writing the
       evolution scenario in PR #31 (worked around there by dropping
-      the explicit DEFAULT). Fix is to wrap the empty-string case as
-      `''` for column types where MySQL preserves it (varchar /
-      char / text / enum / set / etc.), or — simpler — drop the
-      empty-string short-circuit and let the same vitess-parse path
-      classify it.
+      the explicit DEFAULT). Fix needs an explicit mapping: when
+      `def == ""` and the column type is one where MySQL preserves
+      an empty literal (varchar / char / text / enum / set / etc.),
+      normalise to `''`. (Simply dropping the short-circuit and
+      letting the vitess-parse path classify it doesn't work —
+      vitess can't parse `SELECT ` and returns a syntax error.)
+      The current `normalizeColumnDefault` ignores `typeName`; the
+      fix would have to start consuming it.
 - [ ] **FK-implicit covering indexes look like drift.** Adding a
       foreign key on un-indexed columns (inline `CREATE TABLE` or
       `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently
