@@ -85,18 +85,30 @@ func ValidateDirectives(rawSQL string) error {
 func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 	var oldName string
 	var inBlock bool
+	stop := false
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
+		if stop {
+			break
+		}
 		if inBlock {
 			if strings.Contains(line, "*/") {
 				inBlock = false
 			}
 			continue
 		}
-		trim := strings.TrimSpace(line)
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
 		if trim == "" {
 			continue
 		}
-		if strings.HasPrefix(trim, "--") {
+		// Re-classify the reduced trim. Loop because `--` directives
+		// can also appear after a stripped `/* … */` on the same line
+		// (e.g. `/* header */ -- myschema:renamed-from old`).
+		switch {
+		case strings.HasPrefix(trim, "--"):
 			if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
 				candidate := stripBackticks(m[1])
 				if oldName != "" {
@@ -104,45 +116,29 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 				}
 				oldName = candidate
 			}
-			continue
+		case strings.HasPrefix(trim, "#"):
+			// non-myschema line comment, skip
+		default:
+			// First real SQL line — stop scanning the leading block.
+			stop = true
 		}
-		if strings.HasPrefix(trim, "#") {
-			continue
-		}
-		if strings.HasPrefix(trim, "/*") {
-			rest, closed, more := stripLeadingBlockComment(trim)
-			if !closed {
-				inBlock = true
-				continue
-			}
-			if more {
-				// SQL continues after `*/` on this line — that's the
-				// first real SQL line, stop scanning the leading block.
-				_ = rest
-				break
-			}
-			continue
-		}
-		break
 	}
 	return oldName, nil
 }
 
-// stripLeadingBlockComment peels off a leading `/* … */` block from
-// trim and reports the result. closed is true iff `*/` was found on
-// the same line; more is true iff there is non-whitespace content
-// after the `*/` (i.e. the line continues with non-comment SQL).
-// rest is the trimmed remainder when more is true.
-func stripLeadingBlockComment(trim string) (rest string, closed bool, more bool) {
-	if !strings.HasPrefix(trim, "/*") {
-		return trim, true, trim != ""
+// reduceLeadingBlocks repeatedly strips a leading `/* … */` block from
+// trim and returns the remainder. opened is true when a block opens but
+// doesn't close on the same line — the caller should set its multi-line
+// inBlock state and skip the rest of this line.
+func reduceLeadingBlocks(trim string) (rest string, opened bool) {
+	for strings.HasPrefix(trim, "/*") {
+		idx := strings.Index(trim[2:], "*/")
+		if idx < 0 {
+			return "", true
+		}
+		trim = strings.TrimSpace(trim[2+idx+2:])
 	}
-	idx := strings.Index(trim[2:], "*/")
-	if idx < 0 {
-		return "", false, false
-	}
-	tail := strings.TrimSpace(trim[2+idx+2:])
-	return tail, true, tail != ""
+	return trim, false
 }
 
 // InlineRenames separates inline rename directives by the kind of object
@@ -195,10 +191,18 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 			}
 			continue
 		}
-		trim := strings.TrimSpace(line)
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
 		if trim == "" {
 			continue
 		}
+		// After block-comment reduction the remainder may still be a
+		// `--` directive, a `#` comment, or a real SQL line. Classify
+		// here, not before the strip — `/* note */ -- myschema:...` is
+		// otherwise lost.
 		if strings.HasPrefix(trim, "--") {
 			if !sawSQL {
 				continue // leading directives belong to ExtractStmtRenameFrom
@@ -218,27 +222,8 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 			}
 			continue
 		}
-		// Non-myschema comment line: skip without disturbing pending.
-		// Covers `#` line comments and `/* … */` blocks (single-line
-		// and multi-line — for multi-line we flip `inBlock` and resume
-		// skipping until we see `*/`).
 		if strings.HasPrefix(trim, "#") {
 			continue
-		}
-		if strings.HasPrefix(trim, "/*") {
-			rest, closed, more := stripLeadingBlockComment(trim)
-			if !closed {
-				inBlock = true
-				continue
-			}
-			if !more {
-				continue
-			}
-			// `/* note */ <sql>` — the SQL after `*/` is the real
-			// target line. Re-process the remainder as if it had been
-			// the line all along: opener for the first one (sawSQL
-			// flips), classifier for subsequent ones.
-			trim = rest
 		}
 		if !sawSQL {
 			sawSQL = true
@@ -305,6 +290,26 @@ func classifyInlineLine(line string) (inlineKind, string) {
 	// backtick can only be a column name.
 	if name, ok := leadingBacktickedIdent(line); ok {
 		return inlineKindColumn, name
+	}
+	// Index / constraint shapes whose *name* is backticked and contains
+	// whitespace can't survive strings.Fields tokenisation either. Try
+	// a backtick-aware peel for each known prefix before falling
+	// through to the standard tokenize-based path.
+	if name, ok := backtickedNameAfterPrefix(line, []string{"UNIQUE KEY", "UNIQUE INDEX", "FULLTEXT KEY", "FULLTEXT INDEX", "SPATIAL KEY", "SPATIAL INDEX"}); ok {
+		return inlineKindIndex, name
+	}
+	if name, ok := backtickedNameAfterPrefix(line, []string{"KEY", "INDEX"}); ok {
+		return inlineKindIndex, name
+	}
+	if name, ok := backtickedNameAfterPrefix(line, []string{"CONSTRAINT"}); ok {
+		// `CONSTRAINT \`name\` UNIQUE …` is a unique index, not a
+		// regular constraint. Detect the UNIQUE keyword after the
+		// backticked name to route to inlineKindIndex.
+		rest := strings.TrimLeft(stripUntilAfterBacktickedName(line, "CONSTRAINT"), " \t")
+		if strings.HasPrefix(strings.ToUpper(rest), "UNIQUE") {
+			return inlineKindIndex, name
+		}
+		return inlineKindConstraint, name
 	}
 	tokens := tokenize(line)
 	if len(tokens) == 0 {
@@ -373,6 +378,58 @@ func classifyInlineLine(line string) (inlineKind, string) {
 
 	// Default: a column line. The first token is the column name.
 	return inlineKindColumn, stripBackticks(tokens[0])
+}
+
+// backtickedNameAfterPrefix tries to match a leading keyword from
+// `prefixes` (case-insensitive) followed by whitespace and a
+// backtick-quoted identifier (which may itself contain whitespace).
+// Returns the unquoted identifier when matched. Used by classifyInlineLine
+// to recognise `KEY \`weird name\` (col)` etc., where strings.Fields would
+// otherwise split the backticked name.
+func backtickedNameAfterPrefix(line string, prefixes []string) (string, bool) {
+	upper := strings.ToUpper(line)
+	for _, p := range prefixes {
+		if !strings.HasPrefix(upper, p) {
+			continue
+		}
+		// The character after the prefix must be whitespace (so we
+		// don't match e.g. `KEYWORD` against `KEY`).
+		after := line[len(p):]
+		if after == "" || (after[0] != ' ' && after[0] != '\t') {
+			continue
+		}
+		rest := strings.TrimLeft(after, " \t")
+		if rest == "" || rest[0] != '`' {
+			continue
+		}
+		end := strings.IndexByte(rest[1:], '`')
+		if end < 0 {
+			continue
+		}
+		return rest[1 : 1+end], true
+	}
+	return "", false
+}
+
+// stripUntilAfterBacktickedName returns the substring of line that
+// follows a `prefix \`name\“ head. Returns line as-is if the head
+// doesn't match. Used to inspect what comes after a CONSTRAINT name to
+// decide whether it's UNIQUE (a unique-index spelling) or another kind.
+func stripUntilAfterBacktickedName(line, prefix string) string {
+	upper := strings.ToUpper(line)
+	if !strings.HasPrefix(upper, prefix) {
+		return line
+	}
+	after := line[len(prefix):]
+	rest := strings.TrimLeft(after, " \t")
+	if rest == "" || rest[0] != '`' {
+		return line
+	}
+	end := strings.IndexByte(rest[1:], '`')
+	if end < 0 {
+		return line
+	}
+	return rest[1+end+1:]
 }
 
 // leadingBacktickedIdent returns the unquoted identifier at the start of

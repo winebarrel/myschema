@@ -134,6 +134,48 @@ func TestExtractInlineRenamesSkipsMultiLineBlockComment(t *testing.T) {
 	assert.Empty(t, got.Unsupported)
 }
 
+func TestExtractStmtRenameFromBlockCommentBeforeDirectiveSameLine(t *testing.T) {
+	// `/* header */ -- myschema:renamed-from old` — the directive
+	// follows a single-line block comment on the same line. The
+	// reduce-then-classify pass picks up the directive instead of
+	// breaking out as "first SQL line".
+	got, err := parser.ExtractStmtRenameFrom(`/* header */ -- myschema:renamed-from old_users
+CREATE TABLE users (id INT);`)
+	require.NoError(t, err)
+	assert.Equal(t, "old_users", got)
+}
+
+func TestExtractInlineRenamesBlockCommentBeforeDirectiveSameLine(t *testing.T) {
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    /* note */ -- myschema:renamed-from old_name
+    name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (id)
+);`)
+	assert.Equal(t, "old_name", got.Columns["name"])
+	assert.Empty(t, got.Unsupported)
+}
+
+func TestExtractInlineRenamesBacktickedIndexNameWithSpace(t *testing.T) {
+	// MySQL allows backtick-quoted index names with whitespace, e.g.
+	// `KEY `weird name` (col)`. strings.Fields would split the name
+	// itself; the backticked-name peel handles it without going
+	// through tokenize.
+	got := parser.ExtractInlineRenames("CREATE TABLE t (\n" +
+		"    id INT NOT NULL,\n" +
+		"    -- myschema:renamed-from old_idx\n" +
+		"    KEY `weird name` (id),\n" +
+		"    -- myschema:renamed-from old_uq\n" +
+		"    UNIQUE KEY `also weird` (id),\n" +
+		"    -- myschema:renamed-from old_chk\n" +
+		"    CONSTRAINT `chk one` CHECK (id > 0)\n" +
+		");")
+	assert.Equal(t, "old_idx", got.Indexes["weird name"])
+	assert.Equal(t, "old_uq", got.Indexes["also weird"])
+	require.Len(t, got.Unsupported, 1, "constraint with backticked name still surfaces as Unsupported (CHECK rename not in scope)")
+	assert.Equal(t, "old_chk", got.Unsupported[0].OldName)
+}
+
 func TestExtractStmtRenameFromSkipsLeadingHashAndBlockComments(t *testing.T) {
 	// `#` and single-line `/* … */` lines in the leading block must
 	// not stop the scan. Without skipping them, the directive after
