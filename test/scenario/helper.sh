@@ -5,14 +5,6 @@ set -euo pipefail
 
 : "${MYSCHEMA:=./myschema}"
 : "${MYSCHEMA_TEST_DB:=myschema_test}"
-# myschema reads its target DB from the DSN. If MYSCHEMA_TEST_DSN already
-# contains a database we trust it; otherwise append MYSCHEMA_TEST_DB.
-_base_dsn="${MYSCHEMA_TEST_DSN:-root@tcp(127.0.0.1:3306)/}"
-case "$_base_dsn" in
-  */)  export MYSCHEMA_DSN="${_base_dsn}${MYSCHEMA_TEST_DB}" ;;
-  *)   export MYSCHEMA_DSN="$_base_dsn" ;;
-esac
-
 # `mysql` CLI invocation used to set up / tear down test databases.
 # Override MYSQL_BIN if your client is not on $PATH (e.g. mysql-shell).
 : "${MYSQL_BIN:=mysql}"
@@ -20,6 +12,18 @@ esac
 : "${MYSQL_PORT:=3306}"
 : "${MYSQL_USER:=root}"
 _mysql_args=(--protocol=TCP -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER")
+
+# myschema reads its target DB from the DSN. If MYSCHEMA_TEST_DSN already
+# contains a database we trust it; otherwise append MYSCHEMA_TEST_DB. The
+# default is built from MYSQL_USER / MYSQL_HOST / MYSQL_PORT so the CLI
+# (mysql) and myschema (driver) always hit the same instance — without
+# this, overriding MYSQL_PORT alone (e.g. to 3307 for the 9.x leg) would
+# leave myschema talking to 3306.
+_base_dsn="${MYSCHEMA_TEST_DSN:-${MYSQL_USER}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/}"
+case "$_base_dsn" in
+  */)  export MYSCHEMA_DSN="${_base_dsn}${MYSCHEMA_TEST_DB}" ;;
+  *)   export MYSCHEMA_DSN="$_base_dsn" ;;
+esac
 
 _pass=0
 _fail=0

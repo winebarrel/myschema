@@ -33,17 +33,17 @@ test:
 	go test -p 1 -v ./... $(TEST_OPTS)
 
 # test-mysql9 runs the full integration suite against the MySQL 9.x
-# compose service on port 3307. The Go-side DSN is overridden via env;
-# everything else (catalog reader, parser, diff) is reused as-is.
+# compose service on port 3307. Only MYSQL_PORT is overridden; the
+# DSN template in MYSCHEMA_TEST_DSN at the top of this file picks up
+# the new port automatically, so MYSQL_HOST / MYSQL_USER customisations
+# carry through.
 .PHONY: test-mysql9
 test-mysql9:
-	MYSQL_PORT=3307 MYSCHEMA_TEST_DSN='root@tcp(127.0.0.1:3307)/' \
-	  go test -p 1 -v ./... $(TEST_OPTS)
+	$(MAKE) test MYSQL_PORT=3307
 
 .PHONY: clean-schema-mysql9
 clean-schema-mysql9:
-	mysql -h $(MYSQL_HOST) -P 3307 -u $(MYSQL_USER) -e \
-	  'DROP DATABASE IF EXISTS $(MYSQL_DB); CREATE DATABASE $(MYSQL_DB)'
+	$(MAKE) clean-schema MYSQL_PORT=3307
 
 .PHONY: test-unit
 test-unit:
