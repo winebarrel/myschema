@@ -70,9 +70,10 @@ CREATE TABLE posts (
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
 
-	posts, _ := tables.GetOk("myschema_test.posts")
+	posts, ok := tables.GetOk("myschema_test.posts")
+	require.True(t, ok, "posts table should be loaded")
 	fk, ok := posts.ForeignKeys.GetOk("fk_posts_user")
-	require.True(t, ok)
+	require.True(t, ok, "fk_posts_user should be loaded")
 	assert.Equal(t, "users", fk.RefTable)
 	assert.Equal(t, "myschema_test", fk.RefDB)
 	assert.Equal(t, []string{"user_id"}, fk.Columns)
@@ -100,12 +101,15 @@ CREATE TABLE posts (
 	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
-	posts, _ := tables.GetOk("myschema_test.posts")
+	posts, ok := tables.GetOk("myschema_test.posts")
+	require.True(t, ok, "posts table should be loaded")
 
-	r, _ := posts.ForeignKeys.GetOk("fk_restrict")
+	r, ok := posts.ForeignKeys.GetOk("fk_restrict")
+	require.True(t, ok)
 	assert.Empty(t, r.OnDelete, "RESTRICT folded to empty")
 
-	n, _ := posts.ForeignKeys.GetOk("fk_no_action")
+	n, ok := posts.ForeignKeys.GetOk("fk_no_action")
+	require.True(t, ok)
 	assert.Empty(t, n.OnDelete, "NO ACTION folded to empty")
 }
 
@@ -126,7 +130,8 @@ CREATE TABLE products (
 	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
-	products, _ := tables.GetOk("myschema_test.products")
+	products, ok := tables.GetOk("myschema_test.products")
+	require.True(t, ok, "products table should be loaded")
 
 	c, ok := products.Constraints.GetOk("chk_price")
 	require.True(t, ok)
@@ -154,13 +159,16 @@ CREATE TABLE gen (
 	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
-	gen, _ := tables.GetOk("myschema_test.gen")
+	gen, ok := tables.GetOk("myschema_test.gen")
+	require.True(t, ok, "gen table should be loaded")
 
-	stored, _ := gen.Columns.GetOk("sum_stored")
+	stored, ok := gen.Columns.GetOk("sum_stored")
+	require.True(t, ok, "sum_stored column should be loaded")
 	require.NotNil(t, stored.Generated, "Generated must be populated")
 	assert.True(t, stored.Stored, "STORED column has Stored=true")
 
-	virtual, _ := gen.Columns.GetOk("sum_virtual")
+	virtual, ok := gen.Columns.GetOk("sum_virtual")
+	require.True(t, ok, "sum_virtual column should be loaded")
 	require.NotNil(t, virtual.Generated)
 	assert.False(t, virtual.Stored, "VIRTUAL column has Stored=false")
 }
@@ -187,21 +195,22 @@ CREATE TABLE quirks (
 	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
-	q, _ := tables.GetOk("myschema_test.quirks")
+	q, ok := tables.GetOk("myschema_test.quirks")
+	require.True(t, ok, "quirks table should be loaded")
 
-	prefix, _ := q.Indexes.GetOk("idx_a_prefix")
-	require.NotNil(t, prefix)
+	prefix, ok := q.Indexes.GetOk("idx_a_prefix")
+	require.True(t, ok, "idx_a_prefix should be loaded")
 	require.Len(t, prefix.Parts, 1)
 	assert.Equal(t, 20, prefix.Parts[0].Length)
 
-	combined, _ := q.Indexes.GetOk("idx_a_b")
-	require.NotNil(t, combined)
+	combined, ok := q.Indexes.GetOk("idx_a_b")
+	require.True(t, ok, "idx_a_b should be loaded")
 	require.Len(t, combined.Parts, 2)
 	assert.Equal(t, "a", combined.Parts[0].Column)
 	assert.Equal(t, "b", combined.Parts[1].Column)
 
-	ft, _ := q.Indexes.GetOk("ft_body")
-	require.NotNil(t, ft)
+	ft, ok := q.Indexes.GetOk("ft_body")
+	require.True(t, ok, "ft_body should be loaded")
 	assert.Equal(t, model.IndexFulltext, ft.KeyType)
 }
 
@@ -223,17 +232,21 @@ CREATE TABLE defs (
 	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
-	defs, _ := tables.GetOk("myschema_test.defs")
+	defs, ok := tables.GetOk("myschema_test.defs")
+	require.True(t, ok, "defs table should be loaded")
 
-	rating, _ := defs.Columns.GetOk("rating")
+	rating, ok := defs.Columns.GetOk("rating")
+	require.True(t, ok, "rating column should be loaded")
 	require.NotNil(t, rating.Default)
 	assert.Equal(t, "'g'", *rating.Default, "ENUM default wrapped in single quotes")
 
-	qty, _ := defs.Columns.GetOk("quantity")
+	qty, ok := defs.Columns.GetOk("quantity")
+	require.True(t, ok, "quantity column should be loaded")
 	require.NotNil(t, qty.Default)
 	assert.Equal(t, "0", *qty.Default, "numeric default left bare")
 
-	created, _ := defs.Columns.GetOk("created_at")
+	created, ok := defs.Columns.GetOk("created_at")
+	require.True(t, ok, "created_at column should be loaded")
 	require.NotNil(t, created.Default)
 	assert.Contains(t, *created.Default, "CURRENT_TIMESTAMP", "expression default left bare")
 }
@@ -275,7 +288,8 @@ CREATE TABLE meta (
 	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
-	m, _ := tables.GetOk("myschema_test.meta")
+	m, ok := tables.GetOk("myschema_test.meta")
+	require.True(t, ok, "meta table should be loaded")
 	require.NotNil(t, m.Engine)
 	assert.Equal(t, "InnoDB", *m.Engine)
 	require.NotNil(t, m.Comment)
