@@ -1,5 +1,5 @@
 # Spec test: pins the documented FK-implicit-index limitation
-# (see CLAUDE.md "Not yet implemented" section).
+# (see AGENTS.md "Not yet implemented" section).
 #
 # When ADD FOREIGN KEY runs on un-indexed columns, MySQL silently
 # creates a covering index named after the FK constraint. The catalog
@@ -9,9 +9,10 @@
 # DROP INDEX. (Apply with --allow-drop=index would fail — MySQL
 # guards the index with Error 1553 while the FK still needs it.)
 #
-# When this fixture starts failing — i.e. plan goes silent — the
-# diff-side suppression rule has been added; remove this fixture and
-# the limitation note in CLAUDE.md.
+# When this fixture starts failing — specifically, when the assertion
+# below stops matching because `disallowed_drops` is no longer
+# emitted — the diff-side suppression rule has been added; delete
+# this fixture and the limitation note in AGENTS.md.
 init: |
   CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
   CREATE TABLE posts (

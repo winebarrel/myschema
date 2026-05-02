@@ -17,7 +17,7 @@ Open items only. Done work is in `git log` / closed PRs.
       implicit. When desired SQL declares the FK without the covering
       index, the diff emits a `DROP INDEX` (suppressed unless
       `--allow-drop=index` is set), and `apply` then fails with
-      `Error 1553`. Documented in CLAUDE.md as a known limitation;
+      `Error 1553`. Documented in AGENTS.md as a known limitation;
       not fixed yet. The proper fix is a diff-side suppression: skip
       a DROP INDEX whose columns form the left-most prefix of a
       surviving FK and where no other surviving index covers it
