@@ -115,7 +115,10 @@ by area; ordering inside a group is not significant.
 
 ## Build / release
 
-- [ ] `Makefile` with `build`, `test`, `lint`, `fix`, `schema` targets
+- [x] `Makefile` with `build`, `test`, `lint`, `fix`, `schema` targets
+- [ ] Sakila round-trip fails because pingcap doesn't recognise the
+      `geometry` column type. Either contribute upstream or special-case
+      the type in `parser/parser.go`.
 - [ ] `.golangci.yml`
 - [ ] `.goreleaser.yml`
 - [ ] CI workflow under `.github/workflows/ci.yml`
