@@ -142,7 +142,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	res.Stmts = append(res.Stmts, colRenameStmts...)
 	rewriteIndexColumnRefs(current.Indexes, renames)
 	rewriteFKColumnRefs(current.ForeignKeys, current.Database, current.Name, renames)
-	rewriteConstraintColumnRefs(current.Constraints, renames)
+	rewriteConstraintColumnRefs(current.Constraints, current.Indexes, renames)
 
 	idxRenameStmts, err := applyIndexRenames(fqtn, current.Indexes, desired.Indexes)
 	if err != nil {

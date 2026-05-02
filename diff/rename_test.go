@@ -162,6 +162,52 @@ func TestDiffRenameSelfRenameIsNoOp(t *testing.T) {
 	assert.NotContains(t, got, "RENAME INDEX", "index self-rename must not emit RENAME INDEX x TO x")
 }
 
+func TestDiffRenameColumnPreservesPKPrefixLengthAndDesc(t *testing.T) {
+	// PK column has both a prefix length and DESC modifier. After
+	// renaming the column, the rebuilt PK Definition must still carry
+	// `(new_col(10) DESC)` — not just `(new_col)`. Otherwise current
+	// (rebuilt as bare names) and desired (with full modifiers) diverge
+	// and diffConstraints fires DROP+ADD PRIMARY KEY.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("old_key", col("old_key", "varchar(64)"))
+	cur.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(old_key(10) DESC)", Columns: []string{"old_key"},
+	})
+	cur.Indexes.Set("PRIMARY", &model.Index{
+		Name: "PRIMARY", Database: "shop", Table: "users", Primary: true,
+		Parts: []model.IndexPart{{Column: "old_key", Length: 10, Desc: true}},
+	})
+	current.Set("shop.users", cur)
+
+	from := "old_key"
+	want := tbl("shop", "users")
+	wc := col("user_key", "varchar(64)")
+	wc.RenameFrom = &from
+	want.Columns.Set("user_key", wc)
+	want.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(user_key(10) DESC)", Columns: []string{"user_key"},
+	})
+	want.Indexes.Set("PRIMARY", &model.Index{
+		Name: "PRIMARY", Database: "shop", Table: "users", Primary: true,
+		Parts: []model.IndexPart{{Column: "user_key", Length: 10, Desc: true}},
+	})
+	desired.Set("shop.users", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	assert.Contains(t, got, "RENAME COLUMN old_key TO user_key")
+	assert.NotContains(t, got, "DROP PRIMARY KEY",
+		"PK Definition rebuild must keep prefix length + DESC so diff stays quiet")
+	assert.NotContains(t, got, "ADD PRIMARY KEY",
+		"PK Definition rebuild must keep prefix length + DESC so diff stays quiet")
+}
+
 func TestDiffRenameColumnAlsoRewritesPKConstraint(t *testing.T) {
 	// Rename a PK column. Without rewriting the PRIMARY KEY constraint
 	// in current, diffConstraints would see (old) vs (new) and emit

@@ -170,12 +170,20 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 // destructive DROP PRIMARY KEY + ADD PRIMARY KEY — even though MySQL
 // updates the PK metadata automatically alongside RENAME COLUMN.
 //
+// PRIMARY KEY parts can carry per-column modifiers (`col(10)` for prefix
+// length, `col DESC`). The Constraint.Definition string we'd rebuild
+// from Columns alone would drop those, leaving current/desired diverged
+// after rename. We pull the rebuilt Definition from the matching
+// PRIMARY index entry instead — `rewriteIndexColumnRefs` has already
+// updated its parts with the new column names, and IndexPart.SQL()
+// reproduces the full per-part syntax (length + DESC).
+//
 // CHECK constraints carry a free-form expression in Definition; rewriting
 // embedded column references inside arbitrary expressions is not safe
 // without a full SQL expression parser. CHECK on a renamed column is
 // rare and DROP+ADD on the CHECK is acceptable as the catalog and parser
 // produce the same expression text either way.
-func rewriteConstraintColumnRefs(constraints *orderedmap.Map[string, *model.Constraint], renames map[string]string) {
+func rewriteConstraintColumnRefs(constraints *orderedmap.Map[string, *model.Constraint], indexes *orderedmap.Map[string, *model.Index], renames map[string]string) {
 	if len(renames) == 0 {
 		return
 	}
@@ -190,13 +198,27 @@ func rewriteConstraintColumnRefs(constraints *orderedmap.Map[string, *model.Cons
 				changed = true
 			}
 		}
-		if changed {
-			parts := make([]string, len(con.Columns))
-			for i, c := range con.Columns {
-				parts[i] = model.Ident(c)
+		if !changed {
+			continue
+		}
+		// Prefer the PRIMARY index's own parts so prefix lengths /
+		// DESC survive the rebuild. Fall back to a names-only render
+		// for the rare case where the constraint exists but the
+		// PRIMARY index entry is absent (defensive — both should be
+		// present in tandem post-parser/catalog).
+		if idx, ok := indexes.GetOk("PRIMARY"); ok && len(idx.Parts) > 0 {
+			parts := make([]string, len(idx.Parts))
+			for i, p := range idx.Parts {
+				parts[i] = p.SQL()
 			}
 			con.Definition = "(" + strings.Join(parts, ", ") + ")"
+			continue
 		}
+		parts := make([]string, len(con.Columns))
+		for i, c := range con.Columns {
+			parts[i] = model.Ident(c)
+		}
+		con.Definition = "(" + strings.Join(parts, ", ") + ")"
 	}
 }
 
