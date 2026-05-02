@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/orderedmap"
@@ -20,6 +21,13 @@ func applyTableRenames(current, desired *orderedmap.Map[string, *model.Table]) (
 	var stmts []string
 	for newKey, dt := range desired.All() {
 		if dt.RenameFrom == nil || *dt.RenameFrom == "" {
+			continue
+		}
+		// Self-rename: directive lists the desired table's own name as
+		// the source. Almost certainly a typo; treat as a no-op so we
+		// don't generate `ALTER TABLE x RENAME TO x` (which MySQL
+		// rejects on some versions and is a no-op on others).
+		if *dt.RenameFrom == dt.Name {
 			continue
 		}
 		oldKey := model.Ident(dt.Database, *dt.RenameFrom)
@@ -77,6 +85,9 @@ func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *m
 			continue
 		}
 		oldName := *dc.RenameFrom
+		if oldName == newName {
+			continue // self-rename, see applyTableRenames for rationale
+		}
 		cc, ok := current.GetOk(oldName)
 		if !ok {
 			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
@@ -110,6 +121,42 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 			if newName, ok := renames[idx.Parts[i].Column]; ok {
 				idx.Parts[i].Column = newName
 			}
+		}
+	}
+}
+
+// rewriteConstraintColumnRefs rewrites column references inside PRIMARY KEY
+// constraints after a column rename. Without this, diffConstraints would
+// see `(old_col)` in current vs `(new_col)` in desired and emit a
+// destructive DROP PRIMARY KEY + ADD PRIMARY KEY — even though MySQL
+// updates the PK metadata automatically alongside RENAME COLUMN.
+//
+// CHECK constraints carry a free-form expression in Definition; rewriting
+// embedded column references inside arbitrary expressions is not safe
+// without a full SQL expression parser. CHECK on a renamed column is
+// rare and DROP+ADD on the CHECK is acceptable as the catalog and parser
+// produce the same expression text either way.
+func rewriteConstraintColumnRefs(constraints *orderedmap.Map[string, *model.Constraint], renames map[string]string) {
+	if len(renames) == 0 {
+		return
+	}
+	for _, con := range constraints.CollectValues() {
+		if con.Type != model.PrimaryKeyConstraint {
+			continue
+		}
+		changed := false
+		for i, c := range con.Columns {
+			if newName, ok := renames[c]; ok {
+				con.Columns[i] = newName
+				changed = true
+			}
+		}
+		if changed {
+			parts := make([]string, len(con.Columns))
+			for i, c := range con.Columns {
+				parts[i] = model.Ident(c)
+			}
+			con.Definition = "(" + strings.Join(parts, ", ") + ")"
 		}
 	}
 }
@@ -148,6 +195,9 @@ func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *mo
 			continue
 		}
 		oldName := *di.RenameFrom
+		if oldName == newName {
+			continue // self-rename, see applyTableRenames for rationale
+		}
 		ci, ok := current.GetOk(oldName)
 		if !ok {
 			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {

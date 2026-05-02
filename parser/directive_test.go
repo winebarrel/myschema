@@ -265,6 +265,19 @@ CREATE VIEW v AS SELECT 1 AS x;`, "shop")
 	assert.Contains(t, err.Error(), "CREATE VIEW")
 }
 
+func TestExtractInlineRenamesTrailingPendingUnsupported(t *testing.T) {
+	// Directive at the very tail of the input — no further line at
+	// all. The end-of-loop guard surfaces it as Unsupported instead
+	// of silently dropping it. (When the directive is followed by a
+	// closing-paren line, the regular default branch reports it as
+	// "doesn't attach to a renameable target"; both paths surface as
+	// Unsupported, which is the user-visible contract.)
+	got := parser.ExtractInlineRenames("CREATE TABLE t (\n    id INT NOT NULL\n    -- myschema:renamed-from trailing")
+	require.Len(t, got.Unsupported, 1)
+	assert.Equal(t, "trailing", got.Unsupported[0].OldName)
+	assert.Contains(t, got.Unsupported[0].Reason, "end of statement")
+}
+
 func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {
 	// `KEY (col)` with no name: tokens after the keyword are "(col)".
 	// classifyInlineLine should treat this as unsupported (rather than

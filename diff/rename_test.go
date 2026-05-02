@@ -118,6 +118,85 @@ func TestDiffRenameTableAlsoRewritesCrossTableFKRefs(t *testing.T) {
 	assert.NotContains(t, allFK, "ADD CONSTRAINT", "FK on referencing table must not be re-added after rename")
 }
 
+func TestDiffRenameSelfRenameIsNoOp(t *testing.T) {
+	// Directive lists the desired table's own name as the source — a
+	// typo that, if not guarded, would emit
+	// `ALTER TABLE x RENAME TO x;` (rejected on some MySQL versions
+	// and a no-op on others). Same guard applies to columns and
+	// indexes via applyColumnRenames / applyIndexRenames.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("name", col("name", "varchar(64)"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.Indexes.Set("idx_x", &model.Index{
+		Name: "idx_x", Database: "shop", Table: "users",
+		Parts: []model.IndexPart{{Column: "name"}},
+	})
+	current.Set("shop.users", cur)
+
+	want := tbl("shop", "users")
+	tableSelf := "users"
+	want.RenameFrom = &tableSelf
+	want.Columns.Set("id", col("id", "bigint"))
+	colSelf := "name"
+	wcol := col("name", "varchar(64)")
+	wcol.RenameFrom = &colSelf
+	want.Columns.Set("name", wcol)
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	idxSelf := "idx_x"
+	want.Indexes.Set("idx_x", &model.Index{
+		Name: "idx_x", Database: "shop", Table: "users",
+		Parts:      []model.IndexPart{{Column: "name"}},
+		RenameFrom: &idxSelf,
+	})
+	desired.Set("shop.users", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	assert.NotContains(t, got, "RENAME TO", "table self-rename must not emit ALTER TABLE x RENAME TO x")
+	assert.NotContains(t, got, "RENAME COLUMN", "column self-rename must not emit RENAME COLUMN x TO x")
+	assert.NotContains(t, got, "RENAME INDEX", "index self-rename must not emit RENAME INDEX x TO x")
+}
+
+func TestDiffRenameColumnAlsoRewritesPKConstraint(t *testing.T) {
+	// Rename a PK column. Without rewriting the PRIMARY KEY constraint
+	// in current, diffConstraints would see (old) vs (new) and emit
+	// DROP PRIMARY KEY + ADD PRIMARY KEY — even though MySQL updates
+	// the PK metadata automatically alongside RENAME COLUMN.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("old_id", col("old_id", "bigint"))
+	cur.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(old_id)", Columns: []string{"old_id"},
+	})
+	current.Set("shop.users", cur)
+
+	want := tbl("shop", "users")
+	from := "old_id"
+	wc := col("id", "bigint")
+	wc.RenameFrom = &from
+	want.Columns.Set("id", wc)
+	want.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(id)", Columns: []string{"id"},
+	})
+	desired.Set("shop.users", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	assert.Contains(t, got, "RENAME COLUMN old_id TO id")
+	assert.NotContains(t, got, "DROP PRIMARY KEY", "PK rewrite should suppress DROP PRIMARY KEY")
+	assert.NotContains(t, got, "ADD PRIMARY KEY", "PK rewrite should suppress ADD PRIMARY KEY")
+}
+
 func TestDiffRenameTableMissingSourceErrors(t *testing.T) {
 	current := orderedmap.New[string, *model.Table]()
 	desired := orderedmap.New[string, *model.Table]()

@@ -179,6 +179,15 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 		}
 		pending = ""
 	}
+	if pending != "" {
+		// Loop ended (statement body ran out) before the trailing
+		// directive saw any SQL line to attach to. Surface so the
+		// parser errors instead of silently dropping the directive.
+		out.Unsupported = append(out.Unsupported, UnsupportedRename{
+			OldName: pending,
+			Reason:  "directive at end of statement has no following SQL line to attach to",
+		})
+	}
 	return out
 }
 
@@ -268,10 +277,15 @@ func classifyInlineLine(line string) (inlineKind, string) {
 
 // leadingBacktickedIdent returns the unquoted identifier at the start of
 // line iff the line begins with a backtick — used to handle column
-// definitions whose name is `quoted with spaces`. Doubled backticks
-// inside the quoted region are not supported (MySQL escapes embedded
-// “ as “); the parser regex / validator already rejects such names
-// at the directive layer, so we don't need to round-trip them here.
+// definitions whose name is `quoted with spaces`. Identifiers containing
+// embedded backticks (which MySQL escapes by doubling, so a literal
+// backtick in a name appears as “ inside the surrounding `…`) are not
+// supported by myschema's directive layer: renameDirectivePattern's
+// `[^`]+` capture stops at the first inner backtick, and the validator
+// turns the resulting partial match into a "malformed directive" error.
+// Round-trip support would require teaching this helper, the regex, and
+// stripBackticks all to recognise the doubling — punted as a vanishingly
+// rare case.
 func leadingBacktickedIdent(line string) (string, bool) {
 	s := strings.TrimLeft(line, " \t")
 	if s == "" || s[0] != '`' {
