@@ -97,11 +97,18 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	res.Stmts = append(res.Stmts, conStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, conDisallowed...)
 
-	// Compute the set of columns that are going away. diffIndexes uses this
-	// to suppress an explicit `DROP INDEX` on indexes whose every part is a
-	// dropped column — MySQL drops those indexes automatically alongside
-	// the column, and the redundant `DROP INDEX` would error 1091.
-	dropped := droppedColumns(current.Columns, desired.Columns)
+	// Compute the set of columns that will *actually* be dropped (not
+	// merely desired-to-be-dropped). diffIndexes uses this to suppress an
+	// explicit `DROP INDEX` on indexes whose every part is a dropped
+	// column — MySQL drops those indexes automatically alongside the
+	// column, so a redundant `DROP INDEX` would error 1091. If
+	// --allow-drop=column is unset the column won't actually go away,
+	// so we must NOT suppress the index drop (the index would otherwise
+	// be left orphaned-yet-unmanaged on a column that's still there).
+	var dropped map[string]bool
+	if dc.IsDropAllowed("column") {
+		dropped = droppedColumns(current.Columns, desired.Columns)
+	}
 	idxStmts, idxDisallowed := diffIndexes(fqtn, current.Indexes, desired.Indexes, dc, dropped)
 	res.Stmts = append(res.Stmts, idxStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, idxDisallowed...)

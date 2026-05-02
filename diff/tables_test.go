@@ -264,7 +264,7 @@ func TestDropPolicyWildcard(t *testing.T) {
 // TestDiffDropColumnSuppressesDependentIndex: when a column with a
 // single-column index is dropped, the explicit DROP INDEX is suppressed
 // because MySQL removes the index automatically alongside the column.
-// See diff.allPartsDropped.
+// See allPartsDropped in diff/tables.go.
 func TestDiffDropColumnSuppressesDependentIndex(t *testing.T) {
 	cur, des := parsePair(t,
 		`CREATE TABLE users (id BIGINT NOT NULL, legacy VARCHAR(64), PRIMARY KEY (id), KEY i (legacy));`,
@@ -288,6 +288,26 @@ func TestDiffDropAllColumnsSuppressesCombinedIndex(t *testing.T) {
 	require.NoError(t, err)
 	body := strings.Join(r.Stmts, "\n")
 	assert.NotContains(t, body, "DROP INDEX i", "combined-index DROP should be suppressed when all its columns are dropped")
+}
+
+// TestDiffDropIndexNotSuppressedWhenColumnDropDisallowed: the
+// suppression must respect drop-policy gating. If the user allows
+// `index` drops but NOT `column` drops, the column won't actually go
+// away — so MySQL won't remove the index either, and we still need
+// the explicit DROP INDEX. (Earlier implementation had a bug here.)
+func TestDiffDropIndexNotSuppressedWhenColumnDropDisallowed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, legacy VARCHAR(64), PRIMARY KEY (id), KEY i (legacy));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("index"))
+	require.NoError(t, err)
+	body := strings.Join(r.Stmts, "\n")
+	assert.Contains(t, body, "DROP INDEX i",
+		"DROP INDEX must be emitted because the column drop is disallowed and won't actually run")
+	disallowed := strings.Join(r.DisallowedDropStmts, "\n")
+	assert.Contains(t, disallowed, "DROP COLUMN legacy",
+		"column drop should be in DisallowedDropStmts (not allowed)")
 }
 
 // TestDiffDropPartialColumnKeepsIndex: when only some of an index's
