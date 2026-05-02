@@ -1,8 +1,12 @@
-export MYSQL_HOST  := 127.0.0.1
-export MYSQL_PORT  := 3306
-export MYSQL_USER  := root
-export MYSQL_PWD   :=
-export MYSQL_DB    := myschema_test
+# `?=` so the matrix CI (and any caller) can override these via the
+# environment. `:=` would silently win over the env value because Make
+# assignments override env unless `-e` is passed.
+MYSQL_HOST ?= 127.0.0.1
+MYSQL_PORT ?= 3306
+MYSQL_USER ?= root
+MYSQL_PWD  ?=
+MYSQL_DB   ?= myschema_test
+export MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PWD MYSQL_DB
 
 # Default DSN used by tests / scenario scripts. The trailing slash makes it
 # easy for tests to append the test DB name; the production CLI requires the
