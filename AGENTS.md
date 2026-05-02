@@ -84,7 +84,11 @@ identical to the standalone repo's API.
 
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 
-- Views, triggers, routines (procedures / functions)
+- Views (`CREATE VIEW`, `ALTER VIEW`, `DROP VIEW`)
+
+(Triggers, stored procedures / functions, and events are deliberately
+out of scope, not deferred — they are imperative, version-tagged code
+rather than declarative schema. Manage them out of band.)
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
 - Renaming via directives (pistachio's `-- pist:renamed-from`)
