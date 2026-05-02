@@ -320,6 +320,23 @@ func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {
 	require.Len(t, got.Unsupported, 1)
 }
 
+func TestExtractInlineRenamesBacktickedNoSpaceIndexNameIsParsed(t *testing.T) {
+	// Backtick-quoted index name with no space before the column-list:
+	// `KEY `select`(id)`. tokenize must drop the "(id)" suffix after
+	// the closing backtick so the index name reads as the bare
+	// identifier `select`.
+	got := parser.ExtractInlineRenames("CREATE TABLE t (\n" +
+		"    id INT NOT NULL,\n" +
+		"    -- myschema:renamed-from old_idx\n" +
+		"    KEY `select`(id),\n" +
+		"    -- myschema:renamed-from old_uq\n" +
+		"    UNIQUE KEY `order`(id)\n" +
+		");")
+	assert.Equal(t, "old_idx", got.Indexes["select"], "backticked no-space `KEY `name`(col)`")
+	assert.Equal(t, "old_uq", got.Indexes["order"], "backticked no-space `UNIQUE KEY `name`(col)`")
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractInlineRenamesNoSpaceIndexNameIsParsed(t *testing.T) {
 	// MySQL allows `KEY name(col)` with no space between the name and
 	// the column-list opener. tokenize must strip the trailing "(col)"

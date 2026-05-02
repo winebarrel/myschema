@@ -347,6 +347,14 @@ func leadingBacktickedIdent(line string) (string, bool) {
 //     `idx`. A token that starts with "(" (e.g. `(col)` from the
 //     unnamed `KEY (col)` form) collapses to the empty string and is
 //     dropped from the slice.
+//   - For tokens that *start* with a backtick AND contain a closing
+//     backtick, anything after the closing backtick is dropped (e.g.
+//     “ `select`(id) “ → “ `select` “), so the no-space form
+//     `KEY \`select\`(id)` is also recognised. Tokens that start with
+//     a backtick but don't contain a closing one (i.e. a backticked
+//     identifier whose body contains whitespace and got split by
+//     Fields) are left alone — the column-line path uses
+//     leadingBacktickedIdent for those.
 //
 // Backticks on names are kept so the caller can decide whether to
 // strip them.
@@ -355,8 +363,12 @@ func tokenize(s string) []string {
 	out := make([]string, 0, len(raw))
 	for _, t := range raw {
 		t = strings.TrimRight(t, ",(")
-		if t != "" && t[0] != '`' {
-			if i := strings.IndexByte(t, '('); i >= 0 {
+		if t != "" {
+			if t[0] == '`' {
+				if end := strings.IndexByte(t[1:], '`'); end >= 0 {
+					t = t[:end+2]
+				}
+			} else if i := strings.IndexByte(t, '('); i >= 0 {
 				t = t[:i]
 			}
 		}
