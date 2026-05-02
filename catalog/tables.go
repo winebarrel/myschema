@@ -3,8 +3,9 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
+
+	"vitess.io/vitess/go/vt/sqlparser"
 
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/orderedmap"
@@ -351,49 +352,44 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 }
 
 // normalizeColumnDefault wraps the catalog's bareword default in single
-// quotes when it isn't a recognised expression. MySQL's
-// information_schema.COLUMNS.COLUMN_DEFAULT returns the raw value form —
-// `G` for an enum default, not `'G'` — which is fine to round-trip back
-// into MySQL but breaks vitess's parser. Wrap unquoted, non-numeric, non-
-// expression defaults in single quotes so re-parsing succeeds.
+// quotes when MySQL stored an unquoted string literal — e.g. `G` for an
+// enum, `hello` for a varchar. Vitess parses such barewords as a
+// *sqlparser.ColName (column reference) rather than a string literal, and
+// later round-trips break.
+//
+// We delegate the classification to vitess: try to parse `SELECT <def>`,
+// and if the resulting expression is a *ColName, MySQL stored it as a
+// quoteless literal — wrap it. Anything else (Literal, NullVal, BoolVal,
+// CurTimeFuncExpr, FuncExpr, BinaryExpr, …) is already valid SQL.
+//
+// typeName is unused now but kept on the signature to mark this as
+// type-aware logic (we may need to special-case BIT or BLOB defaults
+// later — see TODO.md).
 func normalizeColumnDefault(typeName, def string) string {
+	_ = typeName
 	if def == "" {
 		return def
 	}
-	// Already quoted, an expression call, or a numeric literal — leave it.
-	if strings.HasPrefix(def, "'") && strings.HasSuffix(def, "'") {
+	p, err := sqlparser.New(sqlparser.Options{})
+	if err != nil {
 		return def
 	}
-	if strings.ContainsAny(def, "()") {
+	stmt, err := p.Parse("SELECT " + def)
+	if err != nil {
 		return def
 	}
-	if _, err := strconv.ParseFloat(def, 64); err == nil {
+	sel, ok := stmt.(*sqlparser.Select)
+	if !ok || sel.SelectExprs == nil || len(sel.SelectExprs.Exprs) != 1 {
 		return def
 	}
-	// Reserved keyword that vitess accepts unquoted.
-	upper := strings.ToUpper(def)
-	if upper == "NULL" || upper == "TRUE" || upper == "FALSE" {
+	ae, ok := sel.SelectExprs.Exprs[0].(*sqlparser.AliasedExpr)
+	if !ok {
 		return def
 	}
-	if strings.HasPrefix(upper, "CURRENT_") || upper == "NOW" {
+	if _, isCol := ae.Expr.(*sqlparser.ColName); !isCol {
 		return def
 	}
-	// String / enum / set / temporal literal — quote it so vitess can parse.
-	switch {
-	case strings.HasPrefix(typeName, "enum("),
-		strings.HasPrefix(typeName, "set("),
-		strings.HasPrefix(typeName, "char"),
-		strings.HasPrefix(typeName, "varchar"),
-		strings.HasPrefix(typeName, "text"),
-		strings.HasPrefix(typeName, "tinytext"),
-		strings.HasPrefix(typeName, "mediumtext"),
-		strings.HasPrefix(typeName, "longtext"),
-		strings.HasPrefix(typeName, "date"),
-		strings.HasPrefix(typeName, "time"),
-		strings.HasPrefix(typeName, "year"):
-		return "'" + strings.ReplaceAll(def, "'", "''") + "'"
-	}
-	return def
+	return "'" + strings.ReplaceAll(def, "'", "''") + "'"
 }
 
 func normalizeRefOpt(s string) string {
