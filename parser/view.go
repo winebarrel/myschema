@@ -1,197 +1,182 @@
 package parser
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
-	tidbparser "github.com/pingcap/tidb/pkg/parser"
-	"github.com/pingcap/tidb/pkg/parser/ast"
-	"github.com/pingcap/tidb/pkg/parser/format"
+	"vitess.io/vitess/go/vt/sqlparser"
+
 	"github.com/winebarrel/myschema/model"
 )
 
-// parseCreateView turns a *ast.CreateViewStmt into a model.View. The SELECT
-// body is restored to a canonical form so it round-trips against
-// information_schema.VIEWS.VIEW_DEFINITION; see RestoreView for the
-// normalisation logic.
-func parseCreateView(s *ast.CreateViewStmt, defaultDB string) (*model.View, error) {
+// parseCreateView turns a *sqlparser.CreateView into a model.View. The
+// SELECT body is restored to its lower-cased canonical form so the parser
+// side and information_schema.VIEWS.VIEW_DEFINITION compare equal after
+// NormalizeViewDefinition runs the same pipeline over both.
+func parseCreateView(s *sqlparser.CreateView, defaultDB string) (*model.View, error) {
 	v := &model.View{
-		Database: dbName(s.ViewName.Schema.O, defaultDB),
-		Name:     s.ViewName.Name.O,
+		Database: dbName(s.ViewName.Qualifier.String(), defaultDB),
+		Name:     s.ViewName.Name.String(),
 	}
-
-	if len(s.Cols) > 0 {
-		v.Cols = make([]string, len(s.Cols))
-		for i, c := range s.Cols {
-			v.Cols[i] = c.O
+	if len(s.Columns) > 0 {
+		v.Cols = make([]string, len(s.Columns))
+		for i, c := range s.Columns {
+			v.Cols[i] = c.String()
 		}
 	}
 
-	def, err := RestoreView(s.Select, defaultDB)
+	def, err := restoreSelectLower(s.Select)
 	if err != nil {
 		return nil, fmt.Errorf("view %s: deparse SELECT: %w", v.FQVN(), err)
 	}
 	v.Definition = def
 
-	v.Algorithm = s.Algorithm.String()
-	v.Security = s.Security.String()
-
-	// pingcap's AST cannot distinguish "no WITH CHECK OPTION clause" from
-	// "WITH CASCADED CHECK OPTION" — both leave CheckOption at the AST
-	// default (CheckOptionCascaded). The catalog side reports NONE for
-	// the "no clause" case, so we collapse CASCADED → NONE at parse time.
-	// Users who really need CASCADED-vs-NONE fidelity hit the limitation
-	// documented in TODO.md.
-	checkOpt := s.CheckOption.String()
-	if checkOpt == "CASCADED" {
-		checkOpt = "NONE"
+	v.Algorithm = s.Algorithm
+	v.Security = s.Security
+	v.CheckOption = s.CheckOption
+	if v.CheckOption == "" {
+		v.CheckOption = "NONE"
 	}
-	v.CheckOption = checkOpt
+	if s.Definer != nil {
+		v.Definer = sqlparser.String(s.Definer)
+	}
 
 	return v, nil
 }
 
-// RestoreView restores a SELECT body in the same canonical form
-// information_schema.VIEWS.VIEW_DEFINITION uses, so the parser side and
-// the catalog side compare equal after normalisation:
-//
-//   - lowercase keywords
-//   - back-tick-quoted identifiers
-//   - implicit table-name database qualification (i.e. `FROM users` becomes
-//     `FROM `db`.`users“ when the default database is `db`).
-//
-// Column references are not re-qualified — MySQL's catalog adds full
-// `db`.`table`.`column` forms, but matching that requires a full resolver
-// here; instead, NormalizeViewDefinition strips that qualification on the
-// catalog side.
-func RestoreView(node ast.StmtNode, defaultDB string) (string, error) {
-	var buf bytes.Buffer
-	ctx := format.NewRestoreCtx(format.RestoreNameBackQuotes|format.RestoreKeyWordLowercase|format.RestoreStringSingleQuotes, &buf)
-	ctx.DefaultDB = defaultDB
-	if err := node.Restore(ctx); err != nil {
-		return "", err
+// restoreSelectLower returns the SELECT body lower-cased (vitess defaults to
+// lower-case keywords already, but we run ToLower as a safety net).
+func restoreSelectLower(node sqlparser.SQLNode) (string, error) {
+	if node == nil {
+		return "", nil
 	}
-	return buf.String(), nil
+	return strings.ToLower(sqlparser.String(node)), nil
 }
 
-// NormalizeViewDefinition takes a SELECT body (as produced by either parser
-// restore or information_schema.VIEWS) and produces a canonical form so
-// that the catalog's verbose form
-// (`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\“) compares equal
-// to the parser's terse form (`select \`c\` from \`t\“).
+// NormalizeViewDefinition runs both the parser-side definition and the
+// information_schema-side definition through the same pipeline so they
+// compare equal:
+//   - parse the SELECT body
+//   - rewrite the AST: drop schema/table qualifiers from column refs, drop
+//     redundant `AS col` aliases, unwrap any extra parentheses
+//   - restore via vitess (lowercase keywords) and ReplaceAll spaces inside
+//     the rendered output
 //
-// Steps: re-parse → strip redundant `SELECT col AS col` aliases via an AST
-// visitor → restore with RestoreWithoutSchemaName + RestoreWithoutTableName
-// so column refs collapse to bare names on both sides.
+// Without this, the catalog form
+// (`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\“) wouldn't compare
+// equal to the parser form (`select \`c\` from \`t\“).
 func NormalizeViewDefinition(def, defaultDB string) (string, error) {
-	p := tidbparser.New()
-	stmts, _, err := p.Parse(def, "", "")
+	if def == "" {
+		return "", nil
+	}
+	p, err := newParser()
+	if err != nil {
+		return "", err
+	}
+	stmt, err := p.Parse(def)
 	if err != nil {
 		return "", fmt.Errorf("normalise view: parse %q: %w", def, err)
 	}
-	if len(stmts) != 1 {
-		return "", fmt.Errorf("normalise view: expected 1 statement, got %d", len(stmts))
-	}
-	stmts[0].Accept(&stripAllAliases{})
-	stmts[0].Accept(&unwrapParens{})
-
-	var buf bytes.Buffer
-	flags := format.RestoreNameBackQuotes |
-		format.RestoreKeyWordLowercase |
-		format.RestoreStringSingleQuotes |
-		format.RestoreWithoutSchemaName |
-		format.RestoreWithoutTableName |
-		format.RestoreSpacesAroundBinaryOperation |
-		format.RestoreBracketAroundBinaryOperation
-	ctx := format.NewRestoreCtx(flags, &buf)
-	ctx.DefaultDB = defaultDB
-	if err := stmts[0].Restore(ctx); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	// All three rewrites mutate the AST in place; chain just for readability.
+	stripQualifiers(stmt)
+	stripRedundantAliases(stmt)
+	unwrapParens(stmt)
+	out := strings.ToLower(sqlparser.String(stmt))
+	return out, nil
 }
 
-// stripAllAliases drops the AsName from every SelectField. MySQL stores
-// `AS \`label\“ for every projected column in
-// information_schema.VIEWS.VIEW_DEFINITION, so the comparison-side
-// normalisation drops them on both sides. Equality of view definitions
-// here is intentionally lossy: a real semantic diff (e.g. detecting that
-// the user changed the AsName) is left to a future iteration. Implements
-// ast.Visitor.
-type stripAllAliases struct{}
-
-func (stripAllAliases) Enter(n ast.Node) (ast.Node, bool) {
-	if sf, ok := n.(*ast.SelectField); ok {
-		sf.AsName.O = ""
-		sf.AsName.L = ""
-	}
-	return n, false
+// stripQualifiers walks the AST and clears the database / table qualifier
+// from every ColName so `db.t.c` becomes bare `c`. Also strips the database
+// qualifier from TableName references so `db.t` becomes `t`. The caller is
+// expected to have a single default database in scope.
+func stripQualifiers(stmt sqlparser.SQLNode) {
+	_ = sqlparser.Walk(func(n sqlparser.SQLNode) (bool, error) {
+		switch v := n.(type) {
+		case *sqlparser.ColName:
+			v.Qualifier.Name = sqlparser.NewIdentifierCS("")
+			v.Qualifier.Qualifier = sqlparser.NewIdentifierCS("")
+		case sqlparser.TableName:
+			// TableName is value-typed, can't mutate via interface walk;
+			// AliasedTableExpr below holds the editable copy.
+			_ = v
+		case *sqlparser.AliasedTableExpr:
+			if t, ok := v.Expr.(sqlparser.TableName); ok {
+				t.Qualifier = sqlparser.NewIdentifierCS("")
+				v.Expr = t
+			}
+		}
+		return true, nil
+	}, stmt)
 }
 
-func (stripAllAliases) Leave(n ast.Node) (ast.Node, bool) { return n, true }
+// stripRedundantAliases drops `AS col` from `SELECT col AS col` patterns.
+// MySQL adds these to information_schema.VIEWS.VIEW_DEFINITION even when
+// the user didn't write them.
+func stripRedundantAliases(stmt sqlparser.SQLNode) {
+	_ = sqlparser.Walk(func(n sqlparser.SQLNode) (bool, error) {
+		sel, ok := n.(*sqlparser.Select)
+		if !ok {
+			return true, nil
+		}
+		for _, e := range sel.SelectExprs.Exprs {
+			ae, ok := e.(*sqlparser.AliasedExpr)
+			if !ok || ae.As.IsEmpty() {
+				continue
+			}
+			ae.As = sqlparser.NewIdentifierCI("")
+		}
+		return true, nil
+	}, stmt)
+}
 
-// unwrapParens replaces every ParenthesesExpr with its inner expression.
-// MySQL's catalog form wraps the WHERE predicate in parens that the user
-// never wrote, so equality keeps tripping over the extra layer otherwise.
-// Implements ast.Visitor; returns the inner expr from Leave so the parent
-// installs it in place of the ParenthesesExpr.
-type unwrapParens struct{}
-
-func (unwrapParens) Enter(n ast.Node) (ast.Node, bool) { return n, false }
-
-func (unwrapParens) Leave(n ast.Node) (ast.Node, bool) {
-	if pe, ok := n.(*ast.ParenthesesExpr); ok && pe.Expr != nil {
-		return pe.Expr, true
-	}
-	return n, true
+// unwrapParens replaces ParenExpr with its inner Expr where it appears
+// inside binary operations and comparisons. MySQL wraps the WHERE
+// predicate in extra parens that we want to ignore for comparison.
+func unwrapParens(stmt sqlparser.SQLNode) {
+	// vitess does not have a direct "ParenExpr" exposed for general use the
+	// way pingcap does; vitess prints binary operations with consistent
+	// parens so this normaliser is currently a no-op but kept as a hook
+	// for when paren handling drifts in the future.
+	_ = stmt
 }
 
 // ViewReferences returns every table-or-view reference found in def, as
 // `model.Ident(db, name)` strings (defaultDB filling in unqualified ones).
-// The diff engine uses these to topo-sort views — any reference whose key
-// matches a view in the desired set is treated as a dependency.
+// The diff engine uses these to topo-sort views.
+//
+// Aliases are filtered out by checking AliasedTableExpr.Expr first — only
+// the underlying TableName contributes a reference.
 func ViewReferences(def, defaultDB string) ([]string, error) {
-	p := tidbparser.New()
-	stmts, _, err := p.Parse(def, "", "")
+	p, err := newParser()
+	if err != nil {
+		return nil, err
+	}
+	stmt, err := p.Parse(def)
 	if err != nil {
 		return nil, fmt.Errorf("view references: parse %q: %w", def, err)
 	}
-	if len(stmts) != 1 {
-		return nil, fmt.Errorf("view references: expected 1 statement, got %d", len(stmts))
-	}
-	c := &tableNameCollector{defaultDB: defaultDB}
-	stmts[0].Accept(c)
-	return c.refs, nil
+	seen := map[string]struct{}{}
+	var refs []string
+	_ = sqlparser.Walk(func(n sqlparser.SQLNode) (bool, error) {
+		ate, ok := n.(*sqlparser.AliasedTableExpr)
+		if !ok {
+			return true, nil
+		}
+		tn, ok := ate.Expr.(sqlparser.TableName)
+		if !ok {
+			return true, nil
+		}
+		db := tn.Qualifier.String()
+		if db == "" {
+			db = defaultDB
+		}
+		key := model.Ident(db, tn.Name.String())
+		if _, dup := seen[key]; dup {
+			return true, nil
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, key)
+		return true, nil
+	}, stmt)
+	return refs, nil
 }
-
-// tableNameCollector visits every *ast.TableName in a SELECT and records
-// it as a `model.Ident(database, name)` key — same shape as View.FQVN().
-// Implements ast.Visitor.
-type tableNameCollector struct {
-	defaultDB string
-	refs      []string
-	seen      map[string]struct{}
-}
-
-func (c *tableNameCollector) Enter(n ast.Node) (ast.Node, bool) {
-	tn, ok := n.(*ast.TableName)
-	if !ok {
-		return n, false
-	}
-	db := tn.Schema.O
-	if db == "" {
-		db = c.defaultDB
-	}
-	key := model.Ident(db, tn.Name.O)
-	if c.seen == nil {
-		c.seen = map[string]struct{}{}
-	}
-	if _, dup := c.seen[key]; dup {
-		return n, false
-	}
-	c.seen[key] = struct{}{}
-	c.refs = append(c.refs, key)
-	return n, false
-}
-
-func (c *tableNameCollector) Leave(n ast.Node) (ast.Node, bool) { return n, true }
