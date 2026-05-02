@@ -4,8 +4,10 @@ export MYSQL_USER  := root
 export MYSQL_PWD   :=
 export MYSQL_DB    := myschema_test
 
-# Default DSN used by tests / scenario scripts. Override with MYSCHEMA_TEST_DSN
-# if your local MySQL is reachable on a different host / port / user.
+# Default DSN used by tests / scenario scripts. The trailing slash makes it
+# easy for tests to append the test DB name; the production CLI requires the
+# database to be in the DSN (testutil + test_helper take care of that).
+# Override with MYSCHEMA_TEST_DSN if MySQL lives elsewhere.
 export MYSCHEMA_TEST_DSN ?= $(MYSQL_USER)@tcp($(MYSQL_HOST):$(MYSQL_PORT))/
 
 MYSQL := mysql -h $(MYSQL_HOST) -P $(MYSQL_PORT) -u $(MYSQL_USER)

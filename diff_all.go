@@ -24,15 +24,15 @@ type diffAllResult struct {
 	Count           ObjectCount
 }
 
-func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, options *diffAllOptions) (*diffAllResult, error) {
-	cat := catalog.NewCatalog(conn, c.Databases)
+func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, options *diffAllOptions) (*diffAllResult, error) {
+	cat := catalog.NewCatalog(conn, database)
 
 	currentTables, err := cat.Tables(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch tables: %w", err)
 	}
 
-	desired, err := parser.ParseSQLFiles(options.Files, c.Databases[0])
+	desired, err := parser.ParseSQLFiles(options.Files, database)
 	if err != nil {
 		return nil, fmt.Errorf("parse desired: %w", err)
 	}
@@ -51,7 +51,7 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, options *diffAllOp
 	stmts = append(stmts, tableDiff.DropStmts...)
 	stmts = append(stmts, tableDiff.FKAddStmts...)
 
-	count := ObjectCount{Databases: c.Databases, Tables: currentTables.Len()}
+	count := ObjectCount{Database: database, Tables: currentTables.Len()}
 
 	return &diffAllResult{
 		Stmts:           stmts,

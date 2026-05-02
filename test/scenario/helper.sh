@@ -4,8 +4,14 @@
 set -euo pipefail
 
 : "${MYSCHEMA:=./myschema}"
-export MYSCHEMA_DSN="${MYSCHEMA_DSN:-${MYSCHEMA_TEST_DSN:-root@tcp(127.0.0.1:3306)/}}"
 : "${MYSCHEMA_TEST_DB:=myschema_test}"
+# myschema reads its target DB from the DSN. If MYSCHEMA_TEST_DSN already
+# contains a database we trust it; otherwise append MYSCHEMA_TEST_DB.
+_base_dsn="${MYSCHEMA_TEST_DSN:-root@tcp(127.0.0.1:3306)/}"
+case "$_base_dsn" in
+  */)  export MYSCHEMA_DSN="${_base_dsn}${MYSCHEMA_TEST_DB}" ;;
+  *)   export MYSCHEMA_DSN="$_base_dsn" ;;
+esac
 
 # `mysql` CLI invocation used to set up / tear down test databases.
 # Override MYSQL_BIN if your client is not on $PATH (e.g. mysql-shell).
@@ -50,17 +56,17 @@ setup_db() {
 
 # Run myschema plan against the test database.
 myschema_plan() {
-  "$MYSCHEMA" -n "$MYSCHEMA_TEST_DB" plan --allow-drop all "$@" 2>&1
+  "$MYSCHEMA" plan --allow-drop all "$@" 2>&1
 }
 
 # Run myschema apply against the test database.
 myschema_apply() {
-  "$MYSCHEMA" -n "$MYSCHEMA_TEST_DB" apply --allow-drop all "$@" 2>&1
+  "$MYSCHEMA" apply --allow-drop all "$@" 2>&1
 }
 
 # Run plan without --allow-drop (drops should be suppressed).
 myschema_plan_no_drop() {
-  "$MYSCHEMA" -n "$MYSCHEMA_TEST_DB" plan "$@" 2>&1
+  "$MYSCHEMA" plan "$@" 2>&1
 }
 
 # Run a step that expects the plan output to contain a particular substring,

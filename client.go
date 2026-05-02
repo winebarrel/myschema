@@ -37,6 +37,20 @@ func (c *connection) Close() error {
 	return derr
 }
 
+// Database returns the database name baked into the DSN. Returns an error if
+// the DSN is malformed or omits the database, since myschema operates on
+// exactly one database per invocation.
+func (c *Client) Database() (string, error) {
+	cfg, err := mysqldrv.ParseDSN(c.DSN)
+	if err != nil {
+		return "", fmt.Errorf("myschema: parse DSN: %w", err)
+	}
+	if cfg.DBName == "" {
+		return "", fmt.Errorf("myschema: MYSCHEMA_DSN must include a database name (e.g. root@tcp(127.0.0.1:3306)/mydb)")
+	}
+	return cfg.DBName, nil
+}
+
 // connect opens a *sql.DB, immediately reserves a single dedicated connection,
 // and returns it. The pool is sized to one so no other code path can borrow
 // a second connection by accident.
@@ -44,6 +58,9 @@ func (c *Client) connect(ctx context.Context) (*connection, error) {
 	cfg, err := mysqldrv.ParseDSN(c.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("myschema: parse DSN: %w", err)
+	}
+	if cfg.DBName == "" {
+		return nil, fmt.Errorf("myschema: MYSCHEMA_DSN must include a database name (e.g. root@tcp(127.0.0.1:3306)/mydb)")
 	}
 	if c.Password != "" {
 		cfg.Passwd = c.Password

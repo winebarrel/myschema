@@ -25,7 +25,7 @@ CREATE TABLE users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `)
 
-	cat := catalog.NewCatalog(db, []string{testutil.DefaultDB})
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
 	tables, err := cat.Tables(ctx)
 	require.NoError(t, err)
 

@@ -5,11 +5,12 @@ import (
 	"path"
 )
 
-// Options are the global flags shared by every CLI subcommand.
+// Options are the global flags shared by every CLI subcommand. The DSN is
+// the single source of truth for the target database — myschema does not
+// model a separate "database list" parameter.
 type Options struct {
-	DSN       string   `short:"d" env:"MYSCHEMA_DSN" default:"root@tcp(127.0.0.1:3306)/" help:"MySQL DSN. See https://github.com/go-sql-driver/mysql#dsn-data-source-name"`
-	Password  string   `env:"MYSCHEMA_PASSWORD" help:"MySQL password (overrides DSN)."`
-	Databases []string `short:"n" env:"MYSCHEMA_DATABASES" required:"" help:"Databases to inspect and modify (comma-separated)."`
+	DSN      string `short:"d" env:"MYSCHEMA_DSN" required:"" help:"MySQL DSN including database name (e.g. root@tcp(127.0.0.1:3306)/mydb). See https://github.com/go-sql-driver/mysql#dsn-data-source-name"`
+	Password string `env:"MYSCHEMA_PASSWORD" help:"MySQL password (overrides DSN)."`
 }
 
 // FilterOptions narrow the set of objects considered by plan/apply/dump.
@@ -73,8 +74,8 @@ func (p *DropPolicy) IsDropAllowed(kind string) bool {
 
 // ObjectCount summarises how many objects were considered during a run.
 type ObjectCount struct {
-	Databases []string
-	Tables    int
+	Database string
+	Tables   int
 }
 
 func (c ObjectCount) Summary() string {
@@ -82,8 +83,5 @@ func (c ObjectCount) Summary() string {
 }
 
 func (c ObjectCount) DBLabel() string {
-	if len(c.Databases) == 1 {
-		return "database " + c.Databases[0]
-	}
-	return fmt.Sprintf("databases %v", c.Databases)
+	return "database " + c.Database
 }
