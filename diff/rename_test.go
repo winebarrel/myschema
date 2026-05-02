@@ -631,3 +631,241 @@ func TestDiffRenameIndexMissingSourceErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "renamed-from")
 	assert.Contains(t, err.Error(), "ghost")
 }
+
+// gap-coverage tests --------------------------------------------------------
+// Each test below was added after a coverage audit identified an edge case
+// that the renamed-from path supports in code but had no dedicated test.
+
+// Gap 1: parent-side column rename when the referencing FK is multi-column
+// and the renamed column appears at a non-first position. The cross-table
+// RefCols rewrite walks each entry by index, so position shouldn't matter,
+// but only single-column RefCols had a test before this.
+func TestDiffRenameColumnRewritesMultiColFKRefColsAtNonFirstPosition(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	curParent := tbl("shop", "users")
+	curParent.Columns.Set("org_id", col("org_id", "bigint"))
+	curParent.Columns.Set("id", col("id", "bigint"))
+	curParent.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(org_id, id)", Columns: []string{"org_id", "id"},
+	})
+	curParent.Indexes.Set("PRIMARY", &model.Index{
+		Name: "PRIMARY", Database: "shop", Table: "users", Primary: true,
+		Parts: []model.IndexPart{{Column: "org_id"}, {Column: "id"}},
+	})
+	current.Set("shop.users", curParent)
+
+	curChild := tbl("shop", "posts")
+	curChild.Columns.Set("id", col("id", "bigint"))
+	curChild.Columns.Set("org_id", col("org_id", "bigint"))
+	curChild.Columns.Set("user_id", col("user_id", "bigint"))
+	curChild.Constraints.Set("PRIMARY", pkConstraint())
+	curChild.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"org_id", "user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"org_id", "id"},
+	})
+	current.Set("shop.posts", curChild)
+
+	from := "id"
+	desParent := tbl("shop", "users")
+	desParent.Columns.Set("org_id", col("org_id", "bigint"))
+	wc := col("user_id", "bigint")
+	wc.RenameFrom = &from
+	desParent.Columns.Set("user_id", wc)
+	desParent.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(org_id, user_id)", Columns: []string{"org_id", "user_id"},
+	})
+	desParent.Indexes.Set("PRIMARY", &model.Index{
+		Name: "PRIMARY", Database: "shop", Table: "users", Primary: true,
+		Parts: []model.IndexPart{{Column: "org_id"}, {Column: "user_id"}},
+	})
+	desired.Set("shop.users", desParent)
+
+	desChild := tbl("shop", "posts")
+	desChild.Columns.Set("id", col("id", "bigint"))
+	desChild.Columns.Set("org_id", col("org_id", "bigint"))
+	desChild.Columns.Set("user_id", col("user_id", "bigint"))
+	desChild.Constraints.Set("PRIMARY", pkConstraint())
+	desChild.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"org_id", "user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"org_id", "user_id"},
+	})
+	desired.Set("shop.posts", desChild)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
+	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "multi-col FK with renamed second RefCol must not be dropped")
+	assert.NotContains(t, allFK, "ADD CONSTRAINT", "multi-col FK with renamed second RefCol must not be re-added")
+}
+
+// Gap 2: ALTER TABLE … RENAME INDEX must preserve per-part modifiers
+// (prefix length, DESC). The rename path only touches Name + map-key, so
+// Parts come along for the ride; this test pins that invariant.
+func TestDiffRenameIndexPreservesPrefixLengthAndDesc(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "posts")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("title", col("title", "varchar(255)"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.Indexes.Set("old_idx", &model.Index{
+		Name: "old_idx", Database: "shop", Table: "posts",
+		Parts: []model.IndexPart{{Column: "title", Length: 16, Desc: true}},
+	})
+	current.Set("shop.posts", cur)
+
+	want := tbl("shop", "posts")
+	want.Columns.Set("id", col("id", "bigint"))
+	want.Columns.Set("title", col("title", "varchar(255)"))
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	from := "old_idx"
+	want.Indexes.Set("idx_title", &model.Index{
+		Name: "idx_title", Database: "shop", Table: "posts",
+		Parts:      []model.IndexPart{{Column: "title", Length: 16, Desc: true}},
+		RenameFrom: &from,
+	})
+	desired.Set("shop.posts", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	assert.Contains(t, got, "RENAME INDEX old_idx TO idx_title")
+	assert.NotContains(t, got, "DROP INDEX", "prefix-length/DESC parts must survive the rename")
+	assert.NotContains(t, got, "CREATE INDEX", "prefix-length/DESC parts must survive the rename")
+}
+
+// Gap 3: dropping only some columns of a multi-column index must NOT
+// trigger the "all parts dropped → suppress DROP INDEX" optimisation.
+// The optimisation hinges on MySQL auto-removing the index when its
+// last column goes; with surviving columns the index stays, and the
+// explicit DROP INDEX is required to match desired (no index).
+func TestDiffDropPartialColumnEmitsDropIndex(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "posts")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("a", col("a", "bigint"))
+	cur.Columns.Set("b", col("b", "bigint"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.Indexes.Set("ab", &model.Index{
+		Name: "ab", Database: "shop", Table: "posts",
+		Parts: []model.IndexPart{{Column: "a"}, {Column: "b"}},
+	})
+	current.Set("shop.posts", cur)
+
+	want := tbl("shop", "posts")
+	want.Columns.Set("id", col("id", "bigint"))
+	want.Columns.Set("b", col("b", "bigint"))
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.posts", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	assert.Contains(t, got, "DROP COLUMN a")
+	assert.Contains(t, got, "DROP INDEX ab",
+		"partial-column drop on a multi-col index must still DROP INDEX (suppression doesn't apply)")
+}
+
+// Gap 4: self-referential FK whose RefCols includes the renamed column.
+// rewriteFKColumnRefs walks both Columns (always) and RefCols (only when
+// the FK's parent is this same table). Without that self-ref branch the
+// FK would diff as DROP+ADD after `id` → `new_id`.
+func TestDiffRenameColumnRewritesSelfRefFKRefCols(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "tree")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("parent_id", col("parent_id", "bigint"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.ForeignKeys.Set("fk_parent", &model.ForeignKey{
+		Name: "fk_parent", Database: "shop", Table: "tree",
+		Columns: []string{"parent_id"},
+		RefDB:   "shop", RefTable: "tree", RefCols: []string{"id"},
+	})
+	current.Set("shop.tree", cur)
+
+	from := "id"
+	want := tbl("shop", "tree")
+	wc := col("new_id", "bigint")
+	wc.RenameFrom = &from
+	want.Columns.Set("new_id", wc)
+	want.Columns.Set("parent_id", col("parent_id", "bigint"))
+	want.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(new_id)", Columns: []string{"new_id"},
+	})
+	want.ForeignKeys.Set("fk_parent", &model.ForeignKey{
+		Name: "fk_parent", Database: "shop", Table: "tree",
+		Columns: []string{"parent_id"},
+		RefDB:   "shop", RefTable: "tree", RefCols: []string{"new_id"},
+	})
+	desired.Set("shop.tree", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
+	assert.Contains(t, got, "RENAME COLUMN id TO new_id")
+	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "self-ref FK must not drop on column rename")
+	assert.NotContains(t, allFK, "ADD CONSTRAINT", "self-ref FK must not be re-added on column rename")
+}
+
+// Gap 5: in a single plan, a table rename and an FK drop on (what
+// becomes) the renamed table must end up in the right buckets.
+// RenameStmts is its own bucket and diff_all.go schedules it ahead of
+// FKDropStmts; this test pins the bucket separation at the diff layer
+// so a future shuffle in tables.go fails loudly.
+func TestDiffRenameTableSeparatesFromFKDropOnSameTable(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	curParent := tbl("shop", "users")
+	curParent.Columns.Set("id", col("id", "bigint"))
+	curParent.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", curParent)
+
+	curChild := tbl("shop", "posts")
+	curChild.Columns.Set("id", col("id", "bigint"))
+	curChild.Columns.Set("user_id", col("user_id", "bigint"))
+	curChild.Constraints.Set("PRIMARY", pkConstraint())
+	curChild.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.posts", curChild)
+
+	desParent := tbl("shop", "users")
+	desParent.Columns.Set("id", col("id", "bigint"))
+	desParent.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.users", desParent)
+
+	from := "posts"
+	desChild := tbl("shop", "comments")
+	desChild.RenameFrom = &from
+	desChild.Columns.Set("id", col("id", "bigint"))
+	desChild.Columns.Set("user_id", col("user_id", "bigint"))
+	desChild.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.comments", desChild)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.RenameStmts, "table rename must land in RenameStmts bucket")
+	require.NotEmpty(t, res.FKDropStmts, "FK on renamed table must be in FKDropStmts")
+	assert.Contains(t, res.RenameStmts[0], "ALTER TABLE shop.posts RENAME TO shop.comments")
+	// Post-rename, current is re-keyed under the new name, so the FK
+	// drop statement targets the new table name. Apply order
+	// (RenameStmts before FKDropStmts in diff_all.go) makes that the
+	// table that exists at the moment the DROP runs.
+	assert.Contains(t, res.FKDropStmts[0], "ALTER TABLE shop.comments DROP FOREIGN KEY fk_user")
+}
