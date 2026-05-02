@@ -292,6 +292,14 @@ func classifyInlineLine(line string) (inlineKind, string) {
 		if len(tokens) < 2 {
 			return inlineKindUnknown, ""
 		}
+		// CONSTRAINT <name> UNIQUE [KEY|INDEX] (...) defines a unique
+		// *index* (renameable via ALTER TABLE … RENAME INDEX), not a
+		// regular constraint. myschema models UNIQUE this way too —
+		// the result lands in t.Indexes, so we route the directive to
+		// inlineKindIndex with the constraint/index name.
+		if len(tokens) >= 3 && strings.EqualFold(tokens[2], "UNIQUE") {
+			return inlineKindIndex, stripBackticks(tokens[1])
+		}
 		return inlineKindConstraint, stripBackticks(tokens[1])
 	case "CHECK":
 		// anonymous CHECK (…) — no name to rename. Fall through to
@@ -328,16 +336,30 @@ func leadingBacktickedIdent(line string) (string, bool) {
 	return s[1 : 1+end], true
 }
 
-// tokenize splits `s` into whitespace-separated tokens, then peels off
-// any trailing "," and "(" characters from each so that strict prefix /
-// equality checks work on names regardless of formatting (a column-list
-// opener stuck to the name like `name(` becomes `name`). Backticks on
-// names are kept so the caller can decide whether to strip them.
+// tokenize splits `s` into whitespace-separated tokens, then normalises
+// each so that strict prefix / equality checks work on names regardless
+// of formatting:
+//
+//   - Trailing "," and "(" are peeled off (e.g. `name(` → `name`).
+//   - For tokens that aren't backtick-quoted, anything from the first
+//     "(" onwards is dropped (e.g. `idx(col)` → `idx`), so the
+//     no-space form `KEY idx(col)` is recognised as an index named
+//     `idx`. A token that starts with "(" (e.g. `(col)` from the
+//     unnamed `KEY (col)` form) collapses to the empty string and is
+//     dropped from the slice.
+//
+// Backticks on names are kept so the caller can decide whether to
+// strip them.
 func tokenize(s string) []string {
 	raw := strings.Fields(s)
 	out := make([]string, 0, len(raw))
 	for _, t := range raw {
 		t = strings.TrimRight(t, ",(")
+		if t != "" && t[0] != '`' {
+			if i := strings.IndexByte(t, '('); i >= 0 {
+				t = t[:i]
+			}
+		}
 		if t == "" {
 			continue
 		}

@@ -320,6 +320,44 @@ func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {
 	require.Len(t, got.Unsupported, 1)
 }
 
+func TestExtractInlineRenamesNoSpaceIndexNameIsParsed(t *testing.T) {
+	// MySQL allows `KEY name(col)` with no space between the name and
+	// the column-list opener. tokenize must strip the trailing "(col)"
+	// from the bare token so the index name reads as just "name", not
+	// "name(col)" (which would later surface as "target index not
+	// found").
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    -- myschema:renamed-from old_idx
+    KEY idx_x(id),
+    -- myschema:renamed-from old_uq
+    UNIQUE KEY uq_x(id)
+);`)
+	assert.Equal(t, "old_idx", got.Indexes["idx_x"], "no-space form `KEY idx_x(col)`")
+	assert.Equal(t, "old_uq", got.Indexes["uq_x"], "no-space form `UNIQUE KEY uq_x(col)`")
+	assert.Empty(t, got.Unsupported)
+}
+
+func TestExtractInlineRenamesConstraintUniqueIsIndex(t *testing.T) {
+	// `CONSTRAINT <name> UNIQUE …` defines a unique *index* in MySQL
+	// (renameable via ALTER TABLE … RENAME INDEX) — myschema models it
+	// in t.Indexes. The classifier must route the directive to
+	// inlineKindIndex with the constraint/index name, not to
+	// inlineKindConstraint (which would surface as "constraint rename
+	// not supported").
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    name VARCHAR(64) NOT NULL,
+    -- myschema:renamed-from old_uq_a
+    CONSTRAINT uq_name UNIQUE KEY (name),
+    -- myschema:renamed-from old_uq_b
+    CONSTRAINT uq_id UNIQUE (id)
+);`)
+	assert.Equal(t, "old_uq_a", got.Indexes["uq_name"])
+	assert.Equal(t, "old_uq_b", got.Indexes["uq_id"])
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractInlineRenamesUnnamedTwoWordIndexIsUnsupported(t *testing.T) {
 	// Same guard for the two-word index keyword forms (UNIQUE KEY,
 	// FULLTEXT INDEX, SPATIAL KEY, etc.). Without the guard,
