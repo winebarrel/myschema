@@ -7,38 +7,38 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
-// Catalog is a database/sql connection bound to a list of databases. The
-// per-object queries below scope themselves to those databases.
+// Catalog is a single dedicated MySQL connection bound to a list of
+// databases. Per-object queries below scope themselves to those databases.
+// The connection is single-use by design (no pooling); callers manage its
+// lifetime via *sql.Conn.Close().
 type Catalog struct {
-	db        *sql.DB
+	conn      *sql.Conn
 	databases []string
 }
 
-// NewCatalog wraps an existing sql.DB.
-func NewCatalog(db *sql.DB, databases []string) *Catalog {
-	return &Catalog{db: db, databases: databases}
+// NewCatalog wraps an existing *sql.Conn.
+func NewCatalog(conn *sql.Conn, databases []string) *Catalog {
+	return &Catalog{conn: conn, databases: databases}
 }
 
 // dbPlaceholders builds "?, ?, ?" with the right number of placeholders and
 // returns the args slice already typed for QueryContext.
 func (c *Catalog) dbPlaceholders() (string, []any) {
 	args := make([]any, len(c.databases))
-	ph := ""
+	parts := make([]string, len(c.databases))
 	for i, d := range c.databases {
-		if i > 0 {
-			ph += ","
-		}
-		ph += "?"
+		parts[i] = "?"
 		args[i] = d
 	}
-	return ph, args
+	return strings.Join(parts, ","), args
 }
 
-// pingDB exists so other catalog files can fail fast on connectivity issues.
+// ping fails fast on a dead connection.
 func (c *Catalog) ping(ctx context.Context) error {
-	if err := c.db.PingContext(ctx); err != nil {
+	if err := c.conn.PingContext(ctx); err != nil {
 		return fmt.Errorf("catalog: ping failed: %w", err)
 	}
 	return nil

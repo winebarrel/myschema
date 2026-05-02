@@ -1,14 +1,16 @@
 package myschema
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
 	mysqldrv "github.com/go-sql-driver/mysql"
 )
 
-// Client is a thin wrapper around the global Options + a sql.DB factory.
-// Each subcommand opens and closes its own connection.
+// Client is a thin wrapper around the global Options + a sql.Conn factory.
+// Each subcommand acquires a single dedicated connection (no pool) and
+// closes it on exit.
 type Client struct {
 	*Options
 }
@@ -18,7 +20,27 @@ func NewClient(o *Options) *Client {
 	return &Client{Options: o}
 }
 
-func (c *Client) connect() (*sql.DB, error) {
+// connection wraps a *sql.Conn with the *sql.DB it was acquired from so the
+// caller can close both with one Close().
+type connection struct {
+	*sql.Conn
+	db *sql.DB
+}
+
+// Close releases the connection back to its parent *sql.DB and closes the DB.
+func (c *connection) Close() error {
+	cerr := c.Conn.Close()
+	derr := c.db.Close()
+	if cerr != nil {
+		return cerr
+	}
+	return derr
+}
+
+// connect opens a *sql.DB, immediately reserves a single dedicated connection,
+// and returns it. The pool is sized to one so no other code path can borrow
+// a second connection by accident.
+func (c *Client) connect(ctx context.Context) (*connection, error) {
 	cfg, err := mysqldrv.ParseDSN(c.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("myschema: parse DSN: %w", err)
@@ -33,5 +55,13 @@ func (c *Client) connect() (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("myschema: open: %w", err)
 	}
-	return db, nil
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("myschema: acquire connection: %w", err)
+	}
+	return &connection{Conn: conn, db: db}, nil
 }

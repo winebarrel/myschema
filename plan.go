@@ -21,13 +21,13 @@ type PlanResult struct {
 
 // Plan computes the diff and returns it as a single SQL string.
 func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, error) {
-	db, err := c.connect()
+	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close() //nolint:errcheck
+	defer conn.Close() //nolint:errcheck
 
-	r, err := c.diffAll(ctx, db, &diffAllOptions{
+	r, err := c.diffAll(ctx, conn.Conn, &diffAllOptions{
 		FilterOptions: options.FilterOptions,
 		DropPolicy:    options.DropPolicy,
 		Files:         options.Files,

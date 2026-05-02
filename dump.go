@@ -23,13 +23,13 @@ func (d *DumpResult) String() string { return d.SQL }
 
 // Dump reads the current schema from MySQL and returns it as a SQL string.
 func (c *Client) Dump(ctx context.Context, options *DumpOptions) (*DumpResult, error) {
-	db, err := c.connect()
+	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close() //nolint:errcheck
+	defer conn.Close() //nolint:errcheck
 
-	cat := catalog.NewCatalog(db, c.Databases)
+	cat := catalog.NewCatalog(conn.Conn, c.Databases)
 	tables, err := cat.Tables(ctx)
 	if err != nil {
 		return nil, err
