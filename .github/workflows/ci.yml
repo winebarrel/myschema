@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - mysql_label: "8.0"
-            mysql_service: mysql
+            mysql_service: mysql8
             mysql_port: 3306
             upload_codecov: true
           - mysql_label: "9.4"
