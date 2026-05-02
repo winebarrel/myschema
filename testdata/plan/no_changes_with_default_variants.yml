@@ -1,0 +1,18 @@
+# Verifies equalExprPtr canonicalisation: parser side stores a default
+# vitess restored as `current_timestamp()`; catalog returns the form
+# `CURRENT_TIMESTAMP`. Both should compare equal so no ALTER fires.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+  );
+
+plan: ""

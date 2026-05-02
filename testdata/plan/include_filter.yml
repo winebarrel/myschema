@@ -1,0 +1,15 @@
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE tmp_log (id BIGINT NOT NULL, PRIMARY KEY (id));
+
+# desired drops both tables, but include filter only considers `users`,
+# so tmp_log is invisible to the diff. Without --allow-drop the users
+# drop is suppressed too.
+desired: ""
+
+include:
+  - "users"
+
+plan: ""
+disallowed_drops: |
+  -- skipped: DROP TABLE myschema_test.users;

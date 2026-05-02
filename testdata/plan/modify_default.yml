@@ -1,0 +1,16 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'pending',
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'active',
+      PRIMARY KEY (id)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.users MODIFY COLUMN status varchar(16) NOT NULL DEFAULT 'active';
