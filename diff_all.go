@@ -24,8 +24,8 @@ type diffAllResult struct {
 	Count           ObjectCount
 }
 
-func (c *Client) diffAll(ctx context.Context, db *sql.DB, options *diffAllOptions) (*diffAllResult, error) {
-	cat := catalog.NewCatalog(db, c.Databases)
+func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, options *diffAllOptions) (*diffAllResult, error) {
+	cat := catalog.NewCatalog(conn, c.Databases)
 
 	currentTables, err := cat.Tables(ctx)
 	if err != nil {

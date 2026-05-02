@@ -25,7 +25,7 @@ WHERE  TABLE_SCHEMA IN (` + ph + `)
   AND  TABLE_TYPE = 'BASE TABLE'
 ORDER  BY TABLE_SCHEMA, TABLE_NAME`
 
-	rows, err := c.db.QueryContext(ctx, q, args...)
+	rows, err := c.conn.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list tables: %w", err)
 	}
@@ -86,7 +86,7 @@ SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA,
 FROM   information_schema.COLUMNS
 WHERE  TABLE_SCHEMA = ? AND TABLE_NAME = ?
 ORDER  BY ORDINAL_POSITION`
-	rows, err := c.db.QueryContext(ctx, q, t.Database, t.Name)
+	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
 		return fmt.Errorf("catalog: list columns for %s: %w", t.FQTN(), err)
 	}
@@ -145,7 +145,7 @@ SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, SUB_PART, INDEX_TYPE,
 FROM   information_schema.STATISTICS
 WHERE  TABLE_SCHEMA = ? AND TABLE_NAME = ?
 ORDER  BY INDEX_NAME, SEQ_IN_INDEX`
-	rows, err := c.db.QueryContext(ctx, q, t.Database, t.Name)
+	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
 		return fmt.Errorf("catalog: list indexes for %s: %w", t.FQTN(), err)
 	}
@@ -265,7 +265,7 @@ JOIN   information_schema.TABLE_CONSTRAINTS tc
 WHERE  tc.TABLE_SCHEMA    = ?
   AND  tc.TABLE_NAME      = ?
   AND  tc.CONSTRAINT_TYPE = 'CHECK'`
-	rows, err := c.db.QueryContext(ctx, q, t.Database, t.Name)
+	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "doesn't exist") ||
 			strings.Contains(strings.ToLower(err.Error()), "unknown table") {
@@ -302,7 +302,7 @@ JOIN   information_schema.REFERENTIAL_CONSTRAINTS r
       AND r.TABLE_NAME        = k.TABLE_NAME
 WHERE  k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ?
 ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
-	rows, err := c.db.QueryContext(ctx, q, t.Database, t.Name)
+	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
 		return fmt.Errorf("catalog: list foreign keys for %s: %w", t.FQTN(), err)
 	}

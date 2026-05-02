@@ -24,13 +24,13 @@ type ApplyResult struct {
 // Apply runs the diff against the database, writing each executed statement
 // to w as it goes.
 func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) (*ApplyResult, error) {
-	db, err := c.connect()
+	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close() //nolint:errcheck
+	defer conn.Close() //nolint:errcheck
 
-	r, err := c.diffAll(ctx, db, &diffAllOptions{
+	r, err := c.diffAll(ctx, conn.Conn, &diffAllOptions{
 		FilterOptions: options.FilterOptions,
 		DropPolicy:    options.DropPolicy,
 		Files:         options.Files,
@@ -46,7 +46,7 @@ func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) 
 
 	for _, stmt := range r.Stmts {
 		fmt.Fprintln(w, stmt) //nolint:errcheck
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
 			return nil, fmt.Errorf("execute %q: %w", stmt, err)
 		}
 	}
