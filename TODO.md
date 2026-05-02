@@ -11,6 +11,17 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## High — correctness bugs
 
+- [ ] **Empty-string `DEFAULT ''` round-trip drift.** A column
+      declared with `NOT NULL DEFAULT ''` apply-loops: every
+      post-apply plan re-emits `MODIFY COLUMN … DEFAULT ''`. The
+      catalog reads `information_schema.COLUMNS.COLUMN_DEFAULT` as
+      the bareword empty string and `catalog.normalizeColumnDefault`
+      doesn't wrap it the way it wraps non-empty barewords for
+      ENUM/SET/CHAR/temporal types, while the parser side stores
+      `''` (quoted). Surfaced while writing the evolution scenario
+      in PR #31 (worked around there by dropping the explicit
+      DEFAULT). Fix lives in `catalog/catalog.go`'s default
+      normaliser.
 - [ ] **FK-implicit covering indexes look like drift.** Adding a
       foreign key on un-indexed columns (inline `CREATE TABLE` or
       `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently
