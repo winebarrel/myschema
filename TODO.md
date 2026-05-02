@@ -38,9 +38,6 @@ Open items only. Done work is in `git log` / closed PRs.
       columns, indexes, constraints, and FKs. Without it, every
       rename emits `DROP + CREATE` which destroys data. Pistachio's
       design is the reference.
-- [ ] **`--strict-drop` (or non-zero exit) when drops are suppressed.**
-      Today suppressed drops only show as `-- skipped:` comments;
-      CI gates can't catch them.
 
 ## Medium — silent diffs / fidelity gaps
 
