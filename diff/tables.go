@@ -75,7 +75,6 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 			continue
 		}
 		rewriteCrossTableFKRefCols(current, dt.Database, dt.Name, renames)
-		_ = k
 	}
 
 	// Modified tables.
