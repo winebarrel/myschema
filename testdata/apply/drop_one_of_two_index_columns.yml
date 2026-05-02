@@ -1,0 +1,36 @@
+# Negative variant of dependent-index suppression: when only some of an
+# index's columns are dropped, the plan must still emit DROP INDEX —
+# MySQL keeps the index in some form unless we ask it to go. Here we
+# also recreate the index with a narrower column list, so the apply is:
+#
+#   1. DROP COLUMN a
+#   2. DROP INDEX i_combined        ← still emitted; suppression doesn't apply
+#   3. CREATE INDEX i_combined (b)  ← rebuild as the desired narrower index
+#
+# (MySQL accepts step 1 because the column-attached index gets folded
+# down to the surviving column automatically; step 2 then drops what
+# remained, and step 3 puts back the desired shape.)
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i_combined (a, b)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i_combined (b)
+  );
+
+allow_drop:
+  - all
+
+applied: |
+  ALTER TABLE myschema_test.users DROP COLUMN a;
+  ALTER TABLE myschema_test.users DROP INDEX i_combined;
+  CREATE INDEX i_combined ON myschema_test.users (b);

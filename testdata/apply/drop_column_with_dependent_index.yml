@@ -1,0 +1,28 @@
+# Regression test for the column-dependent DROP INDEX bug:
+#   1. column has a single-column index
+#   2. desired drops the column
+#   3. MySQL auto-removes the index when DROP COLUMN runs
+#   4. Without suppression, our explicit `DROP INDEX i` then errors
+#      with `Error 1091 (42000): Can't DROP 'i'; check that column/key
+#      exists`.
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      legacy VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i (legacy)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+allow_drop:
+  - all
+
+# Only the column drop appears — the index drop is suppressed because
+# MySQL drops i automatically alongside the legacy column.
+applied: |
+  ALTER TABLE myschema_test.users DROP COLUMN legacy;
