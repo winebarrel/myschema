@@ -154,7 +154,8 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		default:
 			// Skip statements we don't model (CREATE DATABASE, COMMENT, SET,
 			// GRANT, etc).
-			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "this statement"); err != nil {
+			kind := fmt.Sprintf("unsupported statement (%T)", s)
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, kind); err != nil {
 				return nil, err
 			}
 		}

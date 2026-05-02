@@ -326,13 +326,17 @@ func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *mo
 // distinct entries declare the same RenameFrom value (so they'd both
 // try to consume the same current-side row). Returns (true, oldName)
 // on the first conflict found, otherwise (false, "").
+//
+// The uniqueness key goes through model.Ident so back-tick quoting is
+// applied consistently — a table or database name that itself contains
+// a dot won't collide with an unrelated `db`.`tbl` pair.
 func duplicateTableRenameSource(desired *orderedmap.Map[string, *model.Table]) (bool, string) {
 	seen := map[string]bool{}
 	for _, dt := range desired.CollectValues() {
 		if dt.RenameFrom == nil || *dt.RenameFrom == "" {
 			continue
 		}
-		key := dt.Database + "." + *dt.RenameFrom
+		key := model.Ident(dt.Database, *dt.RenameFrom)
 		if seen[key] {
 			return true, *dt.RenameFrom
 		}
