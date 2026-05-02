@@ -464,7 +464,14 @@ func applyIndexOption(idx *model.Index, opt *ast.IndexOption) {
 func indexParts(keys []*ast.IndexPartSpecification) ([]model.IndexPart, error) {
 	out := make([]model.IndexPart, 0, len(keys))
 	for _, k := range keys {
-		p := model.IndexPart{Length: k.Length, Desc: k.Desc}
+		// pingcap parser uses -1 (UnspecifiedLength) when no prefix length is
+		// given. The catalog reader returns 0 for the same case (NULL SUB_PART),
+		// so normalise to 0 here.
+		length := k.Length
+		if length < 0 {
+			length = 0
+		}
+		p := model.IndexPart{Length: length, Desc: k.Desc}
 		if k.Expr != nil {
 			expr, err := restoreExpr(k.Expr)
 			if err != nil {

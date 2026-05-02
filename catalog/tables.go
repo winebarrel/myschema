@@ -254,10 +254,17 @@ ORDER  BY INDEX_NAME, SEQ_IN_INDEX`
 func (c *Catalog) loadCheckConstraints(ctx context.Context, t *model.Table) error {
 	// information_schema.CHECK_CONSTRAINTS exists in MySQL 8.0.16+; missing on
 	// older servers. Treat a missing table as "no checks" so we keep working.
+	// CHECK_CONSTRAINTS has no TABLE_NAME column, so JOIN TABLE_CONSTRAINTS
+	// (CONSTRAINT_TYPE = 'CHECK') to scope by table.
 	q := `
-SELECT CONSTRAINT_NAME, CHECK_CLAUSE
-FROM   information_schema.CHECK_CONSTRAINTS
-WHERE  CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ?`
+SELECT cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+FROM   information_schema.CHECK_CONSTRAINTS cc
+JOIN   information_schema.TABLE_CONSTRAINTS tc
+       ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+      AND tc.CONSTRAINT_NAME   = cc.CONSTRAINT_NAME
+WHERE  tc.TABLE_SCHEMA    = ?
+  AND  tc.TABLE_NAME      = ?
+  AND  tc.CONSTRAINT_TYPE = 'CHECK'`
 	rows, err := c.db.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "doesn't exist") ||
