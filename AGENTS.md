@@ -13,12 +13,29 @@ current → desired.
 ## Build & test
 
 ```sh
-go build ./cmd/myschema      # → ./myschema
-go test  ./...               # parser + diff smoke tests (no DB required)
+make build           # go build ./cmd/myschema (outputs ./myschema)
+make vet             # go vet ./...
+make test            # go test -p 1 -v ./... (requires a reachable MySQL)
+make test-unit       # parser + diff + model only, no network
+make lint            # golangci-lint run
+make fix             # golangci-lint run --fix
+make test-scenario   # bash test/scenario/run.sh (CLI scenario suite)
+make clean-schema    # drop + recreate the test database
 ```
 
-Catalog and end-to-end tests require a real MySQL server. They are not
-included in v1; see "Roadmap" below.
+Tests against MySQL connect to the DSN in `MYSCHEMA_TEST_DSN`
+(default `root@tcp(127.0.0.1:3306)/`) via `internal/testutil.ConnectDB`. If
+MySQL is unreachable the test fails — start it first:
+
+```sh
+docker compose up -d
+make test
+```
+
+`make test` runs with `-p 1` (sequential packages) because integration tests
+share a single MySQL instance.
+
+`make test-unit` is the safe fallback when no MySQL is running.
 
 ## Project layout
 
