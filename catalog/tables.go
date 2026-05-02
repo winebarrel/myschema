@@ -379,13 +379,17 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 // BinaryExpr, …) is already valid SQL.
 //
 // The empty-string default is special-cased because vitess can't parse
-// `SELECT ` (trailing-space empty expression) and the same `”` ↔ `""`
-// drift that this function wraps for non-empty barewords also bites for
-// empty ones — the parser side stores `”` while the catalog returns
-// the empty string. For string-shaped column types where MySQL accepts
-// `DEFAULT ”` (CHAR / VARCHAR / BINARY / VARBINARY / ENUM / SET) we
-// normalise to `”`. TEXT / BLOB are excluded because MySQL doesn't
-// allow a literal default on those types in the first place.
+// `SELECT` with an empty expression. The same quoted-vs-bare drift that
+// this function wraps for non-empty barewords also bites for empty
+// ones: the parser side stores ” (two single quotes) while the catalog
+// returns the bare empty string. For string-shaped column types where
+// MySQL stores `DEFAULT ”` as the bare empty string in
+// information_schema.COLUMNS.COLUMN_DEFAULT (CHAR / VARCHAR / ENUM /
+// SET) we normalise to ” here. TEXT / BLOB are excluded because MySQL
+// doesn't allow a literal default on those types at all; BINARY /
+// VARBINARY are excluded because their `DEFAULT ”` surfaces through
+// information_schema as a hex literal (`0x`, `0x000000…`) rather than
+// the empty string and needs its own normalisation — see TODO.md.
 func normalizeColumnDefault(typeName, def string) string {
 	if def == "" {
 		if columnTypeAllowsEmptyStringDefault(typeName) {
@@ -422,11 +426,22 @@ func normalizeColumnDefault(typeName, def string) string {
 // (e.g. `varchar(64)`) and modifiers, so we match by leading-token
 // prefix rather than full equality.
 //
-// BINARY / VARBINARY are intentionally excluded: MySQL returns their
-// `”` default as a hex literal (`0x` / `0x000000…`) rather than the
-// empty string, so they hit a different round-trip drift that would
-// need its own catalog handling.
+// Fixed-width BINARY is intentionally excluded: MySQL pads the empty
+// default to N zero bytes and surfaces it through information_schema
+// as a hex literal (`0x` for the degenerate case, `0x000000…` for
+// non-zero N), so it needs its own catalog-side normalisation rather
+// than the empty-string path here. VARBINARY (variable-length) does
+// surface its empty default as the bare empty string, so it round-
+// trips cleanly via this path. See TODO.md for the BINARY follow-up.
 func columnTypeAllowsEmptyStringDefault(typeName string) bool {
+	// VARBINARY before BINARY: HasPrefix would otherwise let "varbinary"
+	// match "binary".
+	if strings.HasPrefix(typeName, "varbinary") {
+		return true
+	}
+	if strings.HasPrefix(typeName, "binary") {
+		return false
+	}
 	switch {
 	case strings.HasPrefix(typeName, "varchar"),
 		strings.HasPrefix(typeName, "char"),

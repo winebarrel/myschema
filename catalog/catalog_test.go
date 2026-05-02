@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -253,10 +254,10 @@ CREATE TABLE defs (
 
 // TestColumnDefaultEmptyStringNormalisation pins the type-aware
 // normalisation of `DEFAULT ”`. Without it, the catalog reads the
-// empty literal back as the bare empty string, parser produces `”`
-// (quoted), and every post-apply plan re-emits MODIFY COLUMN. For
-// string-shaped types we normalise to `”` so catalog and parser
-// agree.
+// empty literal back as the bare empty string, parser produces ”
+// (two single quotes), and every post-apply plan re-emits MODIFY
+// COLUMN. For string-shaped types we normalise to ” on the catalog
+// side so the two compare equal.
 func TestColumnDefaultEmptyStringNormalisation(t *testing.T) {
 	db := testutil.ConnectDB(t)
 	ctx := context.Background()
@@ -265,6 +266,7 @@ CREATE TABLE empty_defs (
     id BIGINT NOT NULL AUTO_INCREMENT,
     s_var VARCHAR(64) NOT NULL DEFAULT '',
     s_char CHAR(8) NOT NULL DEFAULT '',
+    s_vbin VARBINARY(8) NOT NULL DEFAULT '',
     s_enum ENUM('a','b','') NOT NULL DEFAULT '',
     s_set SET('x','y') NOT NULL DEFAULT '',
     PRIMARY KEY (id)
@@ -276,12 +278,48 @@ CREATE TABLE empty_defs (
 	defs, ok := tables.GetOk("myschema_test.empty_defs")
 	require.True(t, ok)
 
-	for _, c := range []string{"s_var", "s_char", "s_enum", "s_set"} {
+	for _, c := range []string{"s_var", "s_char", "s_vbin", "s_enum", "s_set"} {
 		col, ok := defs.Columns.GetOk(c)
 		require.True(t, ok, "%s should be loaded", c)
 		require.NotNil(t, col.Default, "%s should have a default", c)
 		assert.Equal(t, "''", *col.Default, "%s empty-string default should be quoted", c)
 	}
+}
+
+// TestColumnDefaultBinaryEmptyStringIsHex pins the documented
+// limitation: a fixed-width BINARY column with `DEFAULT ”` does NOT
+// round-trip cleanly because MySQL surfaces the empty default as a
+// hex literal (`0x` for the degenerate case, `0x000000…` for non-zero
+// N), and `columnTypeAllowsEmptyStringDefault` intentionally excludes
+// it from the empty-string normalisation. The test exists to (a)
+// document the current behaviour and (b) catch a future refactor that
+// accidentally normalises the hex literal to ” before the proper
+// BINARY-side fix lands. See TODO.md. (VARBINARY does round-trip
+// cleanly — its empty default surfaces as the bare empty string, and
+// is asserted in TestColumnDefaultEmptyStringNormalisation.)
+func TestColumnDefaultBinaryEmptyStringIsHex(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE bin_defs (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    s_bin BINARY(8) NOT NULL DEFAULT '',
+    PRIMARY KEY (id)
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	defs, ok := tables.GetOk("myschema_test.bin_defs")
+	require.True(t, ok)
+
+	col, ok := defs.Columns.GetOk("s_bin")
+	require.True(t, ok)
+	require.NotNil(t, col.Default)
+	assert.True(t, strings.HasPrefix(*col.Default, "0x"),
+		"BINARY empty default should remain a hex literal, got %q", *col.Default)
+	assert.NotEqual(t, "''", *col.Default,
+		"BINARY must NOT be normalised to '' (round-trip needs separate handling)")
 }
 
 // TestViewsRoundTrip is the catalog-side companion to the view fixtures:
