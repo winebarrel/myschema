@@ -33,5 +33,5 @@ go.work.sum
 
 # Project-local
 /myschema
-*.sql
+/*.sql
 .DS_Store
