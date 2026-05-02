@@ -1,6 +1,9 @@
 package diff
 
 import (
+	"fmt"
+	"sort"
+
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/myschema/parser"
 	"github.com/winebarrel/orderedmap"
@@ -21,14 +24,30 @@ type ViewDiffResult struct {
 // statements. database is the default DB used to canonicalise SELECT bodies
 // for comparison (so an unqualified `FROM users` in desired matches a
 // catalog-side `FROM \`mydb\`.\`users\“).
+//
+// Order discipline:
+//   - Creates / replaces are emitted in topological order of view-on-view
+//     dependency: a view that selects from another view in the same set is
+//     emitted *after* its dependencies.
+//   - Drops are emitted in **reverse** topological order of the *current*
+//     state, so a view that depends on another isn't left dangling.
 func DiffViews(current, desired *orderedmap.Map[string, *model.View], database string, dc DropChecker) (*ViewDiffResult, error) {
 	dc = NormalizeDropChecker(dc)
 	res := &ViewDiffResult{}
 	viewAllowed := dc.IsDropAllowed("view")
 
-	// Creates / replaces.
-	for name, dv := range desired.All() {
-		cv, ok := current.GetOk(name)
+	desiredOrder, err := topoSortViews(desired, database)
+	if err != nil {
+		return nil, fmt.Errorf("topo-sort desired views: %w", err)
+	}
+	currentOrder, err := topoSortViews(current, database)
+	if err != nil {
+		return nil, fmt.Errorf("topo-sort current views: %w", err)
+	}
+
+	// Creates / replaces, in dependency order.
+	for _, dv := range desiredOrder {
+		cv, ok := current.GetOk(dv.FQVN())
 		if ok {
 			eq, err := viewDefEqual(cv.Definition, dv.Definition, database)
 			if err != nil {
@@ -41,9 +60,11 @@ func DiffViews(current, desired *orderedmap.Map[string, *model.View], database s
 		res.CreateStmts = append(res.CreateStmts, dv.CreateSQL())
 	}
 
-	// Drops.
-	for name, cv := range current.All() {
-		if _, ok := desired.GetOk(name); ok {
+	// Drops, in reverse dependency order so a parent view is gone before the
+	// view it depended on.
+	for i := len(currentOrder) - 1; i >= 0; i-- {
+		cv := currentOrder[i]
+		if _, ok := desired.GetOk(cv.FQVN()); ok {
 			continue
 		}
 		drop := cv.DropSQL()
@@ -55,6 +76,75 @@ func DiffViews(current, desired *orderedmap.Map[string, *model.View], database s
 	}
 
 	return res, nil
+}
+
+// topoSortViews returns the views in `views` ordered so that each view comes
+// after every other view in the same set that it references. Ties are broken
+// by alphabetical FQVN so the output is deterministic. References to
+// non-views (or to views outside `views`) are ignored. Returns an error on
+// circular dependency.
+func topoSortViews(views *orderedmap.Map[string, *model.View], database string) ([]*model.View, error) {
+	// dep[k] = views that k depends on (subset of views' keys).
+	// rev[k] = views that depend on k.
+	// indeg[k] = unmet-dependency count.
+	keys := make([]string, 0, views.Len())
+	for k := range views.All() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	dep := make(map[string][]string, len(keys))
+	rev := make(map[string][]string, len(keys))
+	indeg := make(map[string]int, len(keys))
+
+	for _, k := range keys {
+		v := views.Get(k)
+		refs, err := parser.ViewReferences(v.Definition, database)
+		if err != nil {
+			return nil, fmt.Errorf("view %s: %w", k, err)
+		}
+		for _, r := range refs {
+			if r == k {
+				continue
+			}
+			if _, ok := views.GetOk(r); !ok {
+				continue
+			}
+			dep[k] = append(dep[k], r)
+			rev[r] = append(rev[r], k)
+			indeg[k]++
+		}
+	}
+
+	// Kahn's algorithm with sorted insertion for deterministic ties.
+	var queue []string
+	for _, k := range keys {
+		if indeg[k] == 0 {
+			queue = append(queue, k)
+		}
+	}
+
+	out := make([]*model.View, 0, len(keys))
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		out = append(out, views.Get(n))
+
+		var next []string
+		for _, m := range rev[n] {
+			indeg[m]--
+			if indeg[m] == 0 {
+				next = append(next, m)
+			}
+		}
+		sort.Strings(next)
+		queue = append(queue, next...)
+	}
+
+	if len(out) != len(keys) {
+		return nil, fmt.Errorf("circular view dependency detected among %d views", len(keys))
+	}
+	return out, nil
 }
 
 // viewDefEqual normalises both definitions through pingcap parser+restore

@@ -145,3 +145,53 @@ func (unwrapParens) Leave(n ast.Node) (ast.Node, bool) {
 	}
 	return n, true
 }
+
+// ViewReferences returns every table-or-view reference found in def, as
+// `model.Ident(db, name)` strings (defaultDB filling in unqualified ones).
+// The diff engine uses these to topo-sort views — any reference whose key
+// matches a view in the desired set is treated as a dependency.
+func ViewReferences(def, defaultDB string) ([]string, error) {
+	p := tidbparser.New()
+	stmts, _, err := p.Parse(def, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("view references: parse %q: %w", def, err)
+	}
+	if len(stmts) != 1 {
+		return nil, fmt.Errorf("view references: expected 1 statement, got %d", len(stmts))
+	}
+	c := &tableNameCollector{defaultDB: defaultDB}
+	stmts[0].Accept(c)
+	return c.refs, nil
+}
+
+// tableNameCollector visits every *ast.TableName in a SELECT and records
+// it as a `model.Ident(database, name)` key — same shape as View.FQVN().
+// Implements ast.Visitor.
+type tableNameCollector struct {
+	defaultDB string
+	refs      []string
+	seen      map[string]struct{}
+}
+
+func (c *tableNameCollector) Enter(n ast.Node) (ast.Node, bool) {
+	tn, ok := n.(*ast.TableName)
+	if !ok {
+		return n, false
+	}
+	db := tn.Schema.O
+	if db == "" {
+		db = c.defaultDB
+	}
+	key := model.Ident(db, tn.Name.O)
+	if c.seen == nil {
+		c.seen = map[string]struct{}{}
+	}
+	if _, dup := c.seen[key]; dup {
+		return n, false
+	}
+	c.seen[key] = struct{}{}
+	c.refs = append(c.refs, key)
+	return n, false
+}
+
+func (c *tableNameCollector) Leave(n ast.Node) (ast.Node, bool) { return n, true }
