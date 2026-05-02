@@ -1,0 +1,27 @@
+# Verifies `--allow-drop=all` (the wildcard) permits drops of multiple
+# kinds in one go. We exercise table, constraint, and view together
+# so the wildcard's "no per-kind nag" semantics is fully observed.
+init: |
+  CREATE TABLE legacy_table (id INT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE keep (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk CHECK (price > 0)
+  );
+  CREATE VIEW legacy_view AS SELECT id FROM keep;
+
+desired: |
+  CREATE TABLE keep (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+allow_drop:
+  - all
+
+applied: |
+  DROP VIEW myschema_test.legacy_view;
+  ALTER TABLE myschema_test.keep DROP CHECK chk;
+  DROP TABLE myschema_test.legacy_table;

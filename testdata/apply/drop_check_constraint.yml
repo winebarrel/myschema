@@ -1,0 +1,20 @@
+init: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk CHECK (price > 0)
+  );
+
+desired: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+allow_drop:
+  - constraint
+
+applied: |
+  ALTER TABLE myschema_test.products DROP CHECK chk;

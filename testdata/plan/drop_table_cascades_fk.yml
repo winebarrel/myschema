@@ -1,0 +1,27 @@
+# Pins the current plan ordering when both ends of an FK relationship
+# are dropped in one go: the FK drop comes first (FKDropStmts bucket),
+# then the table drops in TABLE_NAME order (DropStmts bucket).
+#
+# Strict string equality — if a future change reorders the drops (e.g.
+# topo-sorted child-before-parent), this fixture fails on purpose so
+# the change is conscious. The bucket separation itself is what makes
+# the plan correct in the parent-alphabetically-first case; covered
+# by Go's TestDiffDropTableWithFKOrdering.
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+desired: ""
+
+allow_drop:
+  - table
+
+plan: |
+  ALTER TABLE myschema_test.posts DROP FOREIGN KEY fk;
+  DROP TABLE myschema_test.posts;
+  DROP TABLE myschema_test.users;
