@@ -1,8 +1,12 @@
-export MYSQL_HOST  := 127.0.0.1
-export MYSQL_PORT  := 3306
-export MYSQL_USER  := root
-export MYSQL_PWD   :=
-export MYSQL_DB    := myschema_test
+# `?=` so the matrix CI (and any caller) can override these via the
+# environment. `:=` would silently win over the env value because Make
+# assignments override env unless `-e` is passed.
+MYSQL_HOST ?= 127.0.0.1
+MYSQL_PORT ?= 3306
+MYSQL_USER ?= root
+MYSQL_PWD  ?=
+MYSQL_DB   ?= myschema_test
+export MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PWD MYSQL_DB
 
 # Default DSN used by tests / scenario scripts. The trailing slash makes it
 # easy for tests to append the test DB name; the production CLI requires the
@@ -27,6 +31,19 @@ vet:
 .PHONY: test
 test:
 	go test -p 1 -v ./... $(TEST_OPTS)
+
+# test-mysql9 runs the full integration suite against the MySQL 9.x
+# compose service on port 3307. Both MYSQL_PORT and MYSCHEMA_TEST_DSN
+# are overridden explicitly so a caller with MYSCHEMA_TEST_DSN already
+# set in the environment doesn't accidentally hit the 8.0 instance.
+.PHONY: test-mysql9
+test-mysql9:
+	$(MAKE) test MYSQL_PORT=3307 \
+	  MYSCHEMA_TEST_DSN='$(MYSQL_USER)@tcp($(MYSQL_HOST):3307)/'
+
+.PHONY: clean-schema-mysql9
+clean-schema-mysql9:
+	$(MAKE) clean-schema MYSQL_PORT=3307
 
 .PHONY: test-unit
 test-unit:

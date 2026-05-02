@@ -53,6 +53,20 @@ share a single MySQL instance.
 
 `make test-unit` is the safe fallback when no MySQL is running.
 
+For forward-compat testing against MySQL 9.x, `compose.yaml` defines a
+second `mysql9` service on port 3307. `docker compose up -d` brings
+both services up; `make test-mysql9` then runs the suite against
+3307 (overriding both `MYSQL_PORT` and `MYSCHEMA_TEST_DSN` explicitly
+so a pre-set DSN in the caller's environment doesn't leak in):
+
+```sh
+docker compose up -d
+make test-mysql9
+```
+
+`make clean-schema-mysql9` resets the `myschema_test` DB on the 9.x
+instance the same way `clean-schema` does for 8.0.
+
 ## Project layout
 
 | Path                  | Role |

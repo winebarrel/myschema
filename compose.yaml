@@ -1,5 +1,5 @@
 services:
-  mysql:
+  mysql8:
     image: mysql:8.0
     ports:
       - "3306:3306"
@@ -8,6 +8,26 @@ services:
       MYSQL_DATABASE: myschema_test
     command:
       - --default-authentication-plugin=caching_sha2_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # MySQL 9.x instance for forward-compat testing. Listens on 3307 to
+  # coexist with the 8.0 instance above. `docker compose up -d` brings
+  # both services up. caching_sha2_password is the only auth plugin in
+  # 9.x — no override needed.
+  mysql9:
+    image: mysql:9.4
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: myschema_test
+    command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
     healthcheck:
