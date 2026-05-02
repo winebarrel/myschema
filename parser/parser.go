@@ -221,35 +221,25 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 }
 
 // columnTypeString returns just the column type the catalog also produces
-// (e.g. "bigint", "varchar(255)", "decimal(10,2)", "geometry"). We can't
-// use sqlparser.String(ColumnType) directly because vitess pretty-prints
-// Options (NOT NULL, AUTO_INCREMENT, …) inline with the type — so we
-// build the canonical form by hand from the typed fields.
+// (e.g. "bigint", "varchar(255)", "decimal(10,2)", "geometry"). vitess's
+// Format(*ColumnType) inlines both Options (NOT NULL, AUTO_INCREMENT …)
+// AND the column-level CHARACTER SET / COLLATE alongside the type, neither
+// of which the catalog returns inside COLUMN_TYPE. We blank both fields
+// for the duration of the format call and let vitess handle the rest —
+// including ENUM/SET value lists, (length), (length,scale), UNSIGNED and
+// ZEROFILL. ENUM/SET come out with `'a', 'b'` (extra space); we squeeze
+// that down to match information_schema's `'a','b'`.
 func columnTypeString(t *sqlparser.ColumnType) string {
-	var b strings.Builder
-	b.WriteString(strings.ToLower(t.Type))
-	switch {
-	case len(t.EnumValues) > 0: // ENUM/SET
-		b.WriteString("(")
-		for i, v := range t.EnumValues {
-			if i > 0 {
-				b.WriteString(",")
-			}
-			b.WriteString(v) // already wrapped in single quotes
-		}
-		b.WriteString(")")
-	case t.Length != nil && t.Scale != nil:
-		fmt.Fprintf(&b, "(%d,%d)", *t.Length, *t.Scale)
-	case t.Length != nil:
-		fmt.Fprintf(&b, "(%d)", *t.Length)
+	savedOpts, savedCharset := t.Options, t.Charset
+	t.Options = nil
+	t.Charset = sqlparser.ColumnCharset{}
+	defer func() { t.Options, t.Charset = savedOpts, savedCharset }()
+
+	s := strings.ToLower(sqlparser.String(t))
+	if strings.HasPrefix(s, "enum(") || strings.HasPrefix(s, "set(") {
+		s = strings.ReplaceAll(s, ", ", ",")
 	}
-	if t.Unsigned {
-		b.WriteString(" unsigned")
-	}
-	if t.Zerofill {
-		b.WriteString(" zerofill")
-	}
-	return b.String()
+	return s
 }
 
 func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
