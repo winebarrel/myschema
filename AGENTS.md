@@ -107,19 +107,67 @@ When extending: prefer adding YAML-driven tests under a `testdata/` tree
 (matching pistachio's pattern) over Go-table tests, once a real MySQL
 fixture loader is added.
 
-## Conventions
+## Development workflow
 
-- Identifiers go through `model.Ident`, which back-tick-quotes anything that
-  isn't a safe `[a-zA-Z_][a-zA-Z0-9_$]*` token or that collides with a
-  reserved word.
-- Type names from both the parser and the catalog are lowercased and stripped
-  of integer display widths (via `types.TiDBStrictIntegerDisplayWidth = true`)
-  so they compare equal between sides.
-- Foreign keys are kept in their own `Table.ForeignKeys` map (not in
-  `Constraints`). The diff orders FK drops first, then table/column changes,
-  then FK adds.
+Inherited from pistachio. Apply the same discipline here:
+
+1. Create a feature branch before starting implementation.
+2. Write a test that asserts the expected behaviour first, confirm it fails,
+   then implement the fix / feature.
+3. Prefer simplicity — avoid clever or layered implementations when a
+   straightforward approach works. Match the scope of the change to what
+   was actually requested; resist scope creep into adjacent cleanup.
+4. After implementation:
+   - Verify test cases are comprehensive (missing scenarios, edge cases).
+   - Verify coverage has not decreased and cover any reachable paths that
+     can be tested naturally. Do not write unnatural tests for unreachable
+     defensive code.
+   - Consider whether similar issues exist elsewhere in the codebase.
+   - Run `make lint`.
+   - With docker compose MySQL up, run `make test` and `make test-scenario`
+     to confirm no regressions in the integration suites.
+5. Do not run tests in parallel (`make test` uses `-p 1`) — the integration
+   tests share a single MySQL instance.
+6. When something looks wrong in catalog output, dump the raw rows from
+   `information_schema` first; do not assume the parser side is wrong.
+
+## Code conventions
+
+Inherited from pistachio. The MySQL-specific bits sit at the bottom.
+
+- Package-level tests use **external** test packages (e.g. `package
+  catalog_test`, `package model_test`). Use same-package tests only when
+  access to unexported identifiers is required (e.g. `package diff` to
+  hit `normalizeDef`).
+- Root-level integration tests use `package myschema_test` once they exist.
+- Test fixtures should land as YAML files in `testdata/` once the harness
+  ships (TODO.md). Required fields will vary per suite (`apply` vs `plan`
+  vs `dump`); the authoritative list will be the `*TestCase` struct at the
+  top of each `_test.go` — when fixture YAML lacks a field you want to
+  assert, prefer extending the `*TestCase` struct with one optional field
+  (defaulting to nil/zero so existing fixtures keep passing) over writing
+  the test in Go.
+- Until the YAML harness lands, prefer Go table tests over scenario
+  scripts for unit-level assertions. CLI scenario tests under
+  `test/scenario/` are for end-to-end flows (plan → apply → drift check)
+  that hit a real MySQL.
+- `orderedmap.Map` is used throughout for deterministic iteration order of
+  schema objects; reach for it any time iteration order matters for output.
+- Identifiers go through `model.Ident`, which back-tick-quotes anything
+  that isn't a safe `[a-zA-Z_][a-zA-Z0-9_$]*` token or that collides with
+  a MySQL reserved word.
+- Type names from both the parser and the catalog are lowercased and
+  stripped of integer display widths (via
+  `types.TiDBStrictIntegerDisplayWidth = true`) so they compare equal
+  between sides.
+- Foreign keys live in `Table.ForeignKeys`, not in `Constraints`. The diff
+  orders FK drops first, then table / column / index changes, then FK
+  adds — never combine these phases.
+- Index parts: pingcap parser uses `Length = -1` for "no prefix length";
+  the catalog returns `0`. Normalise to `0` at parse time. Index types:
+  treat `""` and `"BTREE"` as equivalent (BTREE is the InnoDB default).
 - The CHECK-constraint diff uses a deliberately loose normaliser
-  (`strings.ToLower` + strip whitespace + strip backticks); replace with a
+  (`strings.ToLower` + strip whitespace + strip backticks). Replace with a
   proper parser/restore pass when adding richer CHECK support.
 
 ## Smoke-test the binary
