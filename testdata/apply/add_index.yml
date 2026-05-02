@@ -1,0 +1,17 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id)
+  );
+  CREATE INDEX idx_users_email ON users (email);
+
+applied: |
+  CREATE INDEX idx_users_email ON myschema_test.users (email);

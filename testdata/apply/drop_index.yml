@@ -1,0 +1,20 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_users_email (email)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+allow_drop:
+  - index
+
+applied: |
+  ALTER TABLE myschema_test.users DROP INDEX idx_users_email;

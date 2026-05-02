@@ -1,0 +1,18 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      legacy VARCHAR(64),
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+# allow_drop omitted → DROP COLUMN suppressed and surfaced via
+# DisallowedDrops, not Plan.
+plan: ""
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.users DROP COLUMN legacy;

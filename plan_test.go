@@ -12,13 +12,14 @@ import (
 
 // planTestCase is the authoritative shape of a testdata/plan/*.yml fixture.
 type planTestCase struct {
-	Init      string   `yaml:"init"`            // SQL to seed the test DB
-	Desired   string   `yaml:"desired"`         // SQL passed to plan
-	Plan      string   `yaml:"plan,omitempty"`  // expected plan SQL ("" → expect no diff)
-	Error     string   `yaml:"error,omitempty"` // substring expected in plan error (mutually exclusive with Plan)
-	AllowDrop []string `yaml:"allow_drop,omitempty"`
-	Include   []string `yaml:"include,omitempty"`
-	Exclude   []string `yaml:"exclude,omitempty"`
+	Init            string   `yaml:"init"`                       // SQL to seed the test DB
+	Desired         string   `yaml:"desired"`                    // SQL passed to plan
+	Plan            string   `yaml:"plan,omitempty"`             // expected plan SQL ("" → expect no diff)
+	DisallowedDrops string   `yaml:"disallowed_drops,omitempty"` // expected `-- skipped:` comments (one per line)
+	Error           string   `yaml:"error,omitempty"`            // substring expected in plan error (mutually exclusive with Plan)
+	AllowDrop       []string `yaml:"allow_drop,omitempty"`
+	Include         []string `yaml:"include,omitempty"`
+	Exclude         []string `yaml:"exclude,omitempty"`
 }
 
 func TestPlanYAML(t *testing.T) {
@@ -50,6 +51,11 @@ func TestPlanYAML(t *testing.T) {
 			strings.TrimSpace(tc.Plan),
 			strings.TrimSpace(r.SQL),
 			"plan output mismatch",
+		)
+		assert.Equal(t,
+			strings.TrimSpace(tc.DisallowedDrops),
+			strings.TrimSpace(r.DisallowedDrops),
+			"disallowed-drops mismatch",
 		)
 	})
 }

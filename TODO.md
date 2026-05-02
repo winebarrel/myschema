@@ -16,8 +16,9 @@ by area; ordering inside a group is not significant.
       scope unless TiDB compatibility is desired)
 - [ ] Partitioning: `PARTITION BY` clause, sub-partitions, partition
       operations (`ADD/DROP/TRUNCATE/REORGANIZE PARTITION`)
-- [ ] Generated column expression diff (currently the expression is captured
-      but `equalGeneratedExpr` is a literal string compare)
+- [x] Generated column expression diff — `Generated` field now goes
+      through `equalExprPtr` (silent-diff-fixes PR), and `Stored` was
+      fixed (was inverted: VIRTUAL columns were marked Stored=true).
 
 > Triggers, stored procedures / functions, and events are intentionally
 > out of scope: they are imperative, version-tagged code rather than

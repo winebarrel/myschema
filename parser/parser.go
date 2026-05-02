@@ -216,7 +216,7 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 	if opts.As != nil {
 		expr := sqlparser.String(opts.As)
 		c.Generated = &expr
-		c.Stored = opts.Storage == sqlparser.VirtualStorage // see note below
+		c.Stored = opts.Storage == sqlparser.StoredStorage
 	}
 
 	return c, nil

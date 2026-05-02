@@ -1,0 +1,30 @@
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      title VARCHAR(128) NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_posts_user_id (user_id),
+      CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+dump: |
+  -- myschema_test.posts
+  CREATE TABLE myschema_test.posts (
+      id bigint NOT NULL,
+      user_id bigint NOT NULL,
+      title varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      PRIMARY KEY (id)
+  ) ENGINE=InnoDB COLLATE=utf8mb4_0900_ai_ci;
+  CREATE INDEX idx_posts_user_id ON myschema_test.posts (user_id) USING BTREE;
+  ALTER TABLE myschema_test.posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES myschema_test.users(id) ON DELETE CASCADE;
+
+  -- myschema_test.users
+  CREATE TABLE myschema_test.users (
+      id bigint NOT NULL,
+      PRIMARY KEY (id)
+  ) ENGINE=InnoDB COLLATE=utf8mb4_0900_ai_ci;

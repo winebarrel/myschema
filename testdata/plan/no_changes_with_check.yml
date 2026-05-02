@@ -1,0 +1,19 @@
+# Verifies the equalCheckDef path: same CHECK with different formatting on
+# both sides should produce no diff.
+init: |
+  CREATE TABLE products (
+      id BIGINT NOT NULL,
+      price DECIMAL(10,2) NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price > 0)
+  );
+
+desired: |
+  CREATE TABLE products (
+      id BIGINT NOT NULL,
+      price DECIMAL(10,2) NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (`price` > 0)
+  );
+
+plan: ""
