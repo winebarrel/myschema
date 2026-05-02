@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
@@ -203,8 +204,9 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 		c.AutoIncrement = true
 	}
 	if opts.Comment != nil {
-		raw := sqlparser.String(opts.Comment)
-		raw = strings.TrimSuffix(strings.TrimPrefix(raw, "'"), "'")
+		// Literal.Val is the unquoted, escape-resolved string value;
+		// sqlparser.String would re-add the wrapping quotes.
+		raw := opts.Comment.Val
 		c.Comment = &raw
 	}
 	if opts.Collate != "" {
@@ -459,14 +461,15 @@ func applyTableOption(t *model.Table, opt *sqlparser.TableOption) {
 		t.Collation = &v
 	case "COMMENT":
 		if opt.Value != nil {
-			v := unquote(opt.Value.Val)
+			// Literal.Val is the unquoted, escape-resolved value.
+			v := opt.Value.Val
 			t.Comment = &v
 		}
 	case "AUTO_INCREMENT":
 		if opt.Value != nil {
-			var n uint64
-			fmt.Sscanf(opt.Value.Val, "%d", &n) //nolint:errcheck
-			t.AutoIncrement = &n
+			if n, err := strconv.ParseUint(opt.Value.Val, 10, 64); err == nil {
+				t.AutoIncrement = &n
+			}
 		}
 	}
 }
@@ -497,13 +500,6 @@ func normalizeDefaultExpr(s string) string {
 		}
 	}
 	return t
-}
-
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
-		return s[1 : len(s)-1]
-	}
-	return s
 }
 
 // applyAlterTable supports two forms in desired-side SQL:
