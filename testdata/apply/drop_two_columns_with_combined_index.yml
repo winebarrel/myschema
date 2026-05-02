@@ -1,0 +1,24 @@
+# Multi-column variant of the dependent-index suppression: when *every*
+# column an index covers is dropped, MySQL still removes the index
+# automatically, so we should still skip the explicit DROP INDEX.
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i_combined (a, b)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+allow_drop:
+  - all
+
+applied: |
+  ALTER TABLE myschema_test.users DROP COLUMN a;
+  ALTER TABLE myschema_test.users DROP COLUMN b;

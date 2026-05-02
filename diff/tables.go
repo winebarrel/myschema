@@ -97,7 +97,12 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	res.Stmts = append(res.Stmts, conStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, conDisallowed...)
 
-	idxStmts, idxDisallowed := diffIndexes(fqtn, current.Indexes, desired.Indexes, dc)
+	// Compute the set of columns that are going away. diffIndexes uses this
+	// to suppress an explicit `DROP INDEX` on indexes whose every part is a
+	// dropped column — MySQL drops those indexes automatically alongside
+	// the column, and the redundant `DROP INDEX` would error 1091.
+	dropped := droppedColumns(current.Columns, desired.Columns)
+	idxStmts, idxDisallowed := diffIndexes(fqtn, current.Indexes, desired.Indexes, dc, dropped)
 	res.Stmts = append(res.Stmts, idxStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, idxDisallowed...)
 
@@ -107,6 +112,19 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, fkDisallowed...)
 
 	return res
+}
+
+// droppedColumns returns the set of column names present in current but
+// absent from desired — i.e. columns the diff is about to remove from
+// the table.
+func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) map[string]bool {
+	out := map[string]bool{}
+	for name := range current.Keys() {
+		if _, ok := desired.GetOk(name); !ok {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func diffColumns(fqtn string, current, desired *orderedmap.Map[string, *model.Column], dc DropChecker) (stmts, disallowed []string) {
@@ -268,7 +286,7 @@ func looseEqual(a, b string) bool {
 	return norm(a) == norm(b)
 }
 
-func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.Index], dc DropChecker) (stmts, disallowed []string) {
+func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.Index], dc DropChecker, droppedCols map[string]bool) (stmts, disallowed []string) {
 	idxAllowed := dc.IsDropAllowed("index")
 
 	for name, ci := range current.All() {
@@ -277,6 +295,12 @@ func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.In
 		}
 		di, ok := desired.GetOk(name)
 		if ok && indexEqual(ci, di) {
+			continue
+		}
+		// Pure removal whose every part is a column also being dropped:
+		// MySQL automatically removes the index when the column drops, so
+		// emitting an explicit DROP INDEX would error 1091. Skip silently.
+		if !ok && allPartsDropped(ci, droppedCols) {
 			continue
 		}
 		drop := "ALTER TABLE " + fqtn + " DROP INDEX " + model.Ident(name) + ";"
@@ -297,6 +321,22 @@ func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.In
 		stmts = append(stmts, di.SQL())
 	}
 	return
+}
+
+// allPartsDropped reports whether every column-typed part of idx is
+// being dropped from the same table. Indexes with expression parts (no
+// column name) don't count — we don't try to track expression-column
+// dependencies here.
+func allPartsDropped(idx *model.Index, droppedCols map[string]bool) bool {
+	if len(idx.Parts) == 0 {
+		return false
+	}
+	for _, p := range idx.Parts {
+		if p.Column == "" || !droppedCols[p.Column] {
+			return false
+		}
+	}
+	return true
 }
 
 func indexEqual(a, b *model.Index) bool {
