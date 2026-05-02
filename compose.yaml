@@ -16,14 +16,12 @@ services:
       timeout: 5s
       retries: 30
 
-  # Optional MySQL 9.x instance for forward-compat testing. Started only
-  # when explicitly selected: `docker compose up -d mysql9` (or via the
-  # `test-mysql9` Makefile target). Listens on 3307 to coexist with the
-  # 8.0 instance above. caching_sha2_password is the only auth plugin in
+  # MySQL 9.x instance for forward-compat testing. Listens on 3307 to
+  # coexist with the 8.0 instance above. `docker compose up -d` brings
+  # both services up. caching_sha2_password is the only auth plugin in
   # 9.x — no override needed.
   mysql9:
     image: mysql:9.4
-    profiles: ["mysql9"]
     ports:
       - "3307:3306"
     environment:

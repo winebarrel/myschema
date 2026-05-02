@@ -32,10 +32,8 @@ vet:
 test:
 	go test -p 1 -v ./... $(TEST_OPTS)
 
-# test-mysql9 runs the full integration suite against a MySQL 9.x
-# container on port 3307. Bring it up with `docker compose --profile
-# mysql9 up -d mysql9` first (the 9.x service uses a profile so it
-# doesn't start by default). The Go-side DSN is overridden via env;
+# test-mysql9 runs the full integration suite against the MySQL 9.x
+# compose service on port 3307. The Go-side DSN is overridden via env;
 # everything else (catalog reader, parser, diff) is reused as-is.
 .PHONY: test-mysql9
 test-mysql9:
