@@ -137,9 +137,11 @@ rather than declarative schema. Manage them out of band.)
   collapses both to `NONE`. Users who explicitly write `WITH CASCADED`
   see it dropped on round-trip. `WITH LOCAL CHECK OPTION` is preserved.
 - **FK-implicit covering indexes are not recognised as implicit.** When
-  `ADD FOREIGN KEY` runs on columns with no covering index, MySQL
-  silently creates one (named after the FK). `information_schema.
-  STATISTICS` doesn't flag it as implicit, so the catalog reads it as
+  a foreign key is added on columns with no covering index — whether
+  inline in `CREATE TABLE` or via `ALTER TABLE … ADD CONSTRAINT … FOREIGN
+  KEY` — MySQL silently creates one (named after the FK). The
+  `information_schema.STATISTICS` view doesn't flag it as implicit, so
+  the catalog reads it as
   an ordinary index — desired SQL that declares the FK without also
   declaring the index then shows false drift, and apply fails with
   `Error 1553` once `--allow-drop=index` lets the DROP through (the

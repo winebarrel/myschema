@@ -1,10 +1,12 @@
 # Spec test: pins the documented FK-implicit-index limitation
 # (see AGENTS.md "Not yet implemented" section).
 #
-# When ADD FOREIGN KEY runs on un-indexed columns, MySQL silently
-# creates a covering index named after the FK constraint. The catalog
-# reads it back as an ordinary index because information_schema.
-# STATISTICS doesn't flag it as implicit. With desired SQL declaring
+# When a foreign key is added on un-indexed columns — inline in
+# CREATE TABLE (as below) or via ALTER TABLE … ADD CONSTRAINT …
+# FOREIGN KEY — MySQL silently creates a covering index named after
+# the FK constraint. The catalog reads it back as an ordinary index
+# because information_schema.STATISTICS doesn't flag it as implicit.
+# With desired SQL declaring
 # the FK but not the index, plan reports false drift: a suppressed
 # DROP INDEX. (Apply with --allow-drop=index would fail — MySQL
 # guards the index with Error 1553 while the FK still needs it.)
