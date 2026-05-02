@@ -110,14 +110,39 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 			continue
 		}
 		if strings.HasPrefix(trim, "/*") {
-			if !strings.Contains(trim[2:], "*/") {
+			rest, closed, more := stripLeadingBlockComment(trim)
+			if !closed {
 				inBlock = true
+				continue
+			}
+			if more {
+				// SQL continues after `*/` on this line — that's the
+				// first real SQL line, stop scanning the leading block.
+				_ = rest
+				break
 			}
 			continue
 		}
 		break
 	}
 	return oldName, nil
+}
+
+// stripLeadingBlockComment peels off a leading `/* … */` block from
+// trim and reports the result. closed is true iff `*/` was found on
+// the same line; more is true iff there is non-whitespace content
+// after the `*/` (i.e. the line continues with non-comment SQL).
+// rest is the trimmed remainder when more is true.
+func stripLeadingBlockComment(trim string) (rest string, closed bool, more bool) {
+	if !strings.HasPrefix(trim, "/*") {
+		return trim, true, trim != ""
+	}
+	idx := strings.Index(trim[2:], "*/")
+	if idx < 0 {
+		return "", false, false
+	}
+	tail := strings.TrimSpace(trim[2+idx+2:])
+	return tail, true, tail != ""
 }
 
 // InlineRenames separates inline rename directives by the kind of object
@@ -201,10 +226,19 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 			continue
 		}
 		if strings.HasPrefix(trim, "/*") {
-			if !strings.Contains(trim[2:], "*/") {
+			rest, closed, more := stripLeadingBlockComment(trim)
+			if !closed {
 				inBlock = true
+				continue
 			}
-			continue
+			if !more {
+				continue
+			}
+			// `/* note */ <sql>` — the SQL after `*/` is the real
+			// target line. Re-process the remainder as if it had been
+			// the line all along: opener for the first one (sawSQL
+			// flips), classifier for subsequent ones.
+			trim = rest
 		}
 		if !sawSQL {
 			sawSQL = true

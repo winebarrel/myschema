@@ -8,9 +8,15 @@ import (
 )
 
 // TableDiffResult separates FK operations from other statements so callers
-// can order them: FK drops first, then table/column/constraint/index changes,
-// then FK adds last.
+// can order them: table renames first, then FK drops, then table /
+// column / constraint / index changes, then FK adds last.
 type TableDiffResult struct {
+	// RenameStmts holds `ALTER TABLE … RENAME TO …` statements, which
+	// must execute *before* any FK drops or other ALTER TABLE statements
+	// targeting the new name. If a table both renames and has an FK
+	// changed, the FK-drop on the new name would fire against a table
+	// that doesn't exist yet under that name without this ordering.
+	RenameStmts         []string
 	FKDropStmts         []string
 	Stmts               []string
 	FKAddStmts          []string
@@ -37,12 +43,14 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 	// other table-level diffing, and the matching current entry is
 	// re-keyed so the rest of the pipeline sees the renamed table under
 	// its new FQTN. New / modified / dropped detection below then works
-	// without false negatives.
+	// without false negatives. Renames go in their own bucket so the
+	// caller can sequence them ahead of FK drops on the (now-renamed)
+	// target table.
 	renameStmts, err := applyTableRenames(current, desired)
 	if err != nil {
 		return nil, err
 	}
-	res.Stmts = append(res.Stmts, renameStmts...)
+	res.RenameStmts = append(res.RenameStmts, renameStmts...)
 
 	// New tables: emit CREATE TABLE, then per-table secondary indexes and FKs.
 	for k, dt := range desired.All() {

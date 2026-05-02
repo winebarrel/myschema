@@ -55,12 +55,16 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 		return nil, fmt.Errorf("diff views: %w", err)
 	}
 
-	// Order: view drops → FK drops → table create/alter → table drops →
-	// FK adds → view create-or-replace.
+	// Order: view drops → table renames → FK drops → table create/alter
+	// → table drops → FK adds → view create-or-replace.
 	// Views must drop before columns / tables they reference are altered or
 	// removed, and must (re)create only after the underlying tables exist.
+	// Table renames must precede FK drops because the same combined
+	// migration may target the table under its new name (the rename goes
+	// first, then anything that ALTERs the new-named table).
 	var stmts []string
 	stmts = append(stmts, viewDiff.DropStmts...)
+	stmts = append(stmts, tableDiff.RenameStmts...)
 	stmts = append(stmts, tableDiff.FKDropStmts...)
 	stmts = append(stmts, tableDiff.Stmts...)
 	stmts = append(stmts, tableDiff.DropStmts...)

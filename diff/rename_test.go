@@ -56,10 +56,11 @@ func TestDiffRenameTableEmitsAlter(t *testing.T) {
 	res, err := diff.DiffTables(current, desired, allowAll)
 	require.NoError(t, err)
 
-	got := strings.Join(res.Stmts, "\n")
+	got := strings.Join(res.RenameStmts, "\n")
 	assert.Contains(t, got, "ALTER TABLE shop.old_users RENAME TO shop.users;")
-	assert.NotContains(t, got, "DROP TABLE", "rename must not surface as drop")
-	assert.NotContains(t, got, "CREATE TABLE", "rename must not surface as create")
+	all := strings.Join(append(append([]string{}, res.Stmts...), res.DropStmts...), "\n")
+	assert.NotContains(t, all, "DROP TABLE", "rename must not surface as drop")
+	assert.NotContains(t, all, "CREATE TABLE", "rename must not surface as create")
 }
 
 func TestDiffRenameTableAlsoRewritesCrossTableFKRefs(t *testing.T) {
@@ -111,9 +112,9 @@ func TestDiffRenameTableAlsoRewritesCrossTableFKRefs(t *testing.T) {
 	res, err := diff.DiffTables(current, desired, allowAll)
 	require.NoError(t, err)
 
-	all := strings.Join(res.Stmts, "\n")
+	allRen := strings.Join(res.RenameStmts, "\n")
 	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
-	assert.Contains(t, all, "ALTER TABLE shop.users RENAME TO shop.members;")
+	assert.Contains(t, allRen, "ALTER TABLE shop.users RENAME TO shop.members;")
 	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "FK on referencing table must not be dropped after rename")
 	assert.NotContains(t, allFK, "ADD CONSTRAINT", "FK on referencing table must not be re-added after rename")
 }
@@ -156,10 +157,10 @@ func TestDiffRenameSelfRenameIsNoOp(t *testing.T) {
 
 	res, err := diff.DiffTables(current, desired, allowAll)
 	require.NoError(t, err)
-	got := strings.Join(res.Stmts, "\n")
-	assert.NotContains(t, got, "RENAME TO", "table self-rename must not emit ALTER TABLE x RENAME TO x")
-	assert.NotContains(t, got, "RENAME COLUMN", "column self-rename must not emit RENAME COLUMN x TO x")
-	assert.NotContains(t, got, "RENAME INDEX", "index self-rename must not emit RENAME INDEX x TO x")
+	all := strings.Join(append(append([]string{}, res.RenameStmts...), res.Stmts...), "\n")
+	assert.NotContains(t, all, "RENAME TO", "table self-rename must not emit ALTER TABLE x RENAME TO x")
+	assert.NotContains(t, all, "RENAME COLUMN", "column self-rename must not emit RENAME COLUMN x TO x")
+	assert.NotContains(t, all, "RENAME INDEX", "index self-rename must not emit RENAME INDEX x TO x")
 }
 
 func TestDiffRenameColumnPreservesPKPrefixLengthAndDesc(t *testing.T) {
