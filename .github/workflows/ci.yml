@@ -28,7 +28,7 @@ jobs:
         run: |
           for i in {1..60}; do docker compose up -d --quiet-pull && break; sleep 1; done
           for i in {1..60}; do
-            mysqladmin ping -h 127.0.0.1 -P 3306 -u root --skip-ssl --silent && break
+            mysqladmin ping -h 127.0.0.1 -P 3306 -u root --silent && break
             sleep 2
           done
       - run: make TEST_OPTS='-coverprofile=coverage.txt'
