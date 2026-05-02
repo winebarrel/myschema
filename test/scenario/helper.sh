@@ -110,6 +110,119 @@ run_step() {
   pass
 }
 
+# Run myschema dump against the test database. Unlike the plan / apply
+# wrappers, this does NOT merge stderr into stdout — callers typically
+# redirect stdout to a .sql file, and any error / warning text on
+# stderr would otherwise end up embedded in the dump and break the
+# re-apply round-trip.
+myschema_dump() {
+  "$MYSCHEMA" dump "$@"
+}
+
+# _assert_substring is the shared implementation behind
+# assert_contains / assert_not_contains. Mode is "contains" or
+# "not_contains"; everything else (arg parsing, validation, command
+# execution, output capture, grep) is identical. Centralising here
+# keeps the two wrappers from drifting on diagnostics or behaviour.
+_assert_substring() {
+  local mode="$1"
+  shift
+  # Validate $# before referencing $1 / shifting so a malformed call
+  # under `set -u` fails loudly via fail() instead of aborting the
+  # whole script with "unbound variable".
+  if [ $# -lt 1 ]; then
+    fail "assert_${mode}: missing step name (usage: <step> <cmd...> -- <substring>)"
+    return 1
+  fi
+  local step_name="$1"
+  shift
+  step "$step_name"
+
+  local cmd=()
+  local found_sep=0
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--" ]; then
+      found_sep=1
+      shift
+      break
+    fi
+    cmd+=("$1")
+    shift
+  done
+  if [ "$found_sep" -ne 1 ]; then
+    fail "assert_${mode}: missing '--' separator (cmd... -- substring)"
+    return 1
+  fi
+  if [ ${#cmd[@]} -eq 0 ]; then
+    fail "assert_${mode}: no command before '--'"
+    return 1
+  fi
+  if [ $# -eq 0 ]; then
+    fail "assert_${mode}: no expected substring after '--'"
+    return 1
+  fi
+  if [ $# -ne 1 ]; then
+    fail "assert_${mode}: too many arguments after '--' (got $#); quote the substring"
+    return 1
+  fi
+  local needle="$1"
+  # Empty needle would make grep -qF always match, so the assertion
+  # would silently pass (contains) or always fail (not_contains)
+  # regardless of output. Almost certainly a caller bug.
+  if [ -z "$needle" ]; then
+    fail "assert_${mode}: substring is empty"
+    return 1
+  fi
+
+  local out
+  out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
+  # printf rather than echo so output starting with `-n` or
+  # backslash escapes doesn't get re-interpreted on the way to grep.
+  local found=1
+  printf '%s\n' "$out" | grep -qF -- "$needle" || found=0
+
+  if [ "$mode" = "contains" ]; then
+    if [ "$found" -eq 1 ]; then
+      pass
+    else
+      fail "expected substring not found"
+      echo "    expected: $needle" >&2
+      echo "    actual:   $out" >&2
+      return 1
+    fi
+  else
+    if [ "$found" -eq 0 ]; then
+      pass
+    else
+      fail "unexpected substring present"
+      echo "    unexpected: $needle" >&2
+      echo "    actual:     $out" >&2
+      return 1
+    fi
+  fi
+}
+
+# Assert that a step's command output (stdout + stderr) contains an
+# expected substring.
+# Usage: assert_contains <step-name> <command...> -- <expected substring>
+# Example:
+#   assert_contains "table is filtered" \
+#     "$MYSCHEMA" plan -I 'users*' "$DATA/schema.sql" \
+#     -- 'CREATE TABLE myschema_test.users'
+#
+# The "--" separator is required so the helper can find the boundary
+# between cmd args and the expected substring; missing separator,
+# missing command, missing/multiple substrings all fail loudly with
+# a clear message rather than letting bash run a malformed command.
+assert_contains() {
+  _assert_substring contains "$@"
+}
+
+# Same shape as assert_contains, but the substring must NOT appear.
+assert_not_contains() {
+  _assert_substring not_contains "$@"
+}
+
 # Run a step that should produce no diff at all.
 run_step_no_diff() {
   local step_name="$1"
