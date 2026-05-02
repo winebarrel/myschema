@@ -169,8 +169,9 @@ func rewriteConstraintColumnRefs(constraints *orderedmap.Map[string, *model.Cons
 // under `--allow-drop=foreign_key` unset, since the FK drop is suppressed
 // while the new ADD CONSTRAINT runs alone (a half-applied state).
 //
-// Note: RefCols (the columns on the parent side) is NOT rewritten here;
-// a column rename in this table doesn't change the parent's column names.
+// This handles only the *child* side (the FK's own columns). For the
+// *parent* side (RefCols on FKs in other tables that point at the
+// renamed column), see rewriteCrossTableFKRefCols.
 func rewriteFKColumnRefs(fks *orderedmap.Map[string, *model.ForeignKey], renames map[string]string) {
 	if len(renames) == 0 {
 		return
@@ -179,6 +180,34 @@ func rewriteFKColumnRefs(fks *orderedmap.Map[string, *model.ForeignKey], renames
 		for i, col := range fk.Columns {
 			if newName, ok := renames[col]; ok {
 				fk.Columns[i] = newName
+			}
+		}
+	}
+}
+
+// rewriteCrossTableFKRefCols handles the parent side of a column rename:
+// for every table in `tables` other than (db, tableName), rewrites RefCols
+// on any FK that points at this table when the referenced column name
+// matches an entry in renames. Without this, renaming a referenced
+// column would diff each referencing FK as DROP+ADD even though MySQL
+// updates the FK's parent-side reference automatically when its parent
+// column is renamed.
+func rewriteCrossTableFKRefCols(tables *orderedmap.Map[string, *model.Table], db, tableName string, renames map[string]string) {
+	if len(renames) == 0 {
+		return
+	}
+	for _, t := range tables.CollectValues() {
+		if t.Database == db && t.Name == tableName {
+			continue // child-side rewrite handled by rewriteFKColumnRefs
+		}
+		for _, fk := range t.ForeignKeys.CollectValues() {
+			if fk.RefDB != db || fk.RefTable != tableName {
+				continue
+			}
+			for i, col := range fk.RefCols {
+				if newName, ok := renames[col]; ok {
+					fk.RefCols[i] = newName
+				}
 			}
 		}
 	}

@@ -20,6 +20,15 @@ type TableDiffResult struct {
 
 // DiffTables produces the DDL needed to bring the current schema into the
 // shape described by desired.
+//
+// CAVEAT: rename handling mutates `current` in place (re-keys entries
+// after table renames; updates Name/Database, FK Columns, FK RefCols,
+// index parts, and PK constraint columns to match desired's view of
+// the world). Callers that want to reuse `current` after calling
+// DiffTables should clone it first. The whole-program flow in
+// diff_all.go builds a fresh `current` per invocation, so this is fine
+// for production use; the constraint matters mainly for tests that
+// share fixtures across subtests.
 func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropChecker) (*TableDiffResult, error) {
 	dc = NormalizeDropChecker(dc)
 	res := &TableDiffResult{}
@@ -50,6 +59,23 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		for _, fk := range dt.ForeignKeys.CollectValues() {
 			res.FKAddStmts = append(res.FKAddStmts, fk.SQL())
 		}
+	}
+
+	// Cross-table column-rename pass: when a column on a parent table
+	// is renamed, every other table's FK that references it needs its
+	// RefCols rewritten so the FK doesn't subsequently diff as DROP+ADD.
+	// Same-table FK Columns and PK / index column refs are handled
+	// inside diffTable itself.
+	for k, dt := range desired.All() {
+		if _, ok := current.GetOk(k); !ok {
+			continue
+		}
+		renames := columnRenameMap(dt.Columns)
+		if len(renames) == 0 {
+			continue
+		}
+		rewriteCrossTableFKRefCols(current, dt.Database, dt.Name, renames)
+		_ = k
 	}
 
 	// Modified tables.

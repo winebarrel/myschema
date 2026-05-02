@@ -122,6 +122,13 @@ type UnsupportedRename struct {
 // Directives that appear in the leading-comment block (before the first
 // SQL line) are statement-level — they're handled by
 // ExtractStmtRenameFrom, not here, so this function ignores them.
+//
+// Comment skipping covers `--` line comments, `# ...` line comments,
+// and `/* ... */` block comments contained on a single line. A
+// block comment that spans multiple lines is not unwound here; if a
+// directive is followed by a multi-line `/* ... */` block before the
+// real target line, the directive will mis-attach. This is rare in
+// hand-written CREATE TABLE bodies.
 func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 	out := &InlineRenames{
 		Columns: map[string]string{},
@@ -151,6 +158,13 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 				}
 				pending = stripBackticks(m[1])
 			}
+			continue
+		}
+		// Non-myschema comment line: skip without disturbing pending.
+		// Covers `#` line comments and single-line `/* … */` blocks
+		// that the line-by-line scanner sees as one unit. Multi-line
+		// `/* … */` is not unwound — see func doc.
+		if strings.HasPrefix(trim, "#") || (strings.HasPrefix(trim, "/*") && strings.HasSuffix(trim, "*/")) {
 			continue
 		}
 		if !sawSQL {
@@ -278,12 +292,12 @@ func classifyInlineLine(line string) (inlineKind, string) {
 // leadingBacktickedIdent returns the unquoted identifier at the start of
 // line iff the line begins with a backtick — used to handle column
 // definitions whose name is `quoted with spaces`. Identifiers containing
-// embedded backticks (which MySQL escapes by doubling, so a literal
-// backtick in a name appears as “ inside the surrounding `…`) are not
-// supported by myschema's directive layer: renameDirectivePattern's
-// `[^`]+` capture stops at the first inner backtick, and the validator
-// turns the resulting partial match into a "malformed directive" error.
-// Round-trip support would require teaching this helper, the regex, and
+// embedded backticks (MySQL escapes them by doubling: a literal backtick
+// inside the quoted name is written as two consecutive backtick chars)
+// are not supported by myschema's directive layer: renameDirectivePattern
+// stops at the first inner backtick, and the validator turns the
+// resulting partial match into a "malformed directive" error. Round-trip
+// support would require teaching this helper, the regex, and
 // stripBackticks all to recognise the doubling — punted as a vanishingly
 // rare case.
 func leadingBacktickedIdent(line string) (string, bool) {

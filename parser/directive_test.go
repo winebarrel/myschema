@@ -278,6 +278,23 @@ func TestExtractInlineRenamesTrailingPendingUnsupported(t *testing.T) {
 	assert.Contains(t, got.Unsupported[0].Reason, "end of statement")
 }
 
+func TestExtractInlineRenamesSkipsBlockAndHashComments(t *testing.T) {
+	// A `# comment` and a single-line `/* comment */` line between the
+	// directive and its target must NOT clear `pending` or be treated
+	// as the SQL line — the directive should still attach to the next
+	// real column line.
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    -- myschema:renamed-from old_name
+    # this is a hash comment
+    /* and this is a block comment */
+    name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (id)
+);`)
+	assert.Equal(t, "old_name", got.Columns["name"])
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {
 	// `KEY (col)` with no name: tokens after the keyword are "(col)".
 	// classifyInlineLine should treat this as unsupported (rather than

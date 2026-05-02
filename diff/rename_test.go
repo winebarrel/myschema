@@ -197,6 +197,68 @@ func TestDiffRenameColumnAlsoRewritesPKConstraint(t *testing.T) {
 	assert.NotContains(t, got, "ADD PRIMARY KEY", "PK rewrite should suppress ADD PRIMARY KEY")
 }
 
+func TestDiffRenameColumnAlsoRewritesCrossTableFKRefCols(t *testing.T) {
+	// Renaming `users.id` → `users.user_id` while another table
+	// (`posts`) holds an FK to `users(id)` must NOT diff that FK as
+	// DROP+ADD just because RefCols changed name. The parent-side
+	// rename pass needs to walk all tables and rewrite RefCols on
+	// matching FKs.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	// users — column is being renamed
+	curUsers := tbl("shop", "users")
+	curUsers.Columns.Set("id", col("id", "bigint"))
+	curUsers.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(id)", Columns: []string{"id"},
+	})
+	current.Set("shop.users", curUsers)
+
+	// posts — references users(id)
+	curPosts := tbl("shop", "posts")
+	curPosts.Columns.Set("id", col("id", "bigint"))
+	curPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	curPosts.Constraints.Set("PRIMARY", pkConstraint())
+	curPosts.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.posts", curPosts)
+
+	// desired: rename users.id → users.user_id; posts FK now points at user_id
+	from := "id"
+	desUsers := tbl("shop", "users")
+	wc := col("user_id", "bigint")
+	wc.RenameFrom = &from
+	desUsers.Columns.Set("user_id", wc)
+	desUsers.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(user_id)", Columns: []string{"user_id"},
+	})
+	desired.Set("shop.users", desUsers)
+
+	desPosts := tbl("shop", "posts")
+	desPosts.Columns.Set("id", col("id", "bigint"))
+	desPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	desPosts.Constraints.Set("PRIMARY", pkConstraint())
+	desPosts.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"user_id"},
+	})
+	desired.Set("shop.posts", desPosts)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+	got := strings.Join(res.Stmts, "\n")
+	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
+	assert.Contains(t, got, "RENAME COLUMN id TO user_id")
+	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "FK on referencing table must not be dropped after parent column rename")
+	assert.NotContains(t, allFK, "ADD CONSTRAINT", "FK on referencing table must not be re-added after parent column rename")
+}
+
 func TestDiffRenameTableMissingSourceErrors(t *testing.T) {
 	current := orderedmap.New[string, *model.Table]()
 	desired := orderedmap.New[string, *model.Table]()
