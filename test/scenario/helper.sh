@@ -110,9 +110,13 @@ run_step() {
   pass
 }
 
-# Run myschema dump against the test database.
+# Run myschema dump against the test database. Unlike the plan / apply
+# wrappers, this does NOT merge stderr into stdout — callers typically
+# redirect stdout to a .sql file, and any error / warning text on
+# stderr would otherwise end up embedded in the dump and break the
+# re-apply round-trip.
 myschema_dump() {
-  "$MYSCHEMA" dump "$@" 2>&1
+  "$MYSCHEMA" dump "$@"
 }
 
 # Assert that a step's command output (stdout + stderr) contains an

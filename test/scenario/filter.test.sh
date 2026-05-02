@@ -15,11 +15,15 @@ DATA="$SCRIPT_DIR/testdata/filter"
 setup_db "$DATA/init.sql"
 
 # 01: --include matches only `users` → no diff against the desired
-# (which also only declares users). Importantly, sessions and logs
-# don't show up as DROPs because they're filtered out.
-assert_not_contains "01 --include=users hides excluded drops" \
+# (which also only declares users). Both sessions and logs must be
+# absent from the plan.
+assert_not_contains "01a --include=users hides sessions" \
   "$MYSCHEMA" plan --allow-drop all -I users "$DATA/desired.sql" \
   -- 'DROP TABLE myschema_test.sessions'
+
+assert_not_contains "01b --include=users hides logs" \
+  "$MYSCHEMA" plan --allow-drop all -I users "$DATA/desired.sql" \
+  -- 'DROP TABLE myschema_test.logs'
 
 # 02: --exclude='log*' (glob) — sessions still drops, logs is hidden.
 assert_contains "02 --exclude=log* still drops sessions" \
