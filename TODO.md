@@ -11,6 +11,26 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## High — correctness bugs
 
+- [ ] **Empty-string `DEFAULT ''` round-trip drift.** A column
+      declared with `NOT NULL DEFAULT ''` apply-loops: every
+      post-apply plan re-emits `MODIFY COLUMN … DEFAULT ''`. The
+      catalog reads `information_schema.COLUMNS.COLUMN_DEFAULT` as
+      the empty string, and `normalizeColumnDefault` in
+      `catalog/tables.go` short-circuits on `def == ""` (returning
+      it unchanged) before the vitess-based bareword check can run.
+      The parser side stores `''` (quoted empty string), so catalog
+      and parser never compare equal. Surfaced while writing the
+      evolution scenario in PR #31 (worked around there by dropping
+      the explicit DEFAULT). Fix needs an explicit mapping: when
+      `def == ""` and the column type is one where MySQL accepts a
+      literal `DEFAULT ''` (CHAR / VARCHAR / BINARY / VARBINARY /
+      ENUM / SET — TEXT / BLOB are excluded since MySQL doesn't
+      allow a literal default on those types), normalise to `''`.
+      Simply dropping the short-circuit and letting the vitess-parse
+      path classify it doesn't work: vitess can't parse `SELECT`
+      with an empty expression and returns a syntax error. The
+      current `normalizeColumnDefault` ignores `typeName`; the fix
+      would have to start consuming it.
 - [ ] **FK-implicit covering indexes look like drift.** Adding a
       foreign key on un-indexed columns (inline `CREATE TABLE` or
       `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently
