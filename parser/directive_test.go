@@ -68,8 +68,9 @@ CREATE TABLE users (id INT);
 }
 
 func TestExtractStmtRenameFromBasic(t *testing.T) {
-	got := parser.ExtractStmtRenameFrom(`-- myschema:renamed-from old_users
+	got, err := parser.ExtractStmtRenameFrom(`-- myschema:renamed-from old_users
 CREATE TABLE users (id INT);`)
+	require.NoError(t, err)
 	assert.Equal(t, "old_users", got)
 }
 
@@ -78,23 +79,37 @@ func TestExtractStmtRenameFromQualifiedNameDoesNotMatch(t *testing.T) {
 	// regex doesn't match the dotted form, so the extractor returns "".
 	// (At the higher level, ValidateDirectives turns the same input into
 	// a malformed-directive error — see TestValidateDirectivesRejectsQualifiedRenameTarget.)
-	got := parser.ExtractStmtRenameFrom(`-- myschema:renamed-from other_db.old_users
+	got, err := parser.ExtractStmtRenameFrom(`-- myschema:renamed-from other_db.old_users
 CREATE TABLE users (id INT);`)
+	require.NoError(t, err)
 	assert.Equal(t, "", got)
 }
 
 func TestExtractStmtRenameFromBacktickedReservedWord(t *testing.T) {
 	// The widened pattern accepts any backtick-quoted blob.
-	got := parser.ExtractStmtRenameFrom("-- myschema:renamed-from `select`\nCREATE TABLE users (id INT);")
+	got, err := parser.ExtractStmtRenameFrom("-- myschema:renamed-from `select`\nCREATE TABLE users (id INT);")
+	require.NoError(t, err)
 	assert.Equal(t, "select", got)
+}
+
+func TestExtractStmtRenameFromMultipleDirectivesError(t *testing.T) {
+	// Two leading renamed-from directives is ambiguous and almost
+	// always a typo; better to fail loudly than to let the second one
+	// silently win.
+	_, err := parser.ExtractStmtRenameFrom(`-- myschema:renamed-from old_users
+-- myschema:renamed-from older_users
+CREATE TABLE users (id INT);`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple")
 }
 
 func TestExtractStmtRenameFromOnlyTopOfBlock(t *testing.T) {
 	// Directive after an SQL line must NOT attach.
-	got := parser.ExtractStmtRenameFrom(`CREATE TABLE users (
+	got, err := parser.ExtractStmtRenameFrom(`CREATE TABLE users (
     id INT
     -- myschema:renamed-from too_late
 );`)
+	require.NoError(t, err)
 	assert.Equal(t, "", got)
 }
 
@@ -210,6 +225,44 @@ func TestParseSQLErrorsOnDanglingRenameDirective(t *testing.T) {
 );`, "shop")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "renamed-from")
+}
+
+func TestExtractInlineRenamesStackedDirectivesUnsupported(t *testing.T) {
+	// Two `-- myschema:renamed-from` lines with no SQL line between
+	// them — the first never attached, so it must surface as
+	// Unsupported instead of being silently overwritten.
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    -- myschema:renamed-from old_first
+    -- myschema:renamed-from old_second
+    name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (id)
+);`)
+	require.Len(t, got.Unsupported, 1)
+	assert.Equal(t, "old_first", got.Unsupported[0].OldName)
+	assert.Equal(t, "old_second", got.Columns["name"])
+}
+
+func TestExtractInlineRenamesBacktickedColumnWithSpace(t *testing.T) {
+	// Column whose name contains whitespace is backtick-quoted; the
+	// backtick-aware first-identifier parser should still pick it up.
+	got := parser.ExtractInlineRenames("CREATE TABLE t (\n" +
+		"    id INT NOT NULL,\n" +
+		"    -- myschema:renamed-from old_weird\n" +
+		"    `weird name` VARCHAR(64) NOT NULL,\n" +
+		"    PRIMARY KEY (id)\n" +
+		");")
+	assert.Equal(t, "old_weird", got.Columns["weird name"])
+}
+
+func TestParseSQLRejectsRenameDirectiveOnCreateView(t *testing.T) {
+	// renamed-from is currently only supported on CREATE TABLE. On any
+	// other statement (CREATE VIEW, ALTER TABLE, …) the directive must
+	// surface as a parse error so it can't be silently lost.
+	_, err := parser.ParseSQL(`-- myschema:renamed-from old_view
+CREATE VIEW v AS SELECT 1 AS x;`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CREATE VIEW")
 }
 
 func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {

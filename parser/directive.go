@@ -67,8 +67,11 @@ func ValidateDirectives(rawSQL string) error {
 // ExtractStmtRenameFrom returns the old name from a leading
 // `-- myschema:renamed-from <old>` comment block at the top of stmtSQL,
 // or "" if no such directive is present. Scans only contiguous comment /
-// blank lines at the start; stops at the first SQL line.
-func ExtractStmtRenameFrom(stmtSQL string) string {
+// blank lines at the start; stops at the first SQL line. Returns an
+// error if more than one renamed-from directive appears in the leading
+// block — multiple sources is ambiguous and almost always a typo, and
+// silently letting the last one win would mask the mistake.
+func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 	var oldName string
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
 		trim := strings.TrimSpace(line)
@@ -79,10 +82,14 @@ func ExtractStmtRenameFrom(stmtSQL string) string {
 			break
 		}
 		if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
-			oldName = stripBackticks(m[1])
+			candidate := stripBackticks(m[1])
+			if oldName != "" {
+				return "", fmt.Errorf("multiple -- myschema:renamed-from directives on the same statement (%q then %q); only one is allowed", oldName, candidate)
+			}
+			oldName = candidate
 		}
 	}
-	return oldName
+	return oldName, nil
 }
 
 // InlineRenames separates inline rename directives by the kind of object
@@ -132,6 +139,16 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 				continue // leading directives belong to ExtractStmtRenameFrom
 			}
 			if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
+				if pending != "" {
+					// Two directives stacked with no SQL line between them:
+					// the first never attached to anything. Surface as
+					// Unsupported so the parser errors out instead of
+					// silently dropping the earlier directive.
+					out.Unsupported = append(out.Unsupported, UnsupportedRename{
+						OldName: pending,
+						Reason:  "directive was followed by another -- myschema:renamed-from before any SQL line attached it",
+					})
+				}
 				pending = stripBackticks(m[1])
 			}
 			continue
@@ -184,6 +201,15 @@ const (
 //   - CONSTRAINT line: "CONSTRAINT name <body>"   → (constraint, "name")
 //   - PRIMARY KEY / anonymous FOREIGN KEY / blank → (unknown, "")
 func classifyInlineLine(line string) (inlineKind, string) {
+	// Backtick-quoted column names can contain whitespace
+	// (e.g. `weird name VARCHAR(64)`); strings.Fields would split the
+	// name itself. Detect that shape up front and parse it as a column
+	// without going through tokenize. KEY / INDEX / CONSTRAINT / etc.
+	// keywords are MySQL reserved tokens, never quoted, so a leading
+	// backtick can only be a column name.
+	if name, ok := leadingBacktickedIdent(line); ok {
+		return inlineKindColumn, name
+	}
 	tokens := tokenize(line)
 	if len(tokens) == 0 {
 		return inlineKindUnknown, ""
@@ -238,6 +264,24 @@ func classifyInlineLine(line string) (inlineKind, string) {
 
 	// Default: a column line. The first token is the column name.
 	return inlineKindColumn, stripBackticks(tokens[0])
+}
+
+// leadingBacktickedIdent returns the unquoted identifier at the start of
+// line iff the line begins with a backtick — used to handle column
+// definitions whose name is `quoted with spaces`. Doubled backticks
+// inside the quoted region are not supported (MySQL escapes embedded
+// “ as “); the parser regex / validator already rejects such names
+// at the directive layer, so we don't need to round-trip them here.
+func leadingBacktickedIdent(line string) (string, bool) {
+	s := strings.TrimLeft(line, " \t")
+	if s == "" || s[0] != '`' {
+		return "", false
+	}
+	end := strings.IndexByte(s[1:], '`')
+	if end < 0 {
+		return "", false
+	}
+	return s[1 : 1+end], true
 }
 
 // tokenize splits `s` into whitespace-separated tokens, then peels off

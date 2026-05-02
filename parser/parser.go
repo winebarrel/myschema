@@ -86,7 +86,10 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		// and an index that share a name (which happens when a KEY is
 		// auto-named after its first column) don't compete for the same
 		// directive.
-		stmtRename := ExtractStmtRenameFrom(piece)
+		stmtRename, err := ExtractStmtRenameFrom(piece)
+		if err != nil {
+			return nil, err
+		}
 		inlineRenames := ExtractInlineRenames(piece)
 		stmt, err := p.Parse(piece)
 		if err != nil {
@@ -131,6 +134,9 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if err := applyAlterTable(tables, s, defaultDB); err != nil {
 				return nil, err
 			}
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "ALTER TABLE"); err != nil {
+				return nil, err
+			}
 
 		case *sqlparser.CreateView:
 			v, err := parseCreateView(s, defaultDB)
@@ -141,14 +147,35 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				return nil, fmt.Errorf("duplicate view: %s", v.FQVN())
 			}
 			views.Set(v.FQVN(), v)
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "CREATE VIEW"); err != nil {
+				return nil, err
+			}
 
 		default:
 			// Skip statements we don't model (CREATE DATABASE, COMMENT, SET,
 			// GRANT, etc).
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "this statement"); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	return &ParseResult{Tables: tables, Views: views}, nil
+}
+
+// rejectMisplacedRenameDirectives errors if any rename directives were
+// extracted from a statement we don't currently support directives on.
+// Only `CREATE TABLE` participates today; anywhere else, a directive
+// would be silently dropped on the floor and the corresponding rename
+// would degrade into a destructive DROP+CREATE on the next plan.
+func rejectMisplacedRenameDirectives(stmtRename string, inline *InlineRenames, stmtKind string) error {
+	switch {
+	case stmtRename != "":
+		return fmt.Errorf("-- myschema:renamed-from %s: directive is only supported on CREATE TABLE, not %s", stmtRename, stmtKind)
+	case len(inline.Columns) > 0, len(inline.Indexes) > 0, len(inline.Unsupported) > 0:
+		return fmt.Errorf("-- myschema:renamed-from: directive is only supported inside CREATE TABLE, not %s", stmtKind)
+	}
+	return nil
 }
 
 func dbName(schema, defaultDB string) string {
