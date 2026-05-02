@@ -84,15 +84,17 @@ by area; ordering inside a group is not significant.
 
 ## Tests / fixtures
 
-- [ ] YAML-driven test harness for parser, diff, plan, apply, dump
-      (mirror `pistachio/testdata/`)
-- [ ] `apply_test.go` integration suite that runs against a real MySQL
-      server, gated on `MYSCHEMA_TEST_DSN`
-- [ ] `dump_test.go` integration suite (round-trip `CREATE TABLE` → dump →
-      parse → diff is empty)
-- [ ] CLI scenario tests under `test/scenario/`, similar to pistachio's
-      shell-script suite
-- [ ] `compose.yaml` for a local MySQL 8.x test container
+- [x] YAML-driven test harness for plan, apply, dump
+      (`testdata/{plan,apply,dump}/*.yml`; the parser / diff suites still
+      use Go table tests). Extending to parser / diff is the remaining
+      bullet.
+- [ ] YAML harness for parser and diff
+- [x] `apply_test.go` integration suite (YAML-driven, requires
+      `MYSCHEMA_TEST_DSN` MySQL)
+- [x] `dump_test.go` integration suite (YAML-driven)
+- [x] `plan_test.go` integration suite (YAML-driven)
+- [x] CLI scenario tests under `test/scenario/`
+- [x] `compose.yaml` for a local MySQL 8.x test container
 
 ## Documentation
 

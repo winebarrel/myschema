@@ -8,6 +8,7 @@ require (
 	github.com/pingcap/tidb/pkg/parser v0.0.0-20260501060436-33ae9e3cb52f
 	github.com/stretchr/testify v1.11.1
 	github.com/winebarrel/orderedmap v1.7.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -23,5 +24,4 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
