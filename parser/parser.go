@@ -82,9 +82,12 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		// Directive extraction runs against the raw piece before vitess
 		// strips comments. Statement-level directives sit on a leading
 		// comment block; inline directives (column / index renames) live
-		// inside the CREATE TABLE body.
+		// inside the CREATE TABLE body, classified per-kind so a column
+		// and an index that share a name (which happens when a KEY is
+		// auto-named after its first column) don't compete for the same
+		// directive.
 		stmtRename := ExtractStmtRenameFrom(piece)
-		inlineRenames := ExtractInlineRenameFrom(piece)
+		inlineRenames := ExtractInlineRenames(piece)
 		stmt, err := p.Parse(piece)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse SQL: %w", err)
@@ -99,22 +102,25 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				rn := stmtRename
 				t.RenameFrom = &rn
 			}
-			for name, old := range inlineRenames {
-				if c, ok := t.Columns.GetOk(name); ok {
-					o := old
-					c.RenameFrom = &o
-					continue
+			for name, old := range inlineRenames.Columns {
+				c, ok := t.Columns.GetOk(name)
+				if !ok {
+					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target column %q not found in CREATE TABLE", t.FQTN(), old, name)
 				}
-				if idx, ok := t.Indexes.GetOk(name); ok {
-					o := old
-					idx.RenameFrom = &o
-					continue
+				o := old
+				c.RenameFrom = &o
+			}
+			for name, old := range inlineRenames.Indexes {
+				idx, ok := t.Indexes.GetOk(name)
+				if !ok {
+					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target index %q not found in CREATE TABLE", t.FQTN(), old, name)
 				}
-				// Constraint / FK renames are not yet supported by the
-				// diff layer (MySQL has no in-place RENAME CONSTRAINT).
-				// Silently ignored for now; the directive validator
-				// already accepts them, and a future implementation can
-				// pick them up here.
+				o := old
+				idx.RenameFrom = &o
+			}
+			if len(inlineRenames.Unsupported) > 0 {
+				u := inlineRenames.Unsupported[0]
+				return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: %s", t.FQTN(), u.OldName, u.Reason)
 			}
 			if _, dup := tables.GetOk(t.FQTN()); dup {
 				return nil, fmt.Errorf("duplicate table: %s", t.FQTN())

@@ -20,10 +20,11 @@ var (
 	anyDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:([a-zA-Z][a-zA-Z0-9_-]*)\b`)
 
 	// renameDirectivePattern captures the old name from a renamed-from
-	// directive. Old name is a single identifier (no spaces, optional
-	// backticks). Schema-qualified old names (`db.tbl`) are accepted but
-	// unusual — myschema operates on a single database per invocation.
-	renameDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:renamed-from\s+(` + "`?" + `[A-Za-z_][A-Za-z0-9_$.` + "`" + `]*` + "`?" + `)\s*$`)
+	// directive. Old name is a single identifier with optional backticks.
+	// Schema-qualified old names (`db.tbl`) are intentionally rejected:
+	// myschema operates on a single database per invocation, so the
+	// directive only ever refers to an object inside that database.
+	renameDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:renamed-from\s+(` + "`?" + `[A-Za-z_][A-Za-z0-9_$]*` + "`?" + `)\s*$`)
 )
 
 // ValidateDirectives scans rawSQL for any -- myschema:<name> comment and
@@ -62,97 +63,170 @@ func ExtractStmtRenameFrom(stmtSQL string) string {
 	return oldName
 }
 
-// ExtractInlineRenameFrom returns a map from object name → old name for
-// every `-- myschema:renamed-from <old>` comment that appears inline in
-// stmtSQL (typically inside the parenthesised list of a CREATE TABLE).
-// The directive attaches to the first identifier on the next non-comment
-// line, which works for both column lines (`name TYPE …`) and constraint
-// / KEY lines (`KEY name (…)`, `CONSTRAINT name …`).
-func ExtractInlineRenameFrom(stmtSQL string) map[string]string {
-	out := map[string]string{}
+// InlineRenames separates inline rename directives by the kind of object
+// they attach to. Each supported map is keyed by the new (desired) name.
+type InlineRenames struct {
+	Columns map[string]string // new column name → old column name
+	Indexes map[string]string // new index  name → old index  name
+	// Unsupported records directives whose target line resolved to an
+	// object kind we don't yet rename in place (constraints, FKs,
+	// PRIMARY KEY, anonymous FOREIGN KEY) or whose target line shape
+	// we couldn't parse. The parser turns these into errors so a typo
+	// or mis-positioned directive doesn't silently degrade into a
+	// destructive DROP+CREATE.
+	Unsupported []UnsupportedRename
+}
+
+// UnsupportedRename is a single inline directive that couldn't be applied.
+type UnsupportedRename struct {
+	OldName string
+	Reason  string
+}
+
+// ExtractInlineRenames walks the body of stmtSQL line by line. Each
+// `-- myschema:renamed-from <old>` directive line attaches to the next
+// non-comment / non-blank line; the resolved kind comes from inspecting
+// that line. Whitespace between tokens (KEY/INDEX/CONSTRAINT prefixes
+// and the name that follows) is tolerated as Fields() treats any run of
+// whitespace as one separator.
+//
+// Directives that appear in the leading-comment block (before the first
+// SQL line) are statement-level — they're handled by
+// ExtractStmtRenameFrom, not here, so this function ignores them.
+func ExtractInlineRenames(stmtSQL string) *InlineRenames {
+	out := &InlineRenames{
+		Columns: map[string]string{},
+		Indexes: map[string]string{},
+	}
 	var pending string
+	var sawSQL bool
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
 		trim := strings.TrimSpace(line)
 		if trim == "" {
 			continue
 		}
 		if strings.HasPrefix(trim, "--") {
+			if !sawSQL {
+				continue // leading directives belong to ExtractStmtRenameFrom
+			}
 			if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
 				pending = stripBackticks(m[1])
 			}
 			continue
 		}
-		if pending != "" {
-			if name := leadingObjectName(trim); name != "" {
-				out[name] = pending
-			}
-			pending = ""
+		if !sawSQL {
+			sawSQL = true
+			continue // first SQL line is the CREATE TABLE … ( opener
 		}
+		if pending == "" {
+			continue
+		}
+		kind, name := classifyInlineLine(trim)
+		switch kind {
+		case inlineKindColumn:
+			out.Columns[name] = pending
+		case inlineKindIndex:
+			out.Indexes[name] = pending
+		case inlineKindConstraint:
+			out.Unsupported = append(out.Unsupported, UnsupportedRename{
+				OldName: pending,
+				Reason:  "constraint / FK rename not yet supported (MySQL has no in-place RENAME CONSTRAINT)",
+			})
+		default:
+			out.Unsupported = append(out.Unsupported, UnsupportedRename{
+				OldName: pending,
+				Reason:  "directive does not attach to a renameable target on the next line",
+			})
+		}
+		pending = ""
 	}
 	return out
 }
 
-// leadingObjectName returns the identifier the inline directive attaches
-// to: the column name for a column line, or the constraint/key name for a
-// CONSTRAINT / KEY / UNIQUE / FOREIGN KEY / PRIMARY KEY / INDEX line.
-// Returns "" if the line shape isn't recognised (e.g. an opening paren on
-// its own, which we treat as "directive doesn't attach here").
-func leadingObjectName(line string) string {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return ""
+type inlineKind int
+
+const (
+	inlineKindUnknown inlineKind = iota
+	inlineKindColumn
+	inlineKindIndex
+	inlineKindConstraint
+)
+
+// classifyInlineLine inspects a non-comment line inside a CREATE TABLE
+// body and returns (kind, name). Tokenisation goes through strings.Fields
+// so any run of whitespace (spaces, tabs, mixed) separates tokens.
+//
+//   - column line: "name TYPE …"                  → (column, "name")
+//   - KEY / INDEX line: "KEY name (…)"            → (index,  "name")
+//   - UNIQUE / FULLTEXT / SPATIAL prefix forms    → (index,  "name")
+//   - CONSTRAINT line: "CONSTRAINT name <body>"   → (constraint, "name")
+//   - PRIMARY KEY / anonymous FOREIGN KEY / blank → (unknown, "")
+func classifyInlineLine(line string) (inlineKind, string) {
+	tokens := tokenize(line)
+	if len(tokens) == 0 {
+		return inlineKindUnknown, ""
 	}
-	upper := strings.ToUpper(line)
-	switch {
-	case strings.HasPrefix(upper, "CONSTRAINT "):
-		return firstIdent(strings.TrimSpace(line[len("CONSTRAINT "):]))
-	case strings.HasPrefix(upper, "PRIMARY KEY"):
-		// PRIMARY KEY has no rename target — the constraint is always
-		// named "PRIMARY" in MySQL. Skip.
-		return ""
-	case strings.HasPrefix(upper, "FOREIGN KEY"):
-		// Anonymous FK; rename via -- myschema:renamed-from on the
-		// CONSTRAINT-prefixed form instead.
-		return ""
-	case strings.HasPrefix(upper, "UNIQUE KEY ") || strings.HasPrefix(upper, "UNIQUE INDEX "),
-		strings.HasPrefix(upper, "FULLTEXT KEY ") || strings.HasPrefix(upper, "FULLTEXT INDEX "),
-		strings.HasPrefix(upper, "SPATIAL KEY ") || strings.HasPrefix(upper, "SPATIAL INDEX "):
-		// Two-word prefix; skip both words.
-		parts := strings.SplitN(line, " ", 3)
-		if len(parts) < 3 {
-			return ""
+	upper := strings.ToUpper(tokens[0])
+
+	// Two-word index keywords: UNIQUE KEY, UNIQUE INDEX, FULLTEXT KEY,
+	// FULLTEXT INDEX, SPATIAL KEY, SPATIAL INDEX. The name is tokens[2].
+	switch upper {
+	case "UNIQUE", "FULLTEXT", "SPATIAL":
+		if len(tokens) < 3 {
+			return inlineKindUnknown, ""
 		}
-		return firstIdent(strings.TrimSpace(parts[2]))
-	case strings.HasPrefix(upper, "KEY ") || strings.HasPrefix(upper, "INDEX "):
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) < 2 {
-			return ""
+		w2 := strings.ToUpper(tokens[1])
+		if w2 != "KEY" && w2 != "INDEX" {
+			return inlineKindUnknown, ""
 		}
-		return firstIdent(strings.TrimSpace(parts[1]))
+		return inlineKindIndex, stripBackticks(tokens[2])
 	}
-	// Default: column line, first token is the column name.
-	return firstIdent(line)
+
+	switch upper {
+	case "PRIMARY":
+		// PRIMARY KEY: name is fixed to "PRIMARY", not user-renameable.
+		return inlineKindUnknown, ""
+	case "FOREIGN":
+		// anonymous "FOREIGN KEY (col) …" — no name. Use the
+		// CONSTRAINT-prefixed form to give it a name first.
+		return inlineKindUnknown, ""
+	case "KEY", "INDEX":
+		if len(tokens) < 2 {
+			return inlineKindUnknown, ""
+		}
+		return inlineKindIndex, stripBackticks(tokens[1])
+	case "CONSTRAINT":
+		if len(tokens) < 2 {
+			return inlineKindUnknown, ""
+		}
+		return inlineKindConstraint, stripBackticks(tokens[1])
+	case "CHECK":
+		// anonymous CHECK (…) — no name to rename. Fall through to
+		// "unknown" so the parser flags the directive as unsupported.
+		return inlineKindUnknown, ""
+	case ")", ");":
+		return inlineKindUnknown, ""
+	}
+
+	// Default: a column line. The first token is the column name.
+	return inlineKindColumn, stripBackticks(tokens[0])
 }
 
-// firstIdent reads the first identifier off s, handling backtick-quoted
-// names. Stops at whitespace, comma, or open-paren.
-func firstIdent(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if s[0] == '`' {
-		end := strings.IndexByte(s[1:], '`')
-		if end < 0 {
-			return ""
+// tokenize splits `s` into whitespace-separated tokens, then peels off
+// trailing punctuation (",", "(", "(") from each so that strict prefix /
+// equality checks work on names regardless of formatting. Backticks on
+// names are kept so the caller can decide whether to strip them.
+func tokenize(s string) []string {
+	raw := strings.Fields(s)
+	out := make([]string, 0, len(raw))
+	for _, t := range raw {
+		t = strings.TrimRight(t, ",(")
+		if t == "" {
+			continue
 		}
-		return s[1 : 1+end]
+		out = append(out, t)
 	}
-	end := strings.IndexAny(s, " \t,(")
-	if end < 0 {
-		return s
-	}
-	return s[:end]
+	return out
 }
 
 func stripBackticks(s string) string {

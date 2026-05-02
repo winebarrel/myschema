@@ -70,10 +70,6 @@ func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *m
 		current.DeleteOk(oldName)
 		cc.Name = newName
 		current.Set(newName, cc)
-		// Propagate the rename to any current-side index that references
-		// the old column name, so the index diff doesn't subsequently see
-		// "current uses old_col, desired uses new_col" and emit a needless
-		// DROP+CREATE.
 	}
 	return stmts, nil
 }
@@ -81,7 +77,9 @@ func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *m
 // rewriteIndexColumnRefs walks every index in current and rewrites any
 // IndexPart.Column == old to new. Called after column renames complete so
 // the catalog-side view stays consistent with the desired-side view of
-// which columns the index covers.
+// which columns the index covers — without this, indexEqual sees an
+// (old col vs new col) mismatch and the index would be needlessly
+// dropped + recreated.
 func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renames map[string]string) {
 	if len(renames) == 0 {
 		return
@@ -90,6 +88,29 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 		for i := range idx.Parts {
 			if newName, ok := renames[idx.Parts[i].Column]; ok {
 				idx.Parts[i].Column = newName
+			}
+		}
+	}
+}
+
+// rewriteFKColumnRefs is the FK counterpart to rewriteIndexColumnRefs:
+// walks every FK in current and rewrites Columns entries from old → new.
+// Without this, fkEqual would diff `current.Columns=[old_col]` against
+// `desired.Columns=[new_col]` and emit a destructive DROP FOREIGN KEY +
+// ADD CONSTRAINT after every plain column rename — which would also fail
+// under `--allow-drop=foreign_key` unset, since the FK drop is suppressed
+// while the new ADD CONSTRAINT runs alone (a half-applied state).
+//
+// Note: RefCols (the columns on the parent side) is NOT rewritten here;
+// a column rename in this table doesn't change the parent's column names.
+func rewriteFKColumnRefs(fks *orderedmap.Map[string, *model.ForeignKey], renames map[string]string) {
+	if len(renames) == 0 {
+		return
+	}
+	for _, fk := range fks.CollectValues() {
+		for i, col := range fk.Columns {
+			if newName, ok := renames[col]; ok {
+				fk.Columns[i] = newName
 			}
 		}
 	}

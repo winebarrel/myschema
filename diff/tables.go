@@ -104,10 +104,11 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	fqtn := desired.FQTN()
 
 	// Column rename pass first, so the index-rename pass below and the
-	// regular column / index diffs see the renamed objects under their
-	// new names. Index parts that referenced the old column names are
-	// rewritten in place (current side only) to keep indexEqual quiet
-	// for indexes that should NOT trigger a DROP+CREATE.
+	// regular column / index / FK diffs see the renamed objects under
+	// their new names. Index parts AND FK column lists that referenced
+	// the old column names are rewritten in place (current side only)
+	// so indexEqual / fkEqual stay quiet for objects that should NOT
+	// trigger a DROP+CREATE / DROP+ADD.
 	renames := columnRenameMap(desired.Columns)
 	colRenameStmts, err := applyColumnRenames(fqtn, current.Columns, desired.Columns)
 	if err != nil {
@@ -115,6 +116,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	}
 	res.Stmts = append(res.Stmts, colRenameStmts...)
 	rewriteIndexColumnRefs(current.Indexes, renames)
+	rewriteFKColumnRefs(current.ForeignKeys, renames)
 
 	idxRenameStmts, err := applyIndexRenames(fqtn, current.Indexes, desired.Indexes)
 	if err != nil {

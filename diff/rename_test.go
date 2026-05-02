@@ -207,6 +207,50 @@ func TestDiffRenameIndexEmitsAlter(t *testing.T) {
 	assert.NotContains(t, got, "CREATE INDEX")
 }
 
+func TestDiffRenameColumnAlsoRewritesFKColumns(t *testing.T) {
+	// Same idea as the index-rewrite test, but for the FK side. After
+	// renaming `posts.author_id` → `posts.user_id`, the FK that
+	// references the renamed column on this table should NOT show as a
+	// DROP FOREIGN KEY + ADD CONSTRAINT — only the column rename
+	// should fire.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "posts")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("author_id", col("author_id", "bigint"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.ForeignKeys.Set("fk_author", &model.ForeignKey{
+		Name: "fk_author", Database: "shop", Table: "posts",
+		Columns: []string{"author_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.posts", cur)
+
+	want := tbl("shop", "posts")
+	want.Columns.Set("id", col("id", "bigint"))
+	from := "author_id"
+	renamed := col("user_id", "bigint")
+	renamed.RenameFrom = &from
+	want.Columns.Set("user_id", renamed)
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	want.ForeignKeys.Set("fk_author", &model.ForeignKey{
+		Name: "fk_author", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	desired.Set("shop.posts", want)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+
+	got := strings.Join(res.Stmts, "\n")
+	gotFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
+	assert.Contains(t, got, "RENAME COLUMN author_id TO user_id")
+	assert.NotContains(t, gotFK, "DROP FOREIGN KEY", "FK must not be dropped after column rename")
+	assert.NotContains(t, gotFK, "ADD CONSTRAINT", "FK must not be re-added after column rename")
+}
+
 func TestDiffRenameIndexMissingSourceErrors(t *testing.T) {
 	current := orderedmap.New[string, *model.Table]()
 	desired := orderedmap.New[string, *model.Table]()
