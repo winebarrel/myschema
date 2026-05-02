@@ -21,9 +21,11 @@ jobs:
       matrix:
         include:
           - mysql_label: "8.0"
+            mysql_service: mysql
             mysql_port: 3306
             upload_codecov: true
           - mysql_label: "9.4"
+            mysql_service: mysql9
             mysql_port: 3307
             upload_codecov: false
     name: test (mysql ${{ matrix.mysql_label }})
@@ -38,7 +40,7 @@ jobs:
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
       - name: Start MySQL
         run: |
-          for i in {1..60}; do docker compose up -d --quiet-pull && break; sleep 1; done
+          for i in {1..60}; do docker compose up -d --quiet-pull "${{ matrix.mysql_service }}" && break; sleep 1; done
           # Use bash's standard timeout idiom instead of a fixed-iteration
           # loop: if the server never comes up, `timeout` returns non-zero
           # and the step fails.
