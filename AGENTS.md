@@ -92,16 +92,15 @@ identical to the standalone repo's API.
 - Partition / sub-partition definitions
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after
-  all CREATE TABLEs, so this works for that case; cross-database ordering
-  is not handled)
+  all CREATE TABLEs, so this works for that case; FKs that point at tables
+  in databases myschema is not managing are not handled)
 - `--with-tx` actually wraps in BEGIN / COMMIT — currently a no-op flag,
   documented as such, because MySQL auto-commits DDL anyway
-- YAML-based testdata harness, scenario tests under `test/scenario/`
-- Schema-name remap (`-m old=new`) — MySQL has no separate schemas / search
-  paths, only databases; the equivalent would be database remap and is left
-  for v2
+- Database-name remap (the MySQL analogue of pistachio's `--schema-map`):
+  let the desired SQL use database `foo` while applying to database `bar`.
+  Today the DSN's database is the single source of truth; if you point it
+  at `bar`, every table reference in the desired SQL must also use `bar`.
 - `--split` for `dump`, `--pre-sql` / `--concurrently-pre-sql`
-- `dump_test.go`, `apply_test.go`, `plan_test.go` integration suites
 
 When extending: prefer adding YAML-driven tests under a `testdata/` tree
 (matching pistachio's pattern) over Go-table tests, once a real MySQL
@@ -186,10 +185,12 @@ Without a database:
 ./myschema plan --help
 ```
 
-With a local MySQL (DSN defaults to `root@tcp(127.0.0.1:3306)/`):
+With a local MySQL — the DSN must include the target database (myschema
+operates on exactly one database per invocation):
 
 ```sh
-./myschema -n app dump > current.sql
-./myschema -n app plan desired.sql
-./myschema -n app apply --allow-drop=all desired.sql
+export MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/app'
+./myschema dump > current.sql
+./myschema plan desired.sql
+./myschema apply --allow-drop=all desired.sql
 ```

@@ -37,16 +37,19 @@ func runYAMLCases[T any](t *testing.T, dir string, body func(t *testing.T, name 
 }
 
 // newClient returns a Client wired to MYSCHEMA_TEST_DSN (or the docker-compose
-// default) and scoped to the test database.
+// default), with the test database appended to the DSN since myschema requires
+// the DSN itself to carry the database name.
 func newClient(t *testing.T) *myschema.Client {
 	t.Helper()
-	dsn := os.Getenv("MYSCHEMA_TEST_DSN")
-	if dsn == "" {
-		dsn = "root@tcp(127.0.0.1:3306)/"
+	base := os.Getenv("MYSCHEMA_TEST_DSN")
+	if base == "" {
+		base = "root@tcp(127.0.0.1:3306)/"
+	}
+	if !strings.HasSuffix(base, "/") {
+		base += "/"
 	}
 	return myschema.NewClient(&myschema.Options{
-		DSN:       dsn,
-		Databases: []string{testutil.DefaultDB},
+		DSN: base + testutil.DefaultDB,
 	})
 }
 

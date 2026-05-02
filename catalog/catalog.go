@@ -7,33 +7,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
-// Catalog is a single dedicated MySQL connection bound to a list of
-// databases. Per-object queries below scope themselves to those databases.
-// The connection is single-use by design (no pooling); callers manage its
-// lifetime via *sql.Conn.Close().
+// Catalog is a single dedicated MySQL connection bound to one database.
+// Per-object queries below scope themselves to that database. The connection
+// is single-use by design (no pooling); callers manage its lifetime via
+// *sql.Conn.Close().
 type Catalog struct {
-	conn      *sql.Conn
-	databases []string
+	conn     *sql.Conn
+	database string
 }
 
-// NewCatalog wraps an existing *sql.Conn.
-func NewCatalog(conn *sql.Conn, databases []string) *Catalog {
-	return &Catalog{conn: conn, databases: databases}
-}
-
-// dbPlaceholders builds "?, ?, ?" with the right number of placeholders and
-// returns the args slice already typed for QueryContext.
-func (c *Catalog) dbPlaceholders() (string, []any) {
-	args := make([]any, len(c.databases))
-	parts := make([]string, len(c.databases))
-	for i, d := range c.databases {
-		parts[i] = "?"
-		args[i] = d
-	}
-	return strings.Join(parts, ","), args
+// NewCatalog wraps an existing *sql.Conn bound to database.
+func NewCatalog(conn *sql.Conn, database string) *Catalog {
+	return &Catalog{conn: conn, database: database}
 }
 
 // ping fails fast on a dead connection.

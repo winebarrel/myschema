@@ -17,15 +17,14 @@ func (c *Catalog) Tables(ctx context.Context) (*orderedmap.Map[string, *model.Ta
 	}
 
 	out := orderedmap.New[string, *model.Table]()
-	ph, args := c.dbPlaceholders()
 	q := `
 SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE, TABLE_COLLATION, TABLE_COMMENT
 FROM   information_schema.TABLES
-WHERE  TABLE_SCHEMA IN (` + ph + `)
+WHERE  TABLE_SCHEMA = ?
   AND  TABLE_TYPE = 'BASE TABLE'
-ORDER  BY TABLE_SCHEMA, TABLE_NAME`
+ORDER  BY TABLE_NAME`
 
-	rows, err := c.conn.QueryContext(ctx, q, args...)
+	rows, err := c.conn.QueryContext(ctx, q, c.database)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list tables: %w", err)
 	}
