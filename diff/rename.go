@@ -18,6 +18,9 @@ import (
 // DROP+CREATE) because a typo'd old name almost always means the user is
 // about to lose data and would rather see the apply abort.
 func applyTableRenames(current, desired *orderedmap.Map[string, *model.Table]) ([]string, error) {
+	if dup, name := duplicateTableRenameSource(desired); dup {
+		return nil, fmt.Errorf("renamed-from: source table %q is referenced by multiple tables — only one table may be renamed from a given source", name)
+	}
 	var stmts []string
 	for newKey, dt := range desired.All() {
 		if dt.RenameFrom == nil || *dt.RenameFrom == "" {
@@ -86,6 +89,9 @@ func rewriteFKRefTable(tables *orderedmap.Map[string, *model.Table], oldDB, oldN
 // fail at execution time with a syntax error, not silently — the user
 // will see the offending RENAME COLUMN statement in the plan output.
 func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Column]) ([]string, error) {
+	if dup, name := duplicateColumnRenameSource(desired); dup {
+		return nil, fmt.Errorf("renamed-from: source column %s.%s is referenced by multiple columns", fqtn, name)
+	}
 	var stmts []string
 	for newName, dc := range desired.All() {
 		if dc.RenameFrom == nil || *dc.RenameFrom == "" {
@@ -243,6 +249,9 @@ func rewriteCrossTableFKRefCols(tables *orderedmap.Map[string, *model.Table], db
 // index diff so an index that was *only* renamed (no part / type change)
 // produces no further DDL.
 func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Index]) ([]string, error) {
+	if dup, name := duplicateIndexRenameSource(desired); dup {
+		return nil, fmt.Errorf("renamed-from: source index %s.%s is referenced by multiple indexes", fqtn, name)
+	}
 	var stmts []string
 	for newName, di := range desired.All() {
 		if di.RenameFrom == nil || *di.RenameFrom == "" {
@@ -268,6 +277,56 @@ func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *mo
 		current.Set(newName, ci)
 	}
 	return stmts, nil
+}
+
+// duplicateTableRenameSource scans desired tables and reports if two
+// distinct entries declare the same RenameFrom value (so they'd both
+// try to consume the same current-side row). Returns (true, oldName)
+// on the first conflict found, otherwise (false, "").
+func duplicateTableRenameSource(desired *orderedmap.Map[string, *model.Table]) (bool, string) {
+	seen := map[string]bool{}
+	for _, dt := range desired.CollectValues() {
+		if dt.RenameFrom == nil || *dt.RenameFrom == "" {
+			continue
+		}
+		key := dt.Database + "." + *dt.RenameFrom
+		if seen[key] {
+			return true, *dt.RenameFrom
+		}
+		seen[key] = true
+	}
+	return false, ""
+}
+
+// duplicateColumnRenameSource is the column counterpart of
+// duplicateTableRenameSource — scoped to one table's column map.
+func duplicateColumnRenameSource(desired *orderedmap.Map[string, *model.Column]) (bool, string) {
+	seen := map[string]bool{}
+	for _, dc := range desired.CollectValues() {
+		if dc.RenameFrom == nil || *dc.RenameFrom == "" {
+			continue
+		}
+		if seen[*dc.RenameFrom] {
+			return true, *dc.RenameFrom
+		}
+		seen[*dc.RenameFrom] = true
+	}
+	return false, ""
+}
+
+// duplicateIndexRenameSource is the index counterpart.
+func duplicateIndexRenameSource(desired *orderedmap.Map[string, *model.Index]) (bool, string) {
+	seen := map[string]bool{}
+	for _, di := range desired.CollectValues() {
+		if di.RenameFrom == nil || *di.RenameFrom == "" {
+			continue
+		}
+		if seen[*di.RenameFrom] {
+			return true, *di.RenameFrom
+		}
+		seen[*di.RenameFrom] = true
+	}
+	return false, ""
 }
 
 // columnRenameMap collects desired-side column renames as old→new for use

@@ -17,7 +17,12 @@ var (
 	// anyDirectivePattern matches a single-line comment of the form
 	// `-- myschema:<name> ...` (with optional leading whitespace and any
 	// number of dashes ≥ 2). Used by ValidateDirectives to flag typos.
-	anyDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:([a-zA-Z][a-zA-Z0-9_-]*)\b`)
+	// Allows optional whitespace between the colon and the directive
+	// name so a slip like `-- myschema: renamed-from old` is still
+	// recognised — the per-directive regex (renameDirectivePattern)
+	// stays strict, so such a slip turns into a "malformed directive"
+	// error instead of being silently ignored.
+	anyDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:\s*([a-zA-Z][a-zA-Z0-9_-]*)\b`)
 
 	// renameDirectivePattern captures the old name from a renamed-from
 	// directive. Old name is either a bareword identifier or any

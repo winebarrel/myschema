@@ -42,6 +42,17 @@ CREATE TABLE users (id INT);
 	assert.Contains(t, err.Error(), "malformed")
 }
 
+func TestValidateDirectivesRejectsSpaceAfterColon(t *testing.T) {
+	// `myschema: renamed-from old` with a space after the colon is
+	// almost certainly a formatting slip; the validator must catch it
+	// instead of silently letting the extractor ignore the directive.
+	err := parser.ValidateDirectives(`-- myschema: renamed-from old_users
+CREATE TABLE users (id INT);
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed")
+}
+
 func TestValidateDirectivesRejectsTrailingJunk(t *testing.T) {
 	err := parser.ValidateDirectives(`-- myschema:renamed-from old, then drop it
 CREATE TABLE users (id INT);

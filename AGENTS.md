@@ -130,10 +130,12 @@ them off.
   secondary indexes. Statement-level on `CREATE TABLE` for table
   rename; inline (line above the column / index) inside the
   parenthesised body for column / index rename. Drives
-  `ALTER TABLE … RENAME TO`, `ALTER TABLE … RENAME COLUMN`, and
-  `ALTER TABLE … RENAME INDEX` (all MySQL 8.0+ syntax — same baseline
-  as the rest of myschema, which already requires 8.0 for INVISIBLE
-  indexes and CHECK constraints). Index parts referencing renamed
+  `ALTER TABLE … RENAME TO` (5.x+), `ALTER TABLE … RENAME COLUMN`
+  (8.0+ only), and `ALTER TABLE … RENAME INDEX` (5.7+). The project
+  baseline is MySQL 8.0 because of INVISIBLE indexes and CHECK
+  constraints elsewhere in the codebase, so the 8.0-only RENAME
+  COLUMN sits inside that same envelope; on a 5.x server only
+  RENAME COLUMN would be rejected. Index parts referencing renamed
   columns are rewritten in place — including child-side FK Columns,
   parent-side cross-table FK RefCols, self-referential FK RefCols,
   and PRIMARY KEY constraint columns — so the index / FK / PK isn't

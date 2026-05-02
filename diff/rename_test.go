@@ -309,6 +309,37 @@ func TestDiffRenameColumnAlsoRewritesSelfReferentialFK(t *testing.T) {
 	assert.NotContains(t, allFK, "ADD CONSTRAINT", "self-referential FK must not be re-added")
 }
 
+func TestDiffRenameDuplicateSourceErrors(t *testing.T) {
+	// Two desired columns claim the same RenameFrm source. Without
+	// the pre-validation, the second one would surface as a confusing
+	// "source not found" after the first rename mutated current.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("legacy", col("legacy", "varchar(64)"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", cur)
+
+	from := "legacy"
+	want := tbl("shop", "users")
+	want.Columns.Set("id", col("id", "bigint"))
+	a := col("name", "varchar(64)")
+	a.RenameFrom = &from
+	want.Columns.Set("name", a)
+	b := col("alias", "varchar(64)")
+	b.RenameFrom = &from
+	want.Columns.Set("alias", b)
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.users", want)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "multiple")
+}
+
 func TestDiffRenameTableMissingSourceErrors(t *testing.T) {
 	current := orderedmap.New[string, *model.Table]()
 	desired := orderedmap.New[string, *model.Table]()
