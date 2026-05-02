@@ -65,6 +65,10 @@ type Index struct {
 	Comment   *string
 	Invisible bool
 	Primary   bool // PRIMARY KEY (modelled as Index, name = "PRIMARY")
+	// RenameFrom: previous index name from a `-- myschema:renamed-from`
+	// inline directive. Drives ALTER TABLE … RENAME INDEX. Always nil on
+	// the catalog side.
+	RenameFrom *string
 }
 
 // SQL emits a standalone CREATE INDEX (or for PRIMARY KEY a constraint ALTER).

@@ -21,6 +21,11 @@ type Table struct {
 	Constraints   *orderedmap.Map[string, *Constraint] // PK / UNIQUE / CHECK; UNIQUE indexes are NOT here, they live in Indexes
 	ForeignKeys   *orderedmap.Map[string, *ForeignKey]
 	Indexes       *orderedmap.Map[string, *Index]
+	// RenameFrom is the previous name from a `-- myschema:renamed-from`
+	// directive on the desired side. Catalog-loaded tables always have it
+	// nil. The diff layer uses it to emit ALTER TABLE … RENAME TO instead
+	// of DROP+CREATE so row data survives.
+	RenameFrom *string
 }
 
 // FQTN returns the database-qualified name (database.table).

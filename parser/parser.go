@@ -59,6 +59,9 @@ func newParser() (*sqlparser.Parser, error) {
 
 // ParseSQL parses a SQL string into a ParseResult.
 func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
+	if err := ValidateDirectives(sql); err != nil {
+		return nil, err
+	}
 	p, err := newParser()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parser: %w", err)
@@ -76,6 +79,12 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		if piece == "" {
 			continue
 		}
+		// Directive extraction runs against the raw piece before vitess
+		// strips comments. Statement-level directives sit on a leading
+		// comment block; inline directives (column / index renames) live
+		// inside the CREATE TABLE body.
+		stmtRename := ExtractStmtRenameFrom(piece)
+		inlineRenames := ExtractInlineRenameFrom(piece)
 		stmt, err := p.Parse(piece)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse SQL: %w", err)
@@ -85,6 +94,27 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			t, err := parseCreateTable(s, defaultDB)
 			if err != nil {
 				return nil, err
+			}
+			if stmtRename != "" {
+				rn := stmtRename
+				t.RenameFrom = &rn
+			}
+			for name, old := range inlineRenames {
+				if c, ok := t.Columns.GetOk(name); ok {
+					o := old
+					c.RenameFrom = &o
+					continue
+				}
+				if idx, ok := t.Indexes.GetOk(name); ok {
+					o := old
+					idx.RenameFrom = &o
+					continue
+				}
+				// Constraint / FK renames are not yet supported by the
+				// diff layer (MySQL has no in-place RENAME CONSTRAINT).
+				// Silently ignored for now; the directive validator
+				// already accepts them, and a future implementation can
+				// pick them up here.
 			}
 			if _, dup := tables.GetOk(t.FQTN()); dup {
 				return nil, fmt.Errorf("duplicate table: %s", t.FQTN())

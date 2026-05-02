@@ -126,6 +126,19 @@ them off.
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index`
 - `--include` / `--exclude` glob filtering on table names
 - CLI: `plan`, `apply`, `dump`
+- `-- myschema:renamed-from <old>` directive on tables, columns, and
+  secondary indexes. Statement-level on `CREATE TABLE` for table
+  rename; inline (line above the column / index) inside the
+  parenthesised body for column / index rename. Drives
+  `ALTER TABLE … RENAME TO`, `ALTER TABLE … RENAME COLUMN`, and
+  `ALTER TABLE … RENAME INDEX`. Index parts referencing renamed
+  columns are rewritten in place so the index isn't also marked for
+  DROP+CREATE. Errors fail the plan when the source object isn't
+  present (typo'd old name shouldn't silently become a destructive
+  DROP+CREATE); idempotent if the rename has already been applied.
+  Constraint and FK renames are not yet supported — MySQL has no
+  in-place RENAME CONSTRAINT, so DROP+ADD is the only path and the
+  diff already does that.
 
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 
@@ -156,8 +169,14 @@ rather than declarative schema. Manage them out of band.)
   diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
-- Renaming via directives (pistachio's `-- pist:renamed-from`)
-- `-- pist:execute` arbitrary-SQL escape hatch
+- Constraint and foreign-key renames via `-- myschema:renamed-from`.
+  MySQL has no in-place `RENAME CONSTRAINT` / `RENAME FOREIGN KEY`,
+  so DROP+ADD is the only path and the diff already takes it; the
+  directive could later be wired through to validate that the source
+  name exists, mirroring the table/column/index path.
+- `-- myschema:execute` arbitrary-SQL escape hatch (the directive
+  registry in `parser/directive.go` is already shaped for it; needs
+  a parser pass, model bucket, and apply-time runner).
 - Partition / sub-partition definitions
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after

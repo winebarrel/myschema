@@ -24,6 +24,17 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 	dc = NormalizeDropChecker(dc)
 	res := &TableDiffResult{}
 
+	// Rename pass first: ALTER TABLE … RENAME TO is applied before any
+	// other table-level diffing, and the matching current entry is
+	// re-keyed so the rest of the pipeline sees the renamed table under
+	// its new FQTN. New / modified / dropped detection below then works
+	// without false negatives.
+	renameStmts, err := applyTableRenames(current, desired)
+	if err != nil {
+		return nil, err
+	}
+	res.Stmts = append(res.Stmts, renameStmts...)
+
 	// New tables: emit CREATE TABLE, then per-table secondary indexes and FKs.
 	for k, dt := range desired.All() {
 		if _, ok := current.GetOk(k); ok {
@@ -47,7 +58,10 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		if !ok {
 			continue
 		}
-		sub := diffTable(ct, dt, dc)
+		sub, err := diffTable(ct, dt, dc)
+		if err != nil {
+			return nil, err
+		}
 		res.FKDropStmts = append(res.FKDropStmts, sub.FKDropStmts...)
 		res.Stmts = append(res.Stmts, sub.Stmts...)
 		res.FKAddStmts = append(res.FKAddStmts, sub.FKAddStmts...)
@@ -85,9 +99,28 @@ type tableDiffResult struct {
 	DisallowedDropStmts []string
 }
 
-func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
+func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult, error) {
 	res := &tableDiffResult{}
 	fqtn := desired.FQTN()
+
+	// Column rename pass first, so the index-rename pass below and the
+	// regular column / index diffs see the renamed objects under their
+	// new names. Index parts that referenced the old column names are
+	// rewritten in place (current side only) to keep indexEqual quiet
+	// for indexes that should NOT trigger a DROP+CREATE.
+	renames := columnRenameMap(desired.Columns)
+	colRenameStmts, err := applyColumnRenames(fqtn, current.Columns, desired.Columns)
+	if err != nil {
+		return nil, err
+	}
+	res.Stmts = append(res.Stmts, colRenameStmts...)
+	rewriteIndexColumnRefs(current.Indexes, renames)
+
+	idxRenameStmts, err := applyIndexRenames(fqtn, current.Indexes, desired.Indexes)
+	if err != nil {
+		return nil, err
+	}
+	res.Stmts = append(res.Stmts, idxRenameStmts...)
 
 	colStmts, colDisallowed := diffColumns(fqtn, current.Columns, desired.Columns, dc)
 	res.Stmts = append(res.Stmts, colStmts...)
@@ -122,7 +155,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	res.FKAddStmts = append(res.FKAddStmts, fkAdds...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, fkDisallowed...)
 
-	return res
+	return res, nil
 }
 
 // droppedColumns returns the names of columns present in current but

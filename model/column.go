@@ -14,4 +14,8 @@ type Column struct {
 	Collation     *string
 	CharacterSet  *string
 	Comment       *string
+	// RenameFrom: previous column name from a `-- myschema:renamed-from`
+	// inline directive in CREATE TABLE. Drives ALTER TABLE … RENAME COLUMN
+	// in the diff. Always nil on the catalog side.
+	RenameFrom *string
 }

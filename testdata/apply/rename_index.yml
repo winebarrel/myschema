@@ -1,0 +1,25 @@
+# Secondary-index rename via inline -- myschema:renamed-from on the
+# KEY definition line. Uses ALTER TABLE … RENAME INDEX (MySQL 5.7+),
+# which preserves the index data (no rebuild) — important for large
+# tables where DROP+CREATE would lock and rebuild.
+init: |
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY old_idx (user_id)
+  );
+
+desired: |
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from old_idx
+      KEY idx_user (user_id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.posts RENAME INDEX old_idx TO idx_user;
+
+verify_no_drift: true

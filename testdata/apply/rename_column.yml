@@ -1,0 +1,23 @@
+# Column rename via inline -- myschema:renamed-from. The directive
+# attaches to the column on the line below. ALTER TABLE … RENAME
+# COLUMN keeps the column's data and DEFAULT/NULL attributes intact
+# (MySQL 8.0+).
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      old_name VARCHAR(64) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_name
+      name VARCHAR(64) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.users RENAME COLUMN old_name TO name;
+
+verify_no_drift: true
