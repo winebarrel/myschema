@@ -34,6 +34,15 @@ func applyTableRenames(current, desired *orderedmap.Map[string, *model.Table]) (
 			continue
 		}
 		oldKey := model.Ident(dt.Database, *dt.RenameFrom)
+		// Source must not also exist on the desired side. If the user
+		// declares both `users` (with rename-from) and `old_users` (the
+		// source) in desired, applying the rename here would later make
+		// DiffTables emit a stray CREATE TABLE for the still-present
+		// source — almost certainly unintended. Surface it as an error
+		// up front instead.
+		if _, ok := desired.GetOk(oldKey); ok && oldKey != newKey {
+			return nil, fmt.Errorf("renamed-from: source table %s is also declared in desired schema; remove the source declaration or change the directive", oldKey)
+		}
 		ct, ok := current.GetOk(oldKey)
 		if !ok {
 			// Tolerate the case where the rename has already been
@@ -100,6 +109,14 @@ func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *m
 		oldName := *dc.RenameFrom
 		if oldName == newName {
 			continue // self-rename, see applyTableRenames for rationale
+		}
+		// Source must not also be declared in desired alongside the
+		// destination. If both `old_name` and `name (renamed-from
+		// old_name)` exist in desired, the rename would happen and
+		// then diffColumns would later ADD the old column back —
+		// almost certainly unintended.
+		if _, ok := desired.GetOk(oldName); ok {
+			return nil, fmt.Errorf("renamed-from: source column %s.%s is also declared in desired schema; remove the source column or change the directive", fqtn, oldName)
 		}
 		cc, ok := current.GetOk(oldName)
 		if !ok {
@@ -260,6 +277,10 @@ func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *mo
 		oldName := *di.RenameFrom
 		if oldName == newName {
 			continue // self-rename, see applyTableRenames for rationale
+		}
+		// Same source-also-declared guard as the table / column passes.
+		if _, ok := desired.GetOk(oldName); ok {
+			return nil, fmt.Errorf("renamed-from: source index %s.%s is also declared in desired schema; remove the source index or change the directive", fqtn, oldName)
 		}
 		ci, ok := current.GetOk(oldName)
 		if !ok {

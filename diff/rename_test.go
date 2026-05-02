@@ -309,6 +309,36 @@ func TestDiffRenameColumnAlsoRewritesSelfReferentialFK(t *testing.T) {
 	assert.NotContains(t, allFK, "ADD CONSTRAINT", "self-referential FK must not be re-added")
 }
 
+func TestDiffRenameSourceAlsoDeclaredErrors(t *testing.T) {
+	// Desired schema declares both the source column (`legacy`) and the
+	// destination column (`name`, with renamed-from legacy). Without
+	// the guard, the rename would happen and then diffColumns would
+	// re-add `legacy` — almost certainly not what the user meant.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("legacy", col("legacy", "varchar(64)"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", cur)
+
+	from := "legacy"
+	want := tbl("shop", "users")
+	want.Columns.Set("id", col("id", "bigint"))
+	want.Columns.Set("legacy", col("legacy", "varchar(64)")) // source still declared
+	renamed := col("name", "varchar(64)")
+	renamed.RenameFrom = &from
+	want.Columns.Set("name", renamed)
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.users", want)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "also declared")
+}
+
 func TestDiffRenameDuplicateSourceErrors(t *testing.T) {
 	// Two desired columns claim the same RenameFrm source. Without
 	// the pre-validation, the second one would surface as a confusing
