@@ -14,4 +14,4 @@ desired: |
   CREATE VIEW active_users AS SELECT id, name FROM users;
 
 plan: |
-  CREATE OR REPLACE VIEW myschema_test.active_users AS select `id`,`name` from `myschema_test`.`users`;
+  CREATE OR REPLACE VIEW myschema_test.active_users AS select id, `name` from users;

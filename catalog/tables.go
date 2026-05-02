@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/winebarrel/myschema/model"
@@ -108,7 +109,7 @@ ORDER  BY ORDINAL_POSITION`
 			CharacterSet: charset,
 		}
 		if defVal != nil {
-			d := *defVal
+			d := normalizeColumnDefault(strings.ToLower(colType), *defVal)
 			col.Default = &d
 		}
 		extraUp := strings.ToUpper(extra)
@@ -347,6 +348,52 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 		t.ForeignKeys.Set(n, fks[n].fk)
 	}
 	return nil
+}
+
+// normalizeColumnDefault wraps the catalog's bareword default in single
+// quotes when it isn't a recognised expression. MySQL's
+// information_schema.COLUMNS.COLUMN_DEFAULT returns the raw value form —
+// `G` for an enum default, not `'G'` — which is fine to round-trip back
+// into MySQL but breaks vitess's parser. Wrap unquoted, non-numeric, non-
+// expression defaults in single quotes so re-parsing succeeds.
+func normalizeColumnDefault(typeName, def string) string {
+	if def == "" {
+		return def
+	}
+	// Already quoted, an expression call, or a numeric literal — leave it.
+	if strings.HasPrefix(def, "'") && strings.HasSuffix(def, "'") {
+		return def
+	}
+	if strings.ContainsAny(def, "()") {
+		return def
+	}
+	if _, err := strconv.ParseFloat(def, 64); err == nil {
+		return def
+	}
+	// Reserved keyword that vitess accepts unquoted.
+	upper := strings.ToUpper(def)
+	if upper == "NULL" || upper == "TRUE" || upper == "FALSE" {
+		return def
+	}
+	if strings.HasPrefix(upper, "CURRENT_") || upper == "NOW" {
+		return def
+	}
+	// String / enum / set / temporal literal — quote it so vitess can parse.
+	switch {
+	case strings.HasPrefix(typeName, "enum("),
+		strings.HasPrefix(typeName, "set("),
+		strings.HasPrefix(typeName, "char"),
+		strings.HasPrefix(typeName, "varchar"),
+		strings.HasPrefix(typeName, "text"),
+		strings.HasPrefix(typeName, "tinytext"),
+		strings.HasPrefix(typeName, "mediumtext"),
+		strings.HasPrefix(typeName, "longtext"),
+		strings.HasPrefix(typeName, "date"),
+		strings.HasPrefix(typeName, "time"),
+		strings.HasPrefix(typeName, "year"):
+		return "'" + strings.ReplaceAll(def, "'", "''") + "'"
+	}
+	return def
 }
 
 func normalizeRefOpt(s string) string {

@@ -34,13 +34,10 @@ MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/employees' ./myschema dump
 MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/sakila'    ./myschema dump
 ```
 
-Chinook and employees round-trip cleanly (`dump` → `plan` against the
-output reports `-- No changes`, and a full `dump` → `drop` → `apply` →
-`re-dump` cycle reproduces the original). Employees in particular
-exercises the view-on-view dependency path because `current_dept_emp`
-references `dept_emp_latest_date`. Sakila currently fails to round-trip
-because pingcap's parser does not recognise the `geometry` column type —
-see TODO.md.
+All three round-trip cleanly (`dump` → `plan` reports `-- No changes`).
+Employees exercises view-on-view dependency ordering (`current_dept_emp`
+references `dept_emp_latest_date`); sakila exercises GEOMETRY columns,
+`SPATIAL INDEX`, ENUM defaults, and FK ON UPDATE CASCADE chains.
 
 Tests against MySQL connect to the DSN in `MYSCHEMA_TEST_DSN`
 (default `root@tcp(127.0.0.1:3306)/`) via `internal/testutil.ConnectDB`. If
@@ -62,7 +59,7 @@ share a single MySQL instance.
 |-----------------------|------|
 | `cmd/myschema/`       | CLI entry point (kong) |
 | `cmd/command/`        | One file per subcommand: `plan`, `apply`, `dump` |
-| `parser/`             | SQL → `model.Table` using `github.com/pingcap/tidb/pkg/parser` |
+| `parser/`             | SQL → `model.Table` using `vitess.io/vitess/go/vt/sqlparser` |
 | `catalog/`            | `information_schema` → `model.Table` (via `database/sql` + `go-sql-driver/mysql`) |
 | `model/`              | `Table`, `Column`, `Constraint`, `ForeignKey`, `Index` |
 | `diff/`               | Compares two `model.Table` maps and emits DDL |
@@ -71,19 +68,45 @@ share a single MySQL instance.
 | `plan.go` / `apply.go` / `dump.go` | Top-level operations called by CLI |
 | `diff_all.go`         | Glues parser + catalog + diff for plan/apply |
 
-## Why `tidb/pkg/parser` and not `github.com/pingcap/parser`
+## Why `vitess.io/vitess/go/vt/sqlparser` (and not pingcap/tidb/pkg/parser)
 
-The user originally asked for `github.com/pingcap/parser`. That standalone
-module (`v3.1.2+incompatible`, last touched 2019/2020) requires
-`github.com/pingcap/tidb/types/parser_driver` from a matching old TiDB
-revision — wiring those module versions into a Go 1.26 project pulls in a
-broken `tipb` / gRPC stack and effectively cannot build today.
+The bootstrap shipped with pingcap, since the user originally asked for the
+TiDB parser. We migrated to vitess once `make schema` surfaced two real
+gaps:
 
-`github.com/pingcap/tidb/pkg/parser` is the same parser, maintained inside the
-TiDB monorepo since the v3.1 split; it ships its own value driver
-(`pkg/parser/test_driver`) so no extra wiring is needed. We use it under that
-import path. The semantics (AST, `Restore` API, `format.RestoreCtx`) are
-identical to the standalone repo's API.
+- **GEOMETRY / SPATIAL types** — pingcap reserves the type code (`mysql.
+  TypeGeometry = 0xff`) but its grammar (`parser.y`) has no production that
+  creates a column with the type. Sakila's `address.location GEOMETRY`
+  could not be parsed, so its dump → plan round-trip never closed.
+- **MySQL coverage philosophy** — pingcap aims to parse what TiDB *executes*
+  (a subset of MySQL by design). vitess sits between application and MySQL,
+  so it must parse anything MySQL accepts and pass the rest through. Its
+  design contract is broader.
+
+Same Apache 2.0 license. Binary went from ~21 MB → ~15 MB after the swap
+(`go-sql-driver/mysql` + kong + orderedmap + parser, stripped). The
+trade-off is that vitess has a slightly different API surface
+(`SplitStatementToPieces` / `Walk(visit, node)` instead of
+`Parse / Accept(visitor)`) and pretty-prints differently — see
+`parser/view.go` for the AST visitors that normalise the catalog form
+(`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\``) into the parser
+form so view diffs stay quiet.
+
+`CREATE INDEX i ON t (...)` is parsed as `*sqlparser.AlterTable` with an
+`AddIndexDefinition` AlterOption (vitess collapses standalone CREATE INDEX
+into ALTER TABLE). `applyAlterTable` handles both shapes.
+
+CURRENT_TIMESTAMP / NOW / etc. are restored by vitess as
+`current_timestamp()` (with empty parens). The catalog stores them
+without parens, so `parser.normalizeDefaultExpr` strips them and
+upper-cases the keyword to match.
+
+ENUM / SET / CHAR / temporal defaults arrive from
+`information_schema.COLUMNS.COLUMN_DEFAULT` as bareword values
+(`G` rather than `'G'` for an enum). vitess can't parse the bareword
+form, so `catalog.normalizeColumnDefault` wraps non-numeric, non-
+expression defaults of these types in single quotes before handing
+them off.
 
 ## Coverage vs. pistachio
 

@@ -8,13 +8,9 @@ by area; ordering inside a group is not significant.
 
 - [x] Views (`CREATE VIEW` / `DROP VIEW`) — emitted as
       `CREATE OR REPLACE VIEW` on apply, diffed via
-      `parser.NormalizeViewDefinition` (parse-then-restore canonicalisation
-      via pingcap with `RestoreWithoutSchemaName` /
-      `RestoreWithoutTableName`, plus AST visitors that strip redundant
-      `SELECT col AS col` aliases and unwrap `ParenthesesExpr`).
-- [ ] View `WITH CHECK OPTION` fidelity: pingcap's AST collapses
-      "no clause" and "WITH CASCADED" into the same value, so we treat
-      them as identical. `WITH LOCAL` is preserved.
+      `parser.NormalizeViewDefinition` (parse-then-restore via vitess plus
+      AST visitors that strip schema/table qualifiers from column refs and
+      drop redundant `SELECT col AS col` aliases).
 - [ ] View `DEFINER` and `SQL SECURITY` diffing (catalogued but not acted on)
 - [ ] Sequences (MySQL 8.0+ does not have native sequences; treat as out of
       scope unless TiDB compatibility is desired)
@@ -122,9 +118,6 @@ by area; ordering inside a group is not significant.
 ## Build / release
 
 - [x] `Makefile` with `build`, `test`, `lint`, `fix`, `schema` targets
-- [ ] Sakila round-trip fails because pingcap doesn't recognise the
-      `geometry` column type. Either contribute upstream or special-case
-      the type in `parser/parser.go`.
 - [ ] `.golangci.yml`
 - [ ] `.goreleaser.yml`
 - [ ] CI workflow under `.github/workflows/ci.yml`
