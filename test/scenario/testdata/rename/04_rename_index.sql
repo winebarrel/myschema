@@ -1,5 +1,6 @@
--- Rename old_display_name_idx → users_display_name_idx, and the
--- previously-renamed UNIQUE index, with inline directives.
+-- Rename two indexes in a single step via inline directives:
+--   * users_legacy_email_key → users_email_key (UNIQUE)
+--   * old_display_name_idx   → users_display_name_idx (KEY)
 CREATE TABLE users (
     id BIGINT NOT NULL AUTO_INCREMENT,
     email VARCHAR(255) NOT NULL,

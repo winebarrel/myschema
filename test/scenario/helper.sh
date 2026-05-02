@@ -166,6 +166,13 @@ _assert_substring() {
     return 1
   fi
   local needle="$1"
+  # Empty needle would make grep -qF always match, so the assertion
+  # would silently pass (contains) or always fail (not_contains)
+  # regardless of output. Almost certainly a caller bug.
+  if [ -z "$needle" ]; then
+    fail "assert_${mode}: substring is empty"
+    return 1
+  fi
 
   local out
   out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }

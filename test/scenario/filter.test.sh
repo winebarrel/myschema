@@ -33,20 +33,20 @@ assert_contains "01c --include=users sees no diff" \
   -- 'No changes'
 
 # 02: --exclude='log*' (glob) — sessions still drops, logs is hidden.
-assert_contains "02 --exclude=log* still drops sessions" \
+assert_contains "02a --exclude=log* still drops sessions" \
   "$MYSCHEMA" plan --allow-drop all -E 'log*' "$DATA/desired.sql" \
   -- 'DROP TABLE myschema_test.sessions'
 
-assert_not_contains "03 --exclude=log* hides logs" \
+assert_not_contains "02b --exclude=log* hides logs" \
   "$MYSCHEMA" plan --allow-drop all -E 'log*' "$DATA/desired.sql" \
   -- 'DROP TABLE myschema_test.logs'
 
-# 04: no filter — both tables drop.
-assert_contains "04 no filter drops sessions" \
+# 03: no filter — both tables drop.
+assert_contains "03a no filter drops sessions" \
   "$MYSCHEMA" plan --allow-drop all "$DATA/desired.sql" \
   -- 'DROP TABLE myschema_test.sessions'
 
-assert_contains "05 no filter drops logs" \
+assert_contains "03b no filter drops logs" \
   "$MYSCHEMA" plan --allow-drop all "$DATA/desired.sql" \
   -- 'DROP TABLE myschema_test.logs'
 
