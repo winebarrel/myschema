@@ -107,7 +107,11 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	// be left orphaned-yet-unmanaged on a column that's still there).
 	var dropped map[string]bool
 	if dc.IsDropAllowed("column") {
-		dropped = droppedColumns(current.Columns, desired.Columns)
+		names := droppedColumns(current.Columns, desired.Columns)
+		dropped = make(map[string]bool, len(names))
+		for _, n := range names {
+			dropped[n] = true
+		}
 	}
 	idxStmts, idxDisallowed := diffIndexes(fqtn, current.Indexes, desired.Indexes, dc, dropped)
 	res.Stmts = append(res.Stmts, idxStmts...)
@@ -121,14 +125,14 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	return res
 }
 
-// droppedColumns returns the set of column names present in current but
+// droppedColumns returns the names of columns present in current but
 // absent from desired — i.e. columns the diff is about to remove from
-// the table.
-func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) map[string]bool {
-	out := map[string]bool{}
+// the table — in current's iteration order.
+func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) []string {
+	var out []string
 	for name := range current.Keys() {
 		if _, ok := desired.GetOk(name); !ok {
-			out[name] = true
+			out = append(out, name)
 		}
 	}
 	return out
@@ -149,10 +153,7 @@ func diffColumns(fqtn string, current, desired *orderedmap.Map[string, *model.Co
 		}
 	}
 	// Dropped columns
-	for name := range current.Keys() {
-		if _, ok := desired.GetOk(name); ok {
-			continue
-		}
+	for _, name := range droppedColumns(current, desired) {
 		drop := "ALTER TABLE " + fqtn + " DROP COLUMN " + model.Ident(name) + ";"
 		if !colAllowed {
 			disallowed = append(disallowed, "-- skipped: "+drop)
