@@ -25,11 +25,12 @@ Open items only. Done work is in `git log` / closed PRs.
       `def == ""` and the column type is one where MySQL accepts a
       literal `DEFAULT ''` (CHAR / VARCHAR / BINARY / VARBINARY /
       ENUM / SET — TEXT / BLOB are excluded since MySQL doesn't
-      allow a literal default on those types), normalise to `''`. (Simply dropping the short-circuit and
-      letting the vitess-parse path classify it doesn't work —
-      vitess can't parse `SELECT ` and returns a syntax error.)
-      The current `normalizeColumnDefault` ignores `typeName`; the
-      fix would have to start consuming it.
+      allow a literal default on those types), normalise to `''`.
+      Simply dropping the short-circuit and letting the vitess-parse
+      path classify it doesn't work: vitess can't parse `SELECT`
+      with an empty expression and returns a syntax error. The
+      current `normalizeColumnDefault` ignores `typeName`; the fix
+      would have to start consuming it.
 - [ ] **FK-implicit covering indexes look like drift.** Adding a
       foreign key on un-indexed columns (inline `CREATE TABLE` or
       `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently
