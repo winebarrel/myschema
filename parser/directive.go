@@ -439,9 +439,10 @@ func backtickedNameAfterPrefix(line string, prefixes []string) (string, bool) {
 }
 
 // stripUntilAfterBacktickedName returns the substring of line that
-// follows a `prefix \`name\“ head. Returns line as-is if the head
-// doesn't match. Used to inspect what comes after a CONSTRAINT name to
-// decide whether it's UNIQUE (a unique-index spelling) or another kind.
+// follows a leading `<prefix> <backtick-quoted name>` head. Returns
+// line as-is if the head doesn't match. Used to inspect what comes
+// after a CONSTRAINT name to decide whether it's UNIQUE (a unique-
+// index spelling) or another kind.
 func stripUntilAfterBacktickedName(line, prefix string) string {
 	upper := strings.ToUpper(line)
 	if !strings.HasPrefix(upper, prefix) {
@@ -494,13 +495,13 @@ func leadingBacktickedIdent(line string) (string, bool) {
 //     unnamed `KEY (col)` form) collapses to the empty string and is
 //     dropped from the slice.
 //   - For tokens that *start* with a backtick AND contain a closing
-//     backtick, anything after the closing backtick is dropped (e.g.
-//     “ `select`(id) “ → “ `select` “), so the no-space form
-//     `KEY \`select\`(id)` is also recognised. Tokens that start with
-//     a backtick but don't contain a closing one (i.e. a backticked
-//     identifier whose body contains whitespace and got split by
-//     Fields) are left alone — the column-line path uses
-//     leadingBacktickedIdent for those.
+//     backtick, anything after the closing backtick is dropped (so
+//     a token of `select`(id) becomes just `select`), letting the
+//     no-space form `KEY <name>(col)` be recognised when <name> is
+//     backtick-quoted. Tokens that start with a backtick but have no
+//     closing one (a backticked identifier whose body contains
+//     whitespace and got split by Fields) are left alone — the
+//     column-line path uses leadingBacktickedIdent for those.
 //
 // Backticks on names are kept so the caller can decide whether to
 // strip them.
