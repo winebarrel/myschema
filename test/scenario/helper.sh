@@ -159,6 +159,10 @@ assert_contains() {
     fail "assert_contains: no expected substring after '--'"
     return 1
   fi
+  if [ $# -ne 1 ]; then
+    fail "assert_contains: too many arguments after '--' (got $#); quote the substring"
+    return 1
+  fi
   local expected="$1"
 
   local out
@@ -200,6 +204,10 @@ assert_not_contains() {
   fi
   if [ $# -eq 0 ]; then
     fail "assert_not_contains: no expected substring after '--'"
+    return 1
+  fi
+  if [ $# -ne 1 ]; then
+    fail "assert_not_contains: too many arguments after '--' (got $#); quote the substring"
     return 1
   fi
   local unexpected="$1"
