@@ -8,36 +8,44 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/winebarrel/myschema/diff"
 	"github.com/winebarrel/myschema/parser"
-	"github.com/winebarrel/orderedmap"
 )
 
-func parseOne(t *testing.T, sql string) *orderedmap.Map[string, *struct{}] {
+// allowAll / allowList helpers cut down the noise in test bodies.
+var allowAll = diff.AllowAll{}
+
+func allowList(kinds ...string) *diff.AllowList {
+	m := map[string]bool{}
+	for _, k := range kinds {
+		m[k] = true
+	}
+	return &diff.AllowList{Kinds: m}
+}
+
+// parsePair is the most common pattern: parse a "current" SQL and a
+// "desired" SQL into two table maps and return them ready for DiffTables.
+func parsePair(t *testing.T, current, desired string) (cur, des *parser.ParseResult) {
 	t.Helper()
-	_, err := parser.ParseSQL(sql, "app")
+	c, err := parser.ParseSQL(current, "app")
 	require.NoError(t, err)
-	return nil
+	d, err := parser.ParseSQL(desired, "app")
+	require.NoError(t, err)
+	return c, d
 }
 
 func TestDiffEmptyToOneTable(t *testing.T) {
-	desired, err := parser.ParseSQL(`
+	cur, des := parsePair(t, "", `
 CREATE TABLE users (
     id BIGINT NOT NULL AUTO_INCREMENT,
     email VARCHAR(255) NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY users_email_key (email)
 ) ENGINE=InnoDB;
-`, "app")
+`)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
 	require.NoError(t, err)
-
-	current, err := parser.ParseSQL("", "app")
-	require.NoError(t, err)
-
-	r, err := diff.DiffTables(current.Tables, desired.Tables, diff.AllowAll{})
-	require.NoError(t, err)
-
-	require.GreaterOrEqual(t, len(r.Stmts), 1, "should emit at least the CREATE TABLE")
+	require.GreaterOrEqual(t, len(r.Stmts), 1)
 	assert.Contains(t, r.Stmts[0], "CREATE TABLE app.users")
-	// secondary index should be a separate statement
+
 	hasIdx := false
 	for _, s := range r.Stmts {
 		if strings.Contains(s, "CREATE UNIQUE INDEX users_email_key ON app.users") {
@@ -48,43 +56,232 @@ CREATE TABLE users (
 }
 
 func TestDiffAddColumn(t *testing.T) {
-	current, err := parser.ParseSQL(`
-CREATE TABLE users (
-    id BIGINT NOT NULL,
-    PRIMARY KEY (id)
-);
-`, "app")
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(64) NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
 	require.NoError(t, err)
-	desired, err := parser.ParseSQL(`
-CREATE TABLE users (
-    id BIGINT NOT NULL,
-    name VARCHAR(64) NOT NULL,
-    PRIMARY KEY (id)
-);
-`, "app")
-	require.NoError(t, err)
-
-	r, err := diff.DiffTables(current.Tables, desired.Tables, diff.AllowAll{})
-	require.NoError(t, err)
-
 	require.Len(t, r.Stmts, 1)
-	assert.Equal(t,
-		"ALTER TABLE app.users ADD COLUMN name varchar(64) NOT NULL;",
-		r.Stmts[0])
-	_ = parseOne // silence unused-helper warning
+	assert.Equal(t, "ALTER TABLE app.users ADD COLUMN name varchar(64) NOT NULL;", r.Stmts[0])
+}
+
+func TestDiffDropColumnSuppressed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, legacy VARCHAR(64), PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList()) // no allow-drop
+	require.NoError(t, err)
+	assert.Empty(t, r.Stmts)
+	require.Len(t, r.DisallowedDropStmts, 1)
+	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE app.users DROP COLUMN legacy")
+}
+
+func TestDiffDropColumnAllowed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, legacy VARCHAR(64), PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("column"))
+	require.NoError(t, err)
+	require.Len(t, r.Stmts, 1)
+	assert.Equal(t, "ALTER TABLE app.users DROP COLUMN legacy;", r.Stmts[0])
+}
+
+func TestDiffModifyColumnType(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(64), PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(255), PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
+	require.NoError(t, err)
+	require.Len(t, r.Stmts, 1)
+	assert.Equal(t, "ALTER TABLE app.users MODIFY COLUMN name varchar(255);", r.Stmts[0])
+}
+
+func TestDiffModifyColumnDefault(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'a', PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'b', PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
+	require.NoError(t, err)
+	require.Len(t, r.Stmts, 1)
+	assert.Contains(t, r.Stmts[0], "DEFAULT 'b'")
 }
 
 func TestDiffDropTableSuppressed(t *testing.T) {
-	current, err := parser.ParseSQL("CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));", "app")
+	cur, des := parsePair(t, `CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));`, "")
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList())
 	require.NoError(t, err)
-	desired, err := parser.ParseSQL("", "app")
-	require.NoError(t, err)
-
-	r, err := diff.DiffTables(current.Tables, desired.Tables, &diff.AllowList{Kinds: map[string]bool{}})
-	require.NoError(t, err)
-
 	assert.Empty(t, r.Stmts)
 	assert.Empty(t, r.DropStmts)
 	require.Len(t, r.DisallowedDropStmts, 1)
 	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: DROP TABLE app.legacy")
+}
+
+func TestDiffDropTableAllowed(t *testing.T) {
+	cur, des := parsePair(t, `CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));`, "")
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("table"))
+	require.NoError(t, err)
+	require.Len(t, r.DropStmts, 1)
+	assert.Equal(t, "DROP TABLE app.legacy;", r.DropStmts[0])
+}
+
+func TestDiffAddCheckConstraint(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE products (id INT NOT NULL, price INT NOT NULL, PRIMARY KEY (id));`,
+		`CREATE TABLE products (id INT NOT NULL, price INT NOT NULL, PRIMARY KEY (id), CONSTRAINT chk CHECK (price > 0));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
+	require.NoError(t, err)
+	require.Len(t, r.Stmts, 1)
+	assert.Contains(t, r.Stmts[0], "ADD CONSTRAINT chk CHECK")
+}
+
+func TestDiffDropCheckConstraintAllowed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE products (id INT NOT NULL, price INT NOT NULL, PRIMARY KEY (id), CONSTRAINT chk CHECK (price > 0));`,
+		`CREATE TABLE products (id INT NOT NULL, price INT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("constraint"))
+	require.NoError(t, err)
+	require.Len(t, r.Stmts, 1)
+	assert.Equal(t, "ALTER TABLE app.products DROP CHECK chk;", r.Stmts[0])
+}
+
+func TestDiffDropCheckConstraintSuppressed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE products (id INT NOT NULL, price INT NOT NULL, PRIMARY KEY (id), CONSTRAINT chk CHECK (price > 0));`,
+		`CREATE TABLE products (id INT NOT NULL, price INT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList())
+	require.NoError(t, err)
+	assert.Empty(t, r.Stmts)
+	require.Len(t, r.DisallowedDropStmts, 1)
+	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE app.products DROP CHECK chk")
+}
+
+func TestDiffAddIndex(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, email VARCHAR(255), PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, email VARCHAR(255), PRIMARY KEY (id), KEY idx_email (email));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
+	require.NoError(t, err)
+	require.Len(t, r.Stmts, 1)
+	assert.Contains(t, r.Stmts[0], "CREATE INDEX idx_email ON app.users")
+}
+
+func TestDiffDropIndexSuppressed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, email VARCHAR(255), PRIMARY KEY (id), KEY idx_email (email));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, email VARCHAR(255), PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList())
+	require.NoError(t, err)
+	assert.Empty(t, r.Stmts)
+	require.Len(t, r.DisallowedDropStmts, 1)
+	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE app.users DROP INDEX idx_email")
+}
+
+func TestDiffAddForeignKey(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id),
+  CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
+	require.NoError(t, err)
+	require.Len(t, r.FKAddStmts, 1)
+	assert.Contains(t, r.FKAddStmts[0], "ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES app.users(id)")
+}
+
+func TestDiffDropForeignKeySuppressed(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id),
+  CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList())
+	require.NoError(t, err)
+	assert.Empty(t, r.FKDropStmts)
+	require.Len(t, r.DisallowedDropStmts, 1)
+	assert.Contains(t, r.DisallowedDropStmts[0], "DROP FOREIGN KEY fk")
+}
+
+// TestDiffDropTableWithFK verifies DiffTables emits FK drops on a
+// being-dropped table BEFORE the table drop, and respects the table-drop
+// policy: when --allow-drop=table is unset, both the FK drop and the
+// table drop are suppressed together.
+func TestDiffDropTableWithFK(t *testing.T) {
+	current, _ := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id),
+  CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id));`,
+		"")
+	desired, _ := parsePair(t, "", "")
+
+	t.Run("allow_drop=table emits FK drop then table drop", func(t *testing.T) {
+		r, err := diff.DiffTables(current.Tables, desired.Tables, allowList("table"))
+		require.NoError(t, err)
+		require.Len(t, r.FKDropStmts, 1)
+		assert.Contains(t, r.FKDropStmts[0], "DROP FOREIGN KEY fk")
+		require.Len(t, r.DropStmts, 2) // posts + users
+	})
+
+	t.Run("no allow_drop suppresses both", func(t *testing.T) {
+		r, err := diff.DiffTables(current.Tables, desired.Tables, allowList())
+		require.NoError(t, err)
+		assert.Empty(t, r.FKDropStmts)
+		assert.Empty(t, r.DropStmts)
+		// Disallowed drops include FK comment + 2 table comments
+		assert.NotEmpty(t, r.DisallowedDropStmts)
+	})
+}
+
+// TestDropPolicyWildcard pins the "all" wildcard semantics.
+func TestDropPolicyWildcard(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE users (id BIGINT NOT NULL, legacy VARCHAR(64), PRIMARY KEY (id), KEY i (legacy));`,
+		`CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));`,
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("all"))
+	require.NoError(t, err)
+	// Should drop the index, drop the column, no disallowed
+	assert.Empty(t, r.DisallowedDropStmts)
+	body := strings.Join(r.Stmts, "\n")
+	assert.Contains(t, body, "DROP INDEX i")
+	assert.Contains(t, body, "DROP COLUMN legacy")
+}
+
+// TestDropPolicyNilFallsBackToAllowAll: passing nil to DiffTables should
+// behave like AllowAll{}, not like an empty AllowList.
+func TestDropPolicyNilFallsBackToAllowAll(t *testing.T) {
+	cur, des := parsePair(t,
+		`CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));`,
+		"",
+	)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, nil)
+	require.NoError(t, err)
+	require.Len(t, r.DropStmts, 1, "nil dc should permit drops")
+}
+
+// TestDiffNoChangesIsEmpty: identical current / desired yields no
+// statements, no disallowed comments. The trivial sanity case.
+func TestDiffNoChanges(t *testing.T) {
+	sql := `CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));`
+	cur, des := parsePair(t, sql, sql)
+	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
+	require.NoError(t, err)
+	assert.Empty(t, r.Stmts)
+	assert.Empty(t, r.DropStmts)
+	assert.Empty(t, r.FKDropStmts)
+	assert.Empty(t, r.FKAddStmts)
+	assert.Empty(t, r.DisallowedDropStmts)
 }
