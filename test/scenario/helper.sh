@@ -10,7 +10,7 @@ export MYSCHEMA_DSN="${MYSCHEMA_DSN:-${MYSCHEMA_TEST_DSN:-root@tcp(127.0.0.1:330
 # `mysql` CLI invocation used to set up / tear down test databases.
 # Override MYSQL_BIN if your client is not on $PATH (e.g. mysql-shell).
 : "${MYSQL_BIN:=mysql}"
-_mysql_args=(--protocol=TCP -h 127.0.0.1 -P 3306 -u root --skip-ssl)
+_mysql_args=(--protocol=TCP -h 127.0.0.1 -P 3306 -u root)
 
 _pass=0
 _fail=0

@@ -10,17 +10,17 @@ import (
 // catalog reader. Indexes/Constraints/ForeignKeys are kept as ordered maps so
 // the serialized output is deterministic.
 type Table struct {
-	Database    string
-	Name        string
-	Engine      *string
-	Charset     *string
-	Collation   *string
-	Comment     *string
+	Database      string
+	Name          string
+	Engine        *string
+	Charset       *string
+	Collation     *string
+	Comment       *string
 	AutoIncrement *uint64
-	Columns     *orderedmap.Map[string, *Column]
-	Constraints *orderedmap.Map[string, *Constraint] // PK / UNIQUE / CHECK; UNIQUE indexes are NOT here, they live in Indexes
-	ForeignKeys *orderedmap.Map[string, *ForeignKey]
-	Indexes     *orderedmap.Map[string, *Index]
+	Columns       *orderedmap.Map[string, *Column]
+	Constraints   *orderedmap.Map[string, *Constraint] // PK / UNIQUE / CHECK; UNIQUE indexes are NOT here, they live in Indexes
+	ForeignKeys   *orderedmap.Map[string, *ForeignKey]
+	Indexes       *orderedmap.Map[string, *Index]
 }
 
 // FQTN returns the database-qualified name (database.table).

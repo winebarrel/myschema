@@ -316,13 +316,25 @@ func indexEqual(a, b *model.Index) bool {
 			return false
 		}
 	}
-	if !strings.EqualFold(a.IndexType, b.IndexType) {
+	if normalizeIndexType(a.IndexType) != normalizeIndexType(b.IndexType) {
 		return false
 	}
 	if a.Invisible != b.Invisible {
 		return false
 	}
 	return true
+}
+
+// normalizeIndexType folds the InnoDB default ("BTREE") into "" so that an
+// implicit `CREATE INDEX … (col)` (no USING clause) compares equal to the
+// catalog's "BTREE". Other index types (HASH, FULLTEXT, SPATIAL) are returned
+// uppercased and unchanged.
+func normalizeIndexType(s string) string {
+	up := strings.ToUpper(s)
+	if up == "BTREE" {
+		return ""
+	}
+	return up
 }
 
 func diffForeignKeys(fqtn string, current, desired *orderedmap.Map[string, *model.ForeignKey], dc DropChecker) (drops, adds, disallowed []string) {

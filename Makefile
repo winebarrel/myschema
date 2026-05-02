@@ -8,7 +8,7 @@ export MYSQL_DB    := myschema_test
 # if your local MySQL is reachable on a different host / port / user.
 export MYSCHEMA_TEST_DSN ?= $(MYSQL_USER)@tcp($(MYSQL_HOST):$(MYSQL_PORT))/
 
-MYSQL := mysql -h $(MYSQL_HOST) -P $(MYSQL_PORT) -u $(MYSQL_USER) --skip-ssl
+MYSQL := mysql -h $(MYSQL_HOST) -P $(MYSQL_PORT) -u $(MYSQL_USER)
 
 .PHONY: all
 all: vet test build
