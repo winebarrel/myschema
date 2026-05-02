@@ -11,7 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/helper.sh"
 
 DATA="$SCRIPT_DIR/testdata/dump_roundtrip"
-TMP="$(mktemp -d)"
+# Portable: GNU `mktemp -d` accepts no template, BSD/macOS requires
+# one. Pass an explicit template under $TMPDIR so both work.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/myschema-roundtrip.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 # 01: load the source schema directly via mysql (the source is hand-

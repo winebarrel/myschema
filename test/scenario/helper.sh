@@ -132,6 +132,13 @@ myschema_dump() {
 # missing command, or missing substring all fail loudly with a clear
 # message rather than letting bash run a malformed command.
 assert_contains() {
+  # Validate $# before referencing $1 / shifting so a malformed call
+  # under `set -u` fails loudly via fail() instead of aborting the
+  # whole script with "unbound variable".
+  if [ $# -lt 1 ]; then
+    fail "assert_contains: missing step name (usage: <step> <cmd...> -- <substring>)"
+    return 1
+  fi
   local step_name="$1"
   shift
   step "$step_name"
@@ -167,7 +174,9 @@ assert_contains() {
 
   local out
   out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
-  if echo "$out" | grep -qF "$expected"; then
+  # printf rather than echo so output starting with `-n` or
+  # backslash escapes doesn't get re-interpreted on the way to grep.
+  if printf '%s\n' "$out" | grep -qF -- "$expected"; then
     pass
   else
     fail "expected substring not found"
@@ -179,6 +188,10 @@ assert_contains() {
 
 # Same shape as assert_contains, but the substring must NOT appear.
 assert_not_contains() {
+  if [ $# -lt 1 ]; then
+    fail "assert_not_contains: missing step name (usage: <step> <cmd...> -- <substring>)"
+    return 1
+  fi
   local step_name="$1"
   shift
   step "$step_name"
@@ -214,7 +227,7 @@ assert_not_contains() {
 
   local out
   out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
-  if echo "$out" | grep -qF "$unexpected"; then
+  if printf '%s\n' "$out" | grep -qF -- "$unexpected"; then
     fail "unexpected substring present"
     echo "    unexpected: $unexpected" >&2
     echo "    actual:     $out" >&2
