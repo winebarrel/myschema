@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+defaults:
+  run:
+    shell: bash -xeo pipefail {0}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v6
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+      - name: Start MySQL
+        run: |
+          for i in {1..60}; do docker compose up -d --quiet-pull && break; sleep 1; done
+          for i in {1..60}; do
+            mysqladmin ping -h 127.0.0.1 -P 3306 -u root --skip-ssl --silent && break
+            sleep 2
+          done
+      - run: make TEST_OPTS='-coverprofile=coverage.txt'
+      - run: make test-scenario
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
