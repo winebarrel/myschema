@@ -141,15 +141,15 @@ rather than declarative schema. Manage them out of band.)
   silently creates one (named after the FK). `information_schema.
   STATISTICS` doesn't flag it as implicit, so the catalog reads it as
   an ordinary index — desired SQL that declares the FK without also
-  declaring the index then shows false drift, and `apply --allow-drop=
-  index` fails with `Error 1553` (the FK still needs the index). Two
-  workarounds: (a) declare the covering index explicitly in desired
-  SQL (this is what `dump` outputs, so `dump → apply` round-trips
-  cleanly); or (b) leave the implicit index in place and accept the
-  `-- skipped: DROP INDEX` line in plan output. The proper fix is a
-  diff-side suppression rule mirroring MySQL's reuse: skip a DROP INDEX
-  whose columns form the left-most prefix of a surviving FK and where
-  no other surviving index covers that FK.
+  declaring the index then shows false drift, and apply fails with
+  `Error 1553` once `--allow-drop=index` lets the DROP through (the
+  FK still needs the index). Two workarounds: (a) declare the covering
+  index explicitly in desired SQL (this is what `dump` outputs, so
+  `dump → apply` round-trips cleanly); or (b) leave the implicit index
+  in place and accept the `-- skipped: DROP INDEX` line in plan output.
+  The proper fix is a diff-side suppression rule mirroring MySQL's
+  reuse: skip a DROP INDEX whose columns form the left-most prefix of
+  a surviving FK and where no other surviving index covers that FK.
 - View `DEFINER` and `SQL SECURITY` clauses are catalogued but not
   diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
