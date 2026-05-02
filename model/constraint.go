@@ -14,8 +14,10 @@ const (
 // neither value ever appears in a *Constraint produced by parser/catalog.
 // They are intentionally not declared here to keep the type space honest.
 
-// Constraint covers PRIMARY KEY, UNIQUE, and CHECK.
-// Foreign keys live in their own struct because they carry a reference target.
+// Constraint covers PRIMARY KEY and CHECK.
+// UNIQUE constraints live in *Index (catalogued via
+// information_schema.STATISTICS), and foreign keys live in *ForeignKey
+// because they carry a reference target.
 type Constraint struct {
 	Name       string
 	Type       ConstraintType

@@ -75,9 +75,9 @@ func (t *Table) SQL() string {
 // ColumnDefSQL renders the post-name body of a column definition
 // (`<type> [CHARACTER SET …] [COLLATE …] [GENERATED …] [NOT NULL]
 // [DEFAULT …] [ON UPDATE …] [AUTO_INCREMENT] [COMMENT …]`) prefixed by
-// the back-tick-quoted column name. It is used both inside `CREATE TABLE`
-// (via TableSQL) and on the diff side for `ALTER TABLE ADD/MODIFY COLUMN`,
-// so both contexts emit the same set of attributes.
+// the back-tick-quoted column name. Used by `(*Table).SQL()` for the
+// `CREATE TABLE` body and by `diff/tables.go` for `ALTER TABLE
+// ADD/MODIFY COLUMN`, so both contexts emit the same set of attributes.
 func ColumnDefSQL(col *Column) string { return columnDefSQL(col) }
 
 func columnDefSQL(col *Column) string {
