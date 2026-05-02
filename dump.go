@@ -2,6 +2,7 @@ package myschema
 
 import (
 	"context"
+	"strings"
 
 	"github.com/winebarrel/myschema/catalog"
 	"github.com/winebarrel/myschema/model"
@@ -50,16 +51,13 @@ func (c *Client) Dump(ctx context.Context, options *DumpOptions) (*DumpResult, e
 	if views.Len() > 0 {
 		parts = append(parts, model.ViewsToSQL(views))
 	}
-	sql := ""
+	nonEmpty := parts[:0]
 	for _, p := range parts {
-		if p == "" {
-			continue
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
 		}
-		if sql != "" {
-			sql += "\n\n"
-		}
-		sql += p
 	}
+	sql := strings.Join(nonEmpty, "\n\n")
 
 	return &DumpResult{
 		SQL: sql,

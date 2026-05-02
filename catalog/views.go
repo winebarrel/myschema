@@ -10,6 +10,9 @@ import (
 
 // Views loads every view in the configured database.
 func (c *Catalog) Views(ctx context.Context) (*orderedmap.Map[string, *model.View], error) {
+	if err := c.ping(ctx); err != nil {
+		return nil, err
+	}
 	out := orderedmap.New[string, *model.View]()
 	q := `
 SELECT TABLE_SCHEMA, TABLE_NAME, VIEW_DEFINITION, CHECK_OPTION,

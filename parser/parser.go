@@ -434,6 +434,12 @@ func buildFK(name string, t *model.Table, cols []string, ref *sqlparser.Referenc
 	return fk, nil
 }
 
+// referenceActionString maps vitess's ReferenceAction onto the strings the
+// catalog reader produces. RESTRICT and NO ACTION are MySQL semantic
+// equivalents and information_schema.REFERENTIAL_CONSTRAINTS reports both
+// as the empty (default) action — so we collapse them too. Otherwise an
+// `ON DELETE NO ACTION` in desired SQL would diff against a catalog row
+// whose UPDATE_RULE / DELETE_RULE was canonicalised to nothing.
 func referenceActionString(a sqlparser.ReferenceAction) string {
 	switch a {
 	case sqlparser.Cascade:
@@ -442,8 +448,8 @@ func referenceActionString(a sqlparser.ReferenceAction) string {
 		return "SET NULL"
 	case sqlparser.SetDefault:
 		return "SET DEFAULT"
-	case sqlparser.NoAction:
-		return "NO ACTION"
+	case sqlparser.NoAction, sqlparser.Restrict:
+		return ""
 	}
 	return ""
 }

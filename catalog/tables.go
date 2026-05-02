@@ -2,14 +2,20 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	mysqldrv "github.com/go-sql-driver/mysql"
 	"vitess.io/vitess/go/vt/sqlparser"
 
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/orderedmap"
 )
+
+// mysqlErrNoSuchTable is MySQL's ER_NO_SUCH_TABLE; we treat it as "this
+// MySQL is too old to have CHECK_CONSTRAINTS" rather than a hard error.
+const mysqlErrNoSuchTable = 1146
 
 // Tables loads every table in the configured databases plus its columns,
 // constraints, foreign keys, and indexes.
@@ -268,8 +274,8 @@ WHERE  tc.TABLE_SCHEMA    = ?
   AND  tc.CONSTRAINT_TYPE = 'CHECK'`
 	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "doesn't exist") ||
-			strings.Contains(strings.ToLower(err.Error()), "unknown table") {
+		var mErr *mysqldrv.MySQLError
+		if errors.As(err, &mErr) && mErr.Number == mysqlErrNoSuchTable {
 			return nil
 		}
 		return fmt.Errorf("catalog: list check constraints for %s: %w", t.FQTN(), err)
