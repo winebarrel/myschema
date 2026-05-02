@@ -25,7 +25,7 @@ func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, e
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	r, err := c.diffAll(ctx, db, &diffAllOptions{
 		FilterOptions: options.FilterOptions,

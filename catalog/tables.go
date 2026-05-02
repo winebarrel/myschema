@@ -29,7 +29,7 @@ ORDER  BY TABLE_SCHEMA, TABLE_NAME`
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list tables: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	for rows.Next() {
 		var (
@@ -90,7 +90,7 @@ ORDER  BY ORDINAL_POSITION`
 	if err != nil {
 		return fmt.Errorf("catalog: list columns for %s: %w", t.FQTN(), err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	for rows.Next() {
 		var (
@@ -149,29 +149,29 @@ ORDER  BY INDEX_NAME, SEQ_IN_INDEX`
 	if err != nil {
 		return fmt.Errorf("catalog: list indexes for %s: %w", t.FQTN(), err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	type indexRow struct {
-		nonUnique  int
-		indexType  string
-		comment    string
-		visible    string
-		parts      []model.IndexPart
+		nonUnique int
+		indexType string
+		comment   string
+		visible   string
+		parts     []model.IndexPart
 	}
 	idxs := map[string]*indexRow{}
 	order := []string{}
 	for rows.Next() {
 		var (
-			name        string
-			nonUnique   int
-			seq         int
-			colName     *string
-			subPart     *int
-			indexType   string
-			collation   *string
-			expression  *string
-			comment     string
-			visible     string
+			name       string
+			nonUnique  int
+			seq        int
+			colName    *string
+			subPart    *int
+			indexType  string
+			collation  *string
+			expression *string
+			comment    string
+			visible    string
 		)
 		if err := rows.Scan(&name, &nonUnique, &seq, &colName, &subPart, &indexType, &collation, &expression, &comment, &visible); err != nil {
 			return fmt.Errorf("catalog: scan indexes for %s: %w", t.FQTN(), err)
@@ -266,7 +266,7 @@ WHERE  CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ?`
 		}
 		return fmt.Errorf("catalog: list check constraints for %s: %w", t.FQTN(), err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
 		var name, clause string
 		if err := rows.Scan(&name, &clause); err != nil {
@@ -299,7 +299,7 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 	if err != nil {
 		return fmt.Errorf("catalog: list foreign keys for %s: %w", t.FQTN(), err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	type fkAcc struct {
 		fk *model.ForeignKey
@@ -308,9 +308,9 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 	order := []string{}
 	for rows.Next() {
 		var (
-			name, col       string
-			refDB, refTable string
-			refCol          string
+			name, col               string
+			refDB, refTable         string
+			refCol                  string
 			updRule, delRule, match string
 		)
 		if err := rows.Scan(&name, &col, &refDB, &refTable, &refCol, &updRule, &delRule, &match); err != nil {
@@ -319,13 +319,13 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 		acc, ok := fks[name]
 		if !ok {
 			acc = &fkAcc{fk: &model.ForeignKey{
-				Name:     name,
-				Database: t.Database,
-				Table:    t.Name,
-				RefDB:    refDB,
-				RefTable: refTable,
-				OnUpdate: normalizeRefOpt(updRule),
-				OnDelete: normalizeRefOpt(delRule),
+				Name:      name,
+				Database:  t.Database,
+				Table:     t.Name,
+				RefDB:     refDB,
+				RefTable:  refTable,
+				OnUpdate:  normalizeRefOpt(updRule),
+				OnDelete:  normalizeRefOpt(delRule),
 				MatchType: normalizeMatch(match),
 			}}
 			fks[name] = acc

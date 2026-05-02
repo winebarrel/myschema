@@ -28,7 +28,7 @@ func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) 
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	r, err := c.diffAll(ctx, db, &diffAllOptions{
 		FilterOptions: options.FilterOptions,

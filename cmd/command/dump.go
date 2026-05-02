@@ -18,6 +18,6 @@ func (cmd *Dump) Run(ctx context.Context, client *myschema.Client, w io.Writer) 
 		return err
 	}
 	fmt.Fprintf(w, "-- Dump of %s (%s)\n", r.Count.DBLabel(), r.Count.Summary()) //nolint:errcheck
-	fmt.Fprintln(w, r)                                                            //nolint:errcheck
+	fmt.Fprintln(w, r)                                                           //nolint:errcheck
 	return nil
 }

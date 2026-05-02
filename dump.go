@@ -27,7 +27,7 @@ func (c *Client) Dump(ctx context.Context, options *DumpOptions) (*DumpResult, e
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	cat := catalog.NewCatalog(db, c.Databases)
 	tables, err := cat.Tables(ctx)
