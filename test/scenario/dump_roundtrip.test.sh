@@ -27,6 +27,8 @@ if myschema_dump > "$dumped"; then
 else
   fail "dump failed"
   cat "$dumped" >&2
+  summary
+  exit 1
 fi
 
 # 03: wipe and re-apply the dumped SQL. Allow drops since the wiped DB
@@ -39,6 +41,8 @@ if "$MYSCHEMA" apply --allow-drop all "$dumped" >"$TMP/apply.log" 2>&1; then
 else
   fail "apply failed"
   cat "$TMP/apply.log" >&2
+  summary
+  exit 1
 fi
 
 # 04: plan against the *original* source SQL — if the dump was

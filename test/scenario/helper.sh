@@ -115,23 +115,50 @@ myschema_dump() {
   "$MYSCHEMA" dump "$@" 2>&1
 }
 
-# Assert that a step's command output contains an expected substring.
+# Assert that a step's command output (stdout + stderr) contains an
+# expected substring.
 # Usage: assert_contains <step-name> <command...> -- <expected substring>
-# Example: assert_contains "table is filtered" myschema_plan -I 'users*' "$DATA/schema.sql" -- 'CREATE TABLE myschema_test.users'
+# Example:
+#   assert_contains "table is filtered" \
+#     "$MYSCHEMA" plan -I 'users*' "$DATA/schema.sql" \
+#     -- 'CREATE TABLE myschema_test.users'
+#
+# The "--" separator is required so the helper can find the boundary
+# between cmd args and the expected substring; missing separator,
+# missing command, or missing substring all fail loudly with a clear
+# message rather than letting bash run a malformed command.
 assert_contains() {
   local step_name="$1"
   shift
+  step "$step_name"
+
   local cmd=()
-  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+  local found_sep=0
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--" ]; then
+      found_sep=1
+      shift
+      break
+    fi
     cmd+=("$1")
     shift
   done
-  shift # consume "--"
+  if [ "$found_sep" -ne 1 ]; then
+    fail "assert_contains: missing '--' separator (cmd... -- substring)"
+    return 1
+  fi
+  if [ ${#cmd[@]} -eq 0 ]; then
+    fail "assert_contains: no command before '--'"
+    return 1
+  fi
+  if [ $# -eq 0 ]; then
+    fail "assert_contains: no expected substring after '--'"
+    return 1
+  fi
   local expected="$1"
 
-  step "$step_name"
   local out
-  out=$("${cmd[@]}") || { fail "command failed: $out"; return 1; }
+  out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
   if echo "$out" | grep -qF "$expected"; then
     pass
   else
@@ -146,17 +173,35 @@ assert_contains() {
 assert_not_contains() {
   local step_name="$1"
   shift
+  step "$step_name"
+
   local cmd=()
-  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+  local found_sep=0
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--" ]; then
+      found_sep=1
+      shift
+      break
+    fi
     cmd+=("$1")
     shift
   done
-  shift # consume "--"
+  if [ "$found_sep" -ne 1 ]; then
+    fail "assert_not_contains: missing '--' separator (cmd... -- substring)"
+    return 1
+  fi
+  if [ ${#cmd[@]} -eq 0 ]; then
+    fail "assert_not_contains: no command before '--'"
+    return 1
+  fi
+  if [ $# -eq 0 ]; then
+    fail "assert_not_contains: no expected substring after '--'"
+    return 1
+  fi
   local unexpected="$1"
 
-  step "$step_name"
   local out
-  out=$("${cmd[@]}") || { fail "command failed: $out"; return 1; }
+  out=$("${cmd[@]}" 2>&1) || { fail "command failed: $out"; return 1; }
   if echo "$out" | grep -qF "$unexpected"; then
     fail "unexpected substring present"
     echo "    unexpected: $unexpected" >&2
