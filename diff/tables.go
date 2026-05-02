@@ -8,9 +8,15 @@ import (
 )
 
 // TableDiffResult separates FK operations from other statements so callers
-// can order them: FK drops first, then table/column/constraint/index changes,
-// then FK adds last.
+// can order them: table renames first, then FK drops, then table /
+// column / constraint / index changes, then FK adds last.
 type TableDiffResult struct {
+	// RenameStmts holds `ALTER TABLE … RENAME TO …` statements, which
+	// must execute *before* any FK drops or other ALTER TABLE statements
+	// targeting the new name. If a table both renames and has an FK
+	// changed, the FK-drop on the new name would fire against a table
+	// that doesn't exist yet under that name without this ordering.
+	RenameStmts         []string
 	FKDropStmts         []string
 	Stmts               []string
 	FKAddStmts          []string
@@ -20,9 +26,31 @@ type TableDiffResult struct {
 
 // DiffTables produces the DDL needed to bring the current schema into the
 // shape described by desired.
+//
+// CAVEAT: rename handling mutates `current` in place (re-keys entries
+// after table renames; updates Name/Database, FK Columns, FK RefCols,
+// index parts, and PK constraint columns to match desired's view of
+// the world). Callers that want to reuse `current` after calling
+// DiffTables should clone it first. The whole-program flow in
+// diff_all.go builds a fresh `current` per invocation, so this is fine
+// for production use; the constraint matters mainly for tests that
+// share fixtures across subtests.
 func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropChecker) (*TableDiffResult, error) {
 	dc = NormalizeDropChecker(dc)
 	res := &TableDiffResult{}
+
+	// Rename pass first: ALTER TABLE … RENAME TO is applied before any
+	// other table-level diffing, and the matching current entry is
+	// re-keyed so the rest of the pipeline sees the renamed table under
+	// its new FQTN. New / modified / dropped detection below then works
+	// without false negatives. Renames go in their own bucket so the
+	// caller can sequence them ahead of FK drops on the (now-renamed)
+	// target table.
+	renameStmts, err := applyTableRenames(current, desired)
+	if err != nil {
+		return nil, err
+	}
+	res.RenameStmts = append(res.RenameStmts, renameStmts...)
 
 	// New tables: emit CREATE TABLE, then per-table secondary indexes and FKs.
 	for k, dt := range desired.All() {
@@ -41,13 +69,32 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		}
 	}
 
+	// Cross-table column-rename pass: when a column on a parent table
+	// is renamed, every other table's FK that references it needs its
+	// RefCols rewritten so the FK doesn't subsequently diff as DROP+ADD.
+	// Same-table FK Columns and PK / index column refs are handled
+	// inside diffTable itself.
+	for k, dt := range desired.All() {
+		if _, ok := current.GetOk(k); !ok {
+			continue
+		}
+		renames := columnRenameMap(dt.Columns)
+		if len(renames) == 0 {
+			continue
+		}
+		rewriteCrossTableFKRefCols(current, dt.Database, dt.Name, renames)
+	}
+
 	// Modified tables.
 	for k, dt := range desired.All() {
 		ct, ok := current.GetOk(k)
 		if !ok {
 			continue
 		}
-		sub := diffTable(ct, dt, dc)
+		sub, err := diffTable(ct, dt, dc)
+		if err != nil {
+			return nil, err
+		}
 		res.FKDropStmts = append(res.FKDropStmts, sub.FKDropStmts...)
 		res.Stmts = append(res.Stmts, sub.Stmts...)
 		res.FKAddStmts = append(res.FKAddStmts, sub.FKAddStmts...)
@@ -85,9 +132,31 @@ type tableDiffResult struct {
 	DisallowedDropStmts []string
 }
 
-func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
+func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult, error) {
 	res := &tableDiffResult{}
 	fqtn := desired.FQTN()
+
+	// Column rename pass first, so the index-rename pass below and the
+	// regular column / index / FK diffs see the renamed objects under
+	// their new names. Index parts AND FK column lists that referenced
+	// the old column names are rewritten in place (current side only)
+	// so indexEqual / fkEqual stay quiet for objects that should NOT
+	// trigger a DROP+CREATE / DROP+ADD.
+	renames := columnRenameMap(desired.Columns)
+	colRenameStmts, err := applyColumnRenames(fqtn, current.Columns, desired.Columns)
+	if err != nil {
+		return nil, err
+	}
+	res.Stmts = append(res.Stmts, colRenameStmts...)
+	rewriteIndexColumnRefs(current.Indexes, renames)
+	rewriteFKColumnRefs(current.ForeignKeys, current.Database, current.Name, renames)
+	rewriteConstraintColumnRefs(current.Constraints, current.Indexes, renames)
+
+	idxRenameStmts, err := applyIndexRenames(fqtn, current.Indexes, desired.Indexes)
+	if err != nil {
+		return nil, err
+	}
+	res.Stmts = append(res.Stmts, idxRenameStmts...)
 
 	colStmts, colDisallowed := diffColumns(fqtn, current.Columns, desired.Columns, dc)
 	res.Stmts = append(res.Stmts, colStmts...)
@@ -122,7 +191,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) *tableDiffResult {
 	res.FKAddStmts = append(res.FKAddStmts, fkAdds...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, fkDisallowed...)
 
-	return res
+	return res, nil
 }
 
 // droppedColumns returns the names of columns present in current but

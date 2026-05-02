@@ -59,6 +59,9 @@ func newParser() (*sqlparser.Parser, error) {
 
 // ParseSQL parses a SQL string into a ParseResult.
 func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
+	if err := ValidateDirectives(sql); err != nil {
+		return nil, err
+	}
 	p, err := newParser()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parser: %w", err)
@@ -76,6 +79,18 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		if piece == "" {
 			continue
 		}
+		// Directive extraction runs against the raw piece before vitess
+		// strips comments. Statement-level directives sit on a leading
+		// comment block; inline directives (column / index renames) live
+		// inside the CREATE TABLE body, classified per-kind so a column
+		// and an index that share a name (which happens when a KEY is
+		// auto-named after its first column) don't compete for the same
+		// directive.
+		stmtRename, err := ExtractStmtRenameFrom(piece)
+		if err != nil {
+			return nil, err
+		}
+		inlineRenames := ExtractInlineRenames(piece)
 		stmt, err := p.Parse(piece)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse SQL: %w", err)
@@ -86,6 +101,30 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if err != nil {
 				return nil, err
 			}
+			if stmtRename != "" {
+				rn := stmtRename
+				t.RenameFrom = &rn
+			}
+			for name, old := range inlineRenames.Columns {
+				c, ok := t.Columns.GetOk(name)
+				if !ok {
+					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target column %q not found in CREATE TABLE", t.FQTN(), old, name)
+				}
+				o := old
+				c.RenameFrom = &o
+			}
+			for name, old := range inlineRenames.Indexes {
+				idx, ok := t.Indexes.GetOk(name)
+				if !ok {
+					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target index %q not found in CREATE TABLE", t.FQTN(), old, name)
+				}
+				o := old
+				idx.RenameFrom = &o
+			}
+			if len(inlineRenames.Unsupported) > 0 {
+				u := inlineRenames.Unsupported[0]
+				return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: %s", t.FQTN(), u.OldName, u.Reason)
+			}
 			if _, dup := tables.GetOk(t.FQTN()); dup {
 				return nil, fmt.Errorf("duplicate table: %s", t.FQTN())
 			}
@@ -93,6 +132,9 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 
 		case *sqlparser.AlterTable:
 			if err := applyAlterTable(tables, s, defaultDB); err != nil {
+				return nil, err
+			}
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "ALTER TABLE"); err != nil {
 				return nil, err
 			}
 
@@ -105,14 +147,36 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				return nil, fmt.Errorf("duplicate view: %s", v.FQVN())
 			}
 			views.Set(v.FQVN(), v)
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "CREATE VIEW"); err != nil {
+				return nil, err
+			}
 
 		default:
 			// Skip statements we don't model (CREATE DATABASE, COMMENT, SET,
 			// GRANT, etc).
+			kind := fmt.Sprintf("unsupported statement (%T)", s)
+			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, kind); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	return &ParseResult{Tables: tables, Views: views}, nil
+}
+
+// rejectMisplacedRenameDirectives errors if any rename directives were
+// extracted from a statement we don't currently support directives on.
+// Only `CREATE TABLE` participates today; anywhere else, a directive
+// would be silently dropped on the floor and the corresponding rename
+// would degrade into a destructive DROP+CREATE on the next plan.
+func rejectMisplacedRenameDirectives(stmtRename string, inline *InlineRenames, stmtKind string) error {
+	switch {
+	case stmtRename != "":
+		return fmt.Errorf("-- myschema:renamed-from %s: directive is only supported on CREATE TABLE, not %s", stmtRename, stmtKind)
+	case len(inline.Columns) > 0, len(inline.Indexes) > 0, len(inline.Unsupported) > 0:
+		return fmt.Errorf("-- myschema:renamed-from: directive is only supported inside CREATE TABLE, not %s", stmtKind)
+	}
+	return nil
 }
 
 func dbName(schema, defaultDB string) string {
