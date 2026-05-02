@@ -21,7 +21,23 @@ make lint            # golangci-lint run
 make fix             # golangci-lint run --fix
 make test-scenario   # bash test/scenario/run.sh (CLI scenario suite)
 make clean-schema    # drop + recreate the test database
+make schema          # load Chinook (MIT), employees (CC BY-SA), sakila (BSD-ish)
+                     # into separate databases for ad-hoc dump / plan testing
+make schema-drop     # remove the three sample databases
 ```
+
+Once `make schema` is loaded, point myschema at a sample DB:
+
+```sh
+MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/Chinook'   ./myschema dump
+MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/employees' ./myschema dump
+MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/sakila'    ./myschema dump
+```
+
+Chinook and employees round-trip cleanly (`dump` → `plan` against the
+output reports `-- No changes`). Sakila currently fails to round-trip
+through `plan` because pingcap's parser does not recognise the
+`geometry` column type — see TODO.md.
 
 Tests against MySQL connect to the DSN in `MYSCHEMA_TEST_DSN`
 (default `root@tcp(127.0.0.1:3306)/`) via `internal/testutil.ConnectDB`. If
