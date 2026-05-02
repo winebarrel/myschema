@@ -45,9 +45,6 @@ by area; ordering inside a group is not significant.
 - [ ] Cross-database FK ordering
 - [ ] `DROP TABLE` ordering when one being-dropped table is referenced by an
       FK on another being-dropped table
-- [ ] `--with-tx` actually wraps the apply in `BEGIN` / `COMMIT`. Today it
-      is a no-op flag. MySQL auto-commits DDL, so the value is mostly for
-      pre-SQL / arbitrary-SQL execution; document or remove
 
 ## CLI features
 
@@ -118,8 +115,6 @@ by area; ordering inside a group is not significant.
 
 ## Cleanup
 
-- [ ] `--with-tx` flag: either implement or remove; current state is a
-      misleading no-op
 - [ ] `applyAlterTable` accepts `ADD CONSTRAINT` only; either support more
       `ALTER TABLE` clauses in desired-side SQL or raise a clear error
 - [ ] `parseOne` test helper in `diff/tables_test.go` is unused once the
