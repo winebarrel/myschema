@@ -1,0 +1,36 @@
+# Spec test: pins the documented FK-implicit-index limitation
+# (see CLAUDE.md "Not yet implemented" section).
+#
+# When ADD FOREIGN KEY runs on un-indexed columns, MySQL silently
+# creates a covering index named after the FK constraint. The catalog
+# reads it back as an ordinary index because information_schema.
+# STATISTICS doesn't flag it as implicit. With desired SQL declaring
+# the FK but not the index, plan reports false drift: a suppressed
+# DROP INDEX. (Apply with --allow-drop=index would fail — MySQL
+# guards the index with Error 1553 while the FK still needs it.)
+#
+# When this fixture starts failing — i.e. plan goes silent — the
+# diff-side suppression rule has been added; remove this fixture and
+# the limitation note in CLAUDE.md.
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+desired: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+# allow_drop omitted → DROP INDEX surfaced as -- skipped:
+plan: ""
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.posts DROP INDEX fk_posts_user;

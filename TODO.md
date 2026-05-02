@@ -11,11 +11,17 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## High — correctness bugs
 
-- [ ] **`--allow-drop=all` emits redundant `DROP INDEX` for
-      column-dependent indexes.** When a column with a single-column
-      index is dropped, MySQL auto-removes the index, then myschema's
-      explicit `DROP INDEX` fails with `Error 1091`. Repro: column +
-      same-column KEY → desired drops both → apply fails.
+- [ ] **FK-implicit covering indexes look like drift.** `ADD FOREIGN
+      KEY` on un-indexed columns silently creates an index named after
+      the FK; `information_schema.STATISTICS` doesn't mark it as
+      implicit. When desired SQL declares the FK without the covering
+      index, the diff emits a `DROP INDEX` (suppressed unless `--allow-
+      drop=index`), and `apply` then fails with `Error 1553`. Documented
+      in CLAUDE.md as a known limitation; not fixed yet. The proper fix
+      is a diff-side suppression: skip a DROP INDEX whose columns form
+      the left-most prefix of a surviving FK and where no other surviving
+      index covers it (mirrors MySQL's reuse rule). Optional matching
+      `dump` filter; safer to leave dump verbose.
 - [ ] **`DROP TABLE` ordering when one being-dropped table is
       FK-referenced by another being-dropped table.** Currently the
       drop order is alphabetical by `TABLE_NAME`; if the parent comes
