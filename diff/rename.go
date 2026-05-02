@@ -42,8 +42,29 @@ func applyTableRenames(current, desired *orderedmap.Map[string, *model.Table]) (
 		ct.Database = dt.Database
 		ct.Name = dt.Name
 		current.Set(newKey, ct)
+		// Rewrite (RefDB, RefTable) on every other table's FKs that
+		// pointed at the old name. Without this, a pure table rename
+		// would diff each referencing FK as DROP FOREIGN KEY +
+		// ADD CONSTRAINT (and fail under restrictive --allow-drop) even
+		// though only the target name changed.
+		rewriteFKRefTable(current, dt.Database, *dt.RenameFrom, dt.Database, dt.Name)
 	}
 	return stmts, nil
+}
+
+// rewriteFKRefTable walks every table in the map and updates any FK
+// whose (RefDB, RefTable) matches (oldDB, oldName) to (newDB, newName).
+// Used after a table rename so cross-table FK references stay quiet in
+// the diff.
+func rewriteFKRefTable(tables *orderedmap.Map[string, *model.Table], oldDB, oldName, newDB, newName string) {
+	for _, t := range tables.CollectValues() {
+		for _, fk := range t.ForeignKeys.CollectValues() {
+			if fk.RefDB == oldDB && fk.RefTable == oldName {
+				fk.RefDB = newDB
+				fk.RefTable = newName
+			}
+		}
+	}
 }
 
 // applyColumnRenames does the same trick at the column level. Returns the

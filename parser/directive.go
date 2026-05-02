@@ -20,23 +20,45 @@ var (
 	anyDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:([a-zA-Z][a-zA-Z0-9_-]*)\b`)
 
 	// renameDirectivePattern captures the old name from a renamed-from
-	// directive. Old name is a single identifier with optional backticks.
+	// directive. Old name is either a bareword identifier or any
+	// backtick-quoted blob (so reserved words and names containing
+	// hyphens / spaces / etc. round-trip through model.Ident). The full
+	// line must match — trailing junk fails the pattern, which the
+	// validator turns into an error so a malformed directive doesn't
+	// silently degrade into a destructive DROP+CREATE.
+	//
 	// Schema-qualified old names (`db.tbl`) are intentionally rejected:
 	// myschema operates on a single database per invocation, so the
 	// directive only ever refers to an object inside that database.
-	renameDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:renamed-from\s+(` + "`?" + `[A-Za-z_][A-Za-z0-9_$]*` + "`?" + `)\s*$`)
+	renameDirectivePattern = regexp.MustCompile("(?m)^\\s*--+\\s*myschema:renamed-from\\s+(`[^`]+`|[A-Za-z_][A-Za-z0-9_$]*)\\s*$")
 )
 
 // ValidateDirectives scans rawSQL for any -- myschema:<name> comment and
-// returns an error if <name> isn't in knownDirectives. Call this once over
-// the whole input before per-statement parsing so typos like
-// `-- myschema:renamed-form old` fail loudly instead of being silently
-// ignored.
+// returns an error if (a) <name> isn't in knownDirectives, or (b) the
+// directive line is recognised but doesn't match the syntax for that
+// directive. Call this once over the whole input before per-statement
+// parsing so typos like `-- myschema:renamed-form old` (wrong name) or
+// `-- myschema:renamed-from db.tbl` (qualified, unsupported) or
+// `-- myschema:renamed-from` (missing arg) fail loudly instead of being
+// silently ignored downstream.
 func ValidateDirectives(rawSQL string) error {
-	for _, m := range anyDirectivePattern.FindAllStringSubmatch(rawSQL, -1) {
+	// Walk lines so we can match the *whole* directive line against the
+	// directive's required syntax — a partial match anywhere in the
+	// line wouldn't tell us about trailing junk or missing arguments.
+	for line := range strings.SplitSeq(rawSQL, "\n") {
+		m := anyDirectivePattern.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
 		name := m[1]
 		if !knownDirectives[name] {
 			return fmt.Errorf("unknown myschema directive %q", name)
+		}
+		switch name {
+		case "renamed-from":
+			if !renameDirectivePattern.MatchString(line) {
+				return fmt.Errorf("malformed -- myschema:renamed-from directive: %q (expected exactly one bareword or `backticked` identifier; schema-qualified names are not supported)", strings.TrimSpace(line))
+			}
 		}
 	}
 	return nil
@@ -192,6 +214,12 @@ func classifyInlineLine(line string) (inlineKind, string) {
 		return inlineKindUnknown, ""
 	case "KEY", "INDEX":
 		if len(tokens) < 2 {
+			return inlineKindUnknown, ""
+		}
+		// Unnamed `KEY (col)` / `INDEX (col)`: tokens[1] starts with
+		// "(" because the column list is the next token. The user must
+		// give the index a name to use renamed-from.
+		if strings.HasPrefix(tokens[1], "(") {
 			return inlineKindUnknown, ""
 		}
 		return inlineKindIndex, stripBackticks(tokens[1])

@@ -25,6 +25,39 @@ CREATE TABLE users (id INT);
 	assert.Contains(t, err.Error(), "renamed-form")
 }
 
+func TestValidateDirectivesRejectsQualifiedRenameTarget(t *testing.T) {
+	err := parser.ValidateDirectives(`-- myschema:renamed-from other_db.old_users
+CREATE TABLE users (id INT);
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed")
+	assert.Contains(t, err.Error(), "renamed-from")
+}
+
+func TestValidateDirectivesRejectsMissingArg(t *testing.T) {
+	err := parser.ValidateDirectives(`-- myschema:renamed-from
+CREATE TABLE users (id INT);
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed")
+}
+
+func TestValidateDirectivesRejectsTrailingJunk(t *testing.T) {
+	err := parser.ValidateDirectives(`-- myschema:renamed-from old, then drop it
+CREATE TABLE users (id INT);
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed")
+}
+
+func TestValidateDirectivesAcceptsBacktickedReservedWord(t *testing.T) {
+	// Reserved words / hyphens / etc. round-trip through model.Ident
+	// when backtick-quoted; the directive's old name should accept the
+	// same shape.
+	require.NoError(t, parser.ValidateDirectives("-- myschema:renamed-from `select`\nCREATE TABLE users (id INT);\n"))
+	require.NoError(t, parser.ValidateDirectives("-- myschema:renamed-from `weird-name`\nCREATE TABLE users (id INT);\n"))
+}
+
 func TestValidateDirectivesIgnoresPlainComments(t *testing.T) {
 	// Plain SQL comments and unrelated tool comments must be untouched.
 	require.NoError(t, parser.ValidateDirectives(`
@@ -40,15 +73,20 @@ CREATE TABLE users (id INT);`)
 	assert.Equal(t, "old_users", got)
 }
 
-func TestExtractStmtRenameFromQualifiedNameRejected(t *testing.T) {
-	// Qualified old names (`db.tbl`) are intentionally rejected — myschema
-	// operates on a single database per invocation, so the directive only
-	// ever refers to an object inside that database. The regex doesn't
-	// match the `.`, so the directive falls through silently as if it
-	// weren't there.
+func TestExtractStmtRenameFromQualifiedNameDoesNotMatch(t *testing.T) {
+	// Qualified old names (`db.tbl`) are intentionally rejected. The
+	// regex doesn't match the dotted form, so the extractor returns "".
+	// (At the higher level, ValidateDirectives turns the same input into
+	// a malformed-directive error — see TestValidateDirectivesRejectsQualifiedRenameTarget.)
 	got := parser.ExtractStmtRenameFrom(`-- myschema:renamed-from other_db.old_users
 CREATE TABLE users (id INT);`)
 	assert.Equal(t, "", got)
+}
+
+func TestExtractStmtRenameFromBacktickedReservedWord(t *testing.T) {
+	// The widened pattern accepts any backtick-quoted blob.
+	got := parser.ExtractStmtRenameFrom("-- myschema:renamed-from `select`\nCREATE TABLE users (id INT);")
+	assert.Equal(t, "select", got)
 }
 
 func TestExtractStmtRenameFromOnlyTopOfBlock(t *testing.T) {
@@ -172,6 +210,19 @@ func TestParseSQLErrorsOnDanglingRenameDirective(t *testing.T) {
 );`, "shop")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "renamed-from")
+}
+
+func TestExtractInlineRenamesUnnamedIndexIsUnsupported(t *testing.T) {
+	// `KEY (col)` with no name: tokens after the keyword are "(col)".
+	// classifyInlineLine should treat this as unsupported (rather than
+	// emit an "index '(col)' not found" error later).
+	got := parser.ExtractInlineRenames(`CREATE TABLE t (
+    id INT NOT NULL,
+    -- myschema:renamed-from old_idx
+    KEY (id)
+);`)
+	assert.Empty(t, got.Indexes)
+	require.Len(t, got.Unsupported, 1)
 }
 
 func TestExtractInlineRenamesColumnIndexNameCollision(t *testing.T) {

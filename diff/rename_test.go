@@ -62,6 +62,62 @@ func TestDiffRenameTableEmitsAlter(t *testing.T) {
 	assert.NotContains(t, got, "CREATE TABLE", "rename must not surface as create")
 }
 
+func TestDiffRenameTableAlsoRewritesCrossTableFKRefs(t *testing.T) {
+	// Renaming `shop.users` → `shop.members` while another table
+	// (`shop.posts`) holds an FK to `shop.users(id)` must NOT diff that
+	// FK as DROP+ADD just because RefTable changed name. The rename
+	// pass needs to walk *all* tables and rewrite (RefDB, RefTable) on
+	// matching FKs.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	// shop.users — being renamed
+	curUsers := tbl("shop", "users")
+	curUsers.Columns.Set("id", col("id", "bigint"))
+	curUsers.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", curUsers)
+
+	// shop.posts — references shop.users via FK
+	curPosts := tbl("shop", "posts")
+	curPosts.Columns.Set("id", col("id", "bigint"))
+	curPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	curPosts.Constraints.Set("PRIMARY", pkConstraint())
+	curPosts.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"},
+		RefDB:   "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.posts", curPosts)
+
+	// desired: shop.users → shop.members; shop.posts FK now points at shop.members
+	from := "users"
+	desUsers := tbl("shop", "members")
+	desUsers.Columns.Set("id", col("id", "bigint"))
+	desUsers.Constraints.Set("PRIMARY", pkConstraint())
+	desUsers.RenameFrom = &from
+	desired.Set("shop.members", desUsers)
+
+	desPosts := tbl("shop", "posts")
+	desPosts.Columns.Set("id", col("id", "bigint"))
+	desPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	desPosts.Constraints.Set("PRIMARY", pkConstraint())
+	desPosts.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"},
+		RefDB:   "shop", RefTable: "members", RefCols: []string{"id"},
+	})
+	desired.Set("shop.posts", desPosts)
+
+	res, err := diff.DiffTables(current, desired, allowAll)
+	require.NoError(t, err)
+
+	all := strings.Join(res.Stmts, "\n")
+	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
+	assert.Contains(t, all, "ALTER TABLE shop.users RENAME TO shop.members;")
+	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "FK on referencing table must not be dropped after rename")
+	assert.NotContains(t, allFK, "ADD CONSTRAINT", "FK on referencing table must not be re-added after rename")
+}
+
 func TestDiffRenameTableMissingSourceErrors(t *testing.T) {
 	current := orderedmap.New[string, *model.Table]()
 	desired := orderedmap.New[string, *model.Table]()
