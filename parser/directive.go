@@ -407,25 +407,24 @@ func classifyInlineLine(line string) (inlineKind, string) {
 	return inlineKindColumn, stripBackticks(tokens[0])
 }
 
-// backtickedNameAfterPrefix tries to match a leading keyword from
-// `prefixes` (case-insensitive) followed by whitespace and a
+// backtickedNameAfterPrefix tries to match a leading keyword sequence
+// from `prefixes` (case-insensitive) followed by whitespace and a
 // backtick-quoted identifier (which may itself contain whitespace).
-// Returns the unquoted identifier when matched. Used by classifyInlineLine
-// to recognise `KEY \`weird name\` (col)` etc., where strings.Fields would
-// otherwise split the backticked name.
+// Each prefix entry may be one or more space-separated keyword tokens
+// (e.g. "UNIQUE KEY"); runs of whitespace between those tokens — and
+// between the final token and the backtick — are tolerated, so
+// `UNIQUE   KEY \`also weird\` (id)` works the same as the single-space
+// form. Returns the unquoted identifier when matched.
+//
+// Used by classifyInlineLine to recognise `KEY \`weird name\` (col)`
+// etc., where strings.Fields would otherwise split the backticked name.
 func backtickedNameAfterPrefix(line string, prefixes []string) (string, bool) {
-	upper := strings.ToUpper(line)
 	for _, p := range prefixes {
-		if !strings.HasPrefix(upper, p) {
+		rest, ok := consumeKeywordSequence(line, p)
+		if !ok {
 			continue
 		}
-		// The character after the prefix must be whitespace (so we
-		// don't match e.g. `KEYWORD` against `KEY`).
-		after := line[len(p):]
-		if after == "" || (after[0] != ' ' && after[0] != '\t') {
-			continue
-		}
-		rest := strings.TrimLeft(after, " \t")
+		rest = strings.TrimLeft(rest, " \t")
 		if rest == "" || rest[0] != '`' {
 			continue
 		}
@@ -438,18 +437,49 @@ func backtickedNameAfterPrefix(line string, prefixes []string) (string, bool) {
 	return "", false
 }
 
+// consumeKeywordSequence walks the prefix's space-separated keywords
+// against `line` (case-insensitive). Between successive keywords, any
+// run of `[ \t]+` is allowed. Returns the substring of line that
+// follows the last keyword (whitespace not consumed) and ok=true on a
+// match. If the head doesn't match, returns (line, false).
+func consumeKeywordSequence(line, prefix string) (string, bool) {
+	words := strings.Fields(prefix)
+	if len(words) == 0 {
+		return line, true
+	}
+	rest := line
+	for i, w := range words {
+		if i > 0 {
+			next := strings.TrimLeft(rest, " \t")
+			if len(next) == len(rest) {
+				return line, false
+			}
+			rest = next
+		}
+		if len(rest) < len(w) || !strings.EqualFold(rest[:len(w)], w) {
+			return line, false
+		}
+		rest = rest[len(w):]
+	}
+	// The character after the final keyword must be whitespace so we
+	// don't match e.g. `KEYWORD` against `KEY`.
+	if rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+		return line, false
+	}
+	return rest, true
+}
+
 // stripUntilAfterBacktickedName returns the substring of line that
 // follows a leading `<prefix> <backtick-quoted name>` head. Returns
 // line as-is if the head doesn't match. Used to inspect what comes
 // after a CONSTRAINT name to decide whether it's UNIQUE (a unique-
 // index spelling) or another kind.
 func stripUntilAfterBacktickedName(line, prefix string) string {
-	upper := strings.ToUpper(line)
-	if !strings.HasPrefix(upper, prefix) {
+	rest, ok := consumeKeywordSequence(line, prefix)
+	if !ok {
 		return line
 	}
-	after := line[len(prefix):]
-	rest := strings.TrimLeft(after, " \t")
+	rest = strings.TrimLeft(rest, " \t")
 	if rest == "" || rest[0] != '`' {
 		return line
 	}

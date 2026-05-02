@@ -205,6 +205,23 @@ func TestExtractInlineRenamesBlockCommentBeforeDirectiveSameLine(t *testing.T) {
 	assert.Empty(t, got.Unsupported)
 }
 
+func TestExtractInlineRenamesBacktickedIndexMultiWhitespacePrefix(t *testing.T) {
+	// `UNIQUE   KEY` (multi-space) and `FULLTEXT\tINDEX` (tab) between
+	// the two-word keyword. backtickedNameAfterPrefix walks the prefix
+	// keyword by keyword with run-of-whitespace separators, so the
+	// backticked name is still extracted.
+	got := parser.ExtractInlineRenames("CREATE TABLE t (\n" +
+		"    id INT NOT NULL,\n" +
+		"    -- myschema:renamed-from old_uq\n" +
+		"    UNIQUE   KEY `also weird` (id),\n" +
+		"    -- myschema:renamed-from old_ft\n" +
+		"    FULLTEXT\tINDEX `headline` (id)\n" +
+		");")
+	assert.Equal(t, "old_uq", got.Indexes["also weird"])
+	assert.Equal(t, "old_ft", got.Indexes["headline"])
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractInlineRenamesBacktickedIndexNameWithSpace(t *testing.T) {
 	// MySQL allows backtick-quoted index names with whitespace, e.g.
 	// `KEY `weird name` (col)`. strings.Fields would split the name
