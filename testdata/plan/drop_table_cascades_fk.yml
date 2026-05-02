@@ -1,12 +1,12 @@
-# Verifies the invariant that DiffTables.FKDropStmts run before *any*
-# table drop, not just before the parent of the FK. The catalog returns
-# tables ordered by TABLE_NAME — so in this specific fixture the child
-# (`posts`) happens to drop first, which would in fact succeed without
-# an explicit FK drop. The point of the assertion isn't to "rescue"
-# this fixture; it's to pin the bucket separation
-# (FKDropStmts → … → DropStmts) so the plan is robust under any future
-# DROP-order change (e.g. drops sorted in a different way) and against
-# variants where the parent comes first alphabetically.
+# Pins the current plan ordering when both ends of an FK relationship
+# are dropped in one go: the FK drop comes first (FKDropStmts bucket),
+# then the table drops in TABLE_NAME order (DropStmts bucket).
+#
+# Strict string equality — if a future change reorders the drops (e.g.
+# topo-sorted child-before-parent), this fixture fails on purpose so
+# the change is conscious. The bucket separation itself is what makes
+# the plan correct in the parent-alphabetically-first case; covered
+# by Go's TestDiffDropTableWithFKOrdering.
 init: |
   CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
   CREATE TABLE posts (
