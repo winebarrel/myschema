@@ -15,13 +15,17 @@ Open items only. Done work is in `git log` / closed PRs.
       declared with `NOT NULL DEFAULT ''` apply-loops: every
       post-apply plan re-emits `MODIFY COLUMN … DEFAULT ''`. The
       catalog reads `information_schema.COLUMNS.COLUMN_DEFAULT` as
-      the bareword empty string and `catalog.normalizeColumnDefault`
-      doesn't wrap it the way it wraps non-empty barewords for
-      ENUM/SET/CHAR/temporal types, while the parser side stores
-      `''` (quoted). Surfaced while writing the evolution scenario
-      in PR #31 (worked around there by dropping the explicit
-      DEFAULT). Fix lives in `catalog/catalog.go`'s default
-      normaliser.
+      the empty string, and `normalizeColumnDefault` in
+      `catalog/tables.go` short-circuits on `def == ""` (returning
+      it unchanged) before the vitess-based bareword check can run.
+      The parser side stores `''` (quoted empty string), so catalog
+      and parser never compare equal. Surfaced while writing the
+      evolution scenario in PR #31 (worked around there by dropping
+      the explicit DEFAULT). Fix is to wrap the empty-string case as
+      `''` for column types where MySQL preserves it (varchar /
+      char / text / enum / set / etc.), or — simpler — drop the
+      empty-string short-circuit and let the same vitess-parse path
+      classify it.
 - [ ] **FK-implicit covering indexes look like drift.** Adding a
       foreign key on un-indexed columns (inline `CREATE TABLE` or
       `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently
