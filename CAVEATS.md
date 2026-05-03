@@ -376,9 +376,12 @@ After running the manual ALTER, update the desired SQL's
 `PARTITION BY` clause (or remove it) to match. The next
 `plan` will report no diff. The supported shapes —
 RANGE/LIST suffix add, order-preserving subset DROP,
-HASH/KEY (incl. LINEAR) count grow / shrink, and pure
-value-change REORGANIZE — don't need a workaround; myschema
-generates them automatically.
+HASH/KEY (incl. LINEAR) count grow / shrink, and per-
+partition definition rewrite via REORGANIZE PARTITION
+(VALUES boundary tweaks plus COMMENT / MAX_ROWS /
+TABLESPACE / other per-partition options that round-trip
+through vitess's PartitionDefinition formatter) — don't
+need a workaround; myschema generates them automatically.
 
 ## View `DEFINER` and `SQL SECURITY` are out of scope
 

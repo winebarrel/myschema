@@ -1,7 +1,10 @@
 # RANGE COLUMNS counterpart to the value-change REORGANIZE
 # fixtures. Tuple boundaries `VALUES LESS THAN (a, b)` flow
 # through parser.FormatPartitionDefinition the same way scalar
-# values do, but this case wasn't pinned end-to-end.
+# values do. The end-to-end pin (apply + verify_no_drift) lives
+# in testdata/apply/partition_value_change_reorganize_range_columns.yml;
+# this file is the plan-side mirror that asserts the exact
+# generated SQL.
 init: |
   CREATE TABLE shards (
       a INT NOT NULL,

@@ -155,14 +155,18 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//     tail / interior drops all generated as
 	//     `DROP PARTITION p1, p2, …`.
 	//   - drops AND adds both non-empty:
-	//     - if the two name lists match position-by-position, the
-	//       only thing that changed is each partition's
-	//       value clause — a pure value-change. Generates a
-	//       single `REORGANIZE PARTITION old1, old2, …
-	//       INTO (PARTITION old1 VALUES …, PARTITION old2 VALUES …,
+	//     - if the two name lists match position-by-position,
+	//       every partition stays in the same slot and the diff
+	//       is necessarily an in-place rewrite of one or more
+	//       per-partition definitions — a `VALUES …` boundary
+	//       tweak, a COMMENT / MAX_ROWS / TABLESPACE change, or
+	//       any other per-partition option that round-trips
+	//       through vitess's PartitionDefinition formatter.
+	//       Generates a single `REORGANIZE PARTITION old1,
+	//       old2, … INTO (PARTITION old1 …, PARTITION old2 …,
 	//       …)` that re-defines each in place. Row-preserving
 	//       (REORGANIZE redistributes rows into the new value
-	//       boundaries).
+	//       boundaries when those moved).
 	//     - any other shape (merge / split / interior insert /
 	//       reorder / "retention roll-forward") falls through to
 	//       error. Disjoint-name detection isn't enough to tell
