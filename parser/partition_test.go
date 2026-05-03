@@ -49,6 +49,21 @@ func TestParseSQLPartitionRoundTrip(t *testing.T) {
 			);`,
 			showLike: "CREATE TABLE `t` (...)\n/*!50100 PARTITION BY RANGE COLUMNS(a,b)\n(PARTITION p0 VALUES LESS THAN (10,100) ENGINE = InnoDB,\n PARTITION p1 VALUES LESS THAN (20,200) ENGINE = InnoDB) */",
 		},
+		"LIST COLUMNS with string literals": {
+			// Pins two things at once:
+			//   - LIST COLUMNS(...) is supported (vitess emits the
+			//     same shape as RANGE COLUMNS, just Type=3).
+			//   - The normaliser only lowercases function-name and
+			//     column-reference identifiers; string literals
+			//     (`'A'`, `'B'`) must round-trip case-preserved
+			//     because flipping `'A'` to `'a'` would change the
+			//     value MySQL stores.
+			sql: `CREATE TABLE t (id INT, region_code CHAR(1)) PARTITION BY LIST COLUMNS(region_code) (
+				PARTITION pAB VALUES IN ('A', 'B'),
+				PARTITION pCD VALUES IN ('C', 'D')
+			);`,
+			showLike: "CREATE TABLE `t` (...)\n/*!50100 PARTITION BY LIST COLUMNS(region_code)\n(PARTITION pAB VALUES IN ('A','B') ENGINE = InnoDB,\n PARTITION pCD VALUES IN ('C','D') ENGINE = InnoDB) */",
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
