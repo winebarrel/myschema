@@ -370,7 +370,7 @@ func duplicateColumnRenameSource(desired *orderedmap.Map[string, *model.Column])
 // shape errors as the rename ALTER passes (duplicate source,
 // source-also-declared, destination-already-exists) are rejected too.
 // Returns no statements on success — the natural diff path produces
-// the DROP CONSTRAINT + ADD CONSTRAINT.
+// the `DROP CHECK <name>` + `ADD CONSTRAINT <name> CHECK (...)` pair.
 func validateConstraintRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Constraint]) error {
 	if dup, name := duplicateConstraintRenameSource(desired); dup {
 		return fmt.Errorf("renamed-from: source constraint %s.%s is referenced by multiple constraints", fqtn, name)

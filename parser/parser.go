@@ -189,7 +189,11 @@ func rejectMisplacedRenameDirectives(stmtRename string, inline *InlineRenames, s
 	switch {
 	case stmtRename != "":
 		return fmt.Errorf("-- myschema:renamed-from %s: directive is only supported on CREATE TABLE, not %s", stmtRename, stmtKind)
-	case len(inline.Columns) > 0, len(inline.Indexes) > 0, len(inline.Unsupported) > 0:
+	case len(inline.Columns) > 0,
+		len(inline.Indexes) > 0,
+		len(inline.Constraints) > 0,
+		len(inline.ForeignKeys) > 0,
+		len(inline.Unsupported) > 0:
 		return fmt.Errorf("-- myschema:renamed-from: directive is only supported inside CREATE TABLE, not %s", stmtKind)
 	}
 	return nil
