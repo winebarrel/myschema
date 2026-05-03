@@ -208,17 +208,27 @@ patterns:
   `--allow-drop=partition`; without that flag the DROP lands
   in the disallowed bucket as a `-- skipped:` line so the user
   sees what would have been removed.
+- *Retention roll-forward* — drops the oldest partition AND
+  appends a new one in the same plan, e.g. `[p2020, p2021]
+  → [p2021, p2022]`. The diff emits both `ALTER TABLE … ADD
+  PARTITION (PARTITION p2022 …)` and `ALTER TABLE … DROP
+  PARTITION p2020`; MySQL runs them in order. Allowed because
+  the dropped and added partition names are disjoint, so no
+  partition is being mutated in place — overlapping names
+  fall through to the REORGANIZE error below.
 
 **Diffs that still error (manage by hand).**
 
-- *Both ADD and DROP needed* — a partition value changes, an
-  interior partition is inserted, or the order of partitions
-  changes. The order-preserving subset diff produces both an
-  add list and a drop list, which is the case `ALTER TABLE …
-  REORGANIZE PARTITION old1, old2 INTO (...)` exists for.
-  Generation isn't implemented yet (the right grammar
-  depends on data layout and split points). Fails with
-  `REORGANIZE PARTITION generation is not yet implemented`.
+- *Same partition appears in both ADD and DROP* — typically a
+  value change on an existing partition (or an interior insert
+  in front of a catch-all). The order-preserving subset diff
+  produces both an add list and a drop list whose name sets
+  intersect, which is the case `ALTER TABLE … REORGANIZE
+  PARTITION old INTO (...)` exists for. Generation isn't
+  implemented yet (the right grammar depends on data layout
+  and split points), and a plain DROP+ADD would lose the
+  partition's data. Fails with `REORGANIZE PARTITION
+  generation is not yet implemented`.
 - *HASH / KEY count change* — different grammar (`COALESCE
   PARTITION n` for shrinks, `ADD PARTITION PARTITIONS n` for
   grows). Future PR. Fails with `HASH / KEY partition diffs
@@ -254,6 +264,17 @@ patterns:
   partition expression too, so the diff catches it upstream
   via "partition strategy / expression differs" — the
   workaround is the same.
+- *PRIMARY KEY / UNIQUE INDEX missing partition column(s)* —
+  MySQL requires every unique key on a partitioned table to
+  include all columns in the partitioning function. If
+  desired's PRIMARY KEY or UNIQUE INDEX omits a column the
+  catalog's `PARTITION BY` clause references, the diff fails
+  at plan time with `… is missing partition column(s) [...]`
+  instead of emitting an `ADD PRIMARY KEY` / `ADD UNIQUE
+  INDEX` MySQL would reject. Workaround: include the
+  partition columns in the unique key, or drop partitioning
+  first (REMOVE PARTITIONING by hand) and let the next plan
+  reconverge.
 - `SUBPARTITION BY …` is out of scope for v1. A desired-side
   `CREATE TABLE` that declares SUBPARTITION fails at parse
   time; a catalog-side table with SUBPARTITION is rejected

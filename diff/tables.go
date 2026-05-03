@@ -233,6 +233,24 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 			}
 		}
 	}
+	// Partitioned-table unique-key cover guard. MySQL requires
+	// "every unique key (including the PRIMARY KEY) must include
+	// all columns in the table's partitioning function" — without
+	// it, a desired schema that omits a partition column from a
+	// unique key (or strips the partition column from PRIMARY KEY
+	// without dropping partitioning too) would generate ADD
+	// PRIMARY KEY / ADD UNIQUE INDEX statements MySQL rejects.
+	// Run after diffPartitions so the more-specific partition
+	// errors take precedence; only when desired stays partitioned.
+	if desired.Partition != nil {
+		required, err := partitionRequiredColumns(*desired.Partition)
+		if err != nil {
+			return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", fqtn, err)
+		}
+		if missing := uniqueKeyPartitionCoverGap(desired, required); missing != "" {
+			return nil, fmt.Errorf("table %s: %s — MySQL requires every unique key (including the PRIMARY KEY) on a partitioned table to include all columns in the partition expression. Either add the missing columns to the unique key, or drop partitioning first (REMOVE PARTITIONING by hand) and let the next plan reconverge", fqtn, missing)
+		}
+	}
 	res.Stmts = append(res.Stmts, partStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, partDisallowed...)
 
@@ -286,6 +304,45 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 // droppedColumns returns the names of columns present in current but
 // absent from desired — i.e. columns the diff is about to remove from
 // the table — in current's iteration order.
+// uniqueKeyPartitionCoverGap reports the first unique key on the
+// desired-side table whose columns don't cover every entry in
+// `required`. Returns "" when all unique keys (PRIMARY KEY plus
+// any UNIQUE index) include the partition columns. Comparison is
+// case-insensitive (column-name case in MySQL is, and required
+// has already been lower-cased by partitionRequiredColumns).
+//
+// PRIMARY KEY is modelled as `Index{Primary: true, Name:
+// "PRIMARY"}` — same code path as UNIQUE indexes here, no
+// separate Constraint walk needed.
+func uniqueKeyPartitionCoverGap(t *model.Table, required []string) string {
+	if len(required) == 0 {
+		return ""
+	}
+	for _, idx := range t.Indexes.CollectValues() {
+		if !idx.Primary && idx.KeyType != model.IndexUnique {
+			continue
+		}
+		have := make(map[string]bool, len(idx.Parts))
+		for _, p := range idx.Parts {
+			have[strings.ToLower(p.Column)] = true
+		}
+		var missing []string
+		for _, c := range required {
+			if !have[c] {
+				missing = append(missing, c)
+			}
+		}
+		if len(missing) > 0 {
+			label := "unique key " + idx.Name
+			if idx.Primary {
+				label = "PRIMARY KEY"
+			}
+			return label + " is missing partition column(s) " + fmt.Sprintf("%v", missing)
+		}
+	}
+	return ""
+}
+
 func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) []string {
 	var out []string
 	for name := range current.Keys() {
