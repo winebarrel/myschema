@@ -24,8 +24,14 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Medium — object coverage
 
-- [ ] **Partitioning** — `PARTITION BY`, sub-partitions,
-      `ADD/DROP/TRUNCATE/REORGANIZE PARTITION`.
+- [ ] **Partitioning diff generation** —
+      `ADD/DROP/TRUNCATE/REORGANIZE PARTITION` from a
+      desired-vs-catalog partition diff. v1 ships round-trip +
+      drift-detect only (CAVEATS.md "Partitioning is round-trip
+      only"); RANGE/LIST need explicit reorganise grammar,
+      HASH/KEY need `COALESCE PARTITION` for shrinks. SUBPARTITION
+      is intentionally out of scope (CAVEATS.md notes both the
+      desired-side parse error and the catalog-side guard).
 
 ## Low — CLI ergonomics
 

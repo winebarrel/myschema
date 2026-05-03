@@ -405,6 +405,13 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 	for _, opt := range s.TableSpec.Options {
 		applyTableOption(t, opt)
 	}
+	if s.TableSpec.PartitionOption != nil {
+		if s.TableSpec.PartitionOption.SubPartition != nil {
+			return nil, fmt.Errorf("table %s: SUBPARTITION BY … is out of scope for v1 partition support; remove the SUBPARTITION clause or manage the table outside myschema", t.FQTN())
+		}
+		p := NormalizePartitionOption(s.TableSpec.PartitionOption)
+		t.Partition = &p
+	}
 	// Drop a redundantly-spelled COLLATE: `CHARSET=utf8mb4
 	// COLLATE=utf8mb4_0900_ai_ci` and bare `CHARSET=utf8mb4` describe
 	// the same MySQL state. Normalising to nil here keeps the parser

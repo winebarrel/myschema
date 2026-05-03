@@ -38,6 +38,20 @@ type Table struct {
 	// because the catalog has no representation for "next apply should
 	// CONVERT TO".
 	ConvertCharset bool
+	// Partition is the canonical PARTITION BY clause
+	// (e.g. `partition by range (year(dt)) (partition p0 values less
+	// than (2021))`). Both the parser and the catalog reader normalise
+	// through `parser.NormalizePartitionOption`, which sits on top of
+	// vitess's `sqlparser.String(*sqlparser.PartitionOption)` and adds
+	// (a) lower-casing of function-name and column-reference
+	// identifiers, (b) trimming of the leading newline vitess emits,
+	// and (c) stripping of the per-partition `engine <name>` option
+	// MySQL 8.0+ always includes in SHOW CREATE TABLE output. The two
+	// sides therefore compare bytewise. nil = the table is not
+	// partitioned. v1 only supports round-trip + drift detection: any
+	// partition-side drift surfaces as a hard error rather than an
+	// emitted ALTER, so users manage partition changes by hand for now.
+	Partition *string
 }
 
 // FQTN returns the database-qualified name (database.table).
@@ -84,6 +98,15 @@ func (t *Table) SQL() string {
 	}
 	if t.Comment != nil {
 		b.WriteString(" COMMENT=" + QuoteLiteral(*t.Comment))
+	}
+	if t.Partition != nil {
+		// Partition is the canonical, vitess-formatted clause —
+		// already lowercase, already wrapped in its own
+		// `(partition … values …)` block when applicable.
+		// Separate it from the table options with a newline so
+		// dump output reads cleanly.
+		b.WriteString("\n")
+		b.WriteString(*t.Partition)
 	}
 	b.WriteString(";")
 	return b.String()
