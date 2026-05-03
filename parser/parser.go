@@ -111,7 +111,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				return nil, fmt.Errorf("-- myschema:execute %q: -- myschema:renamed-from cannot appear inside an execute payload (the payload is held as raw SQL and never parsed)", checkSQL)
 			}
 			if cc, ccErr := ExtractStmtConvertCharset(piece); ccErr != nil {
-				return nil, ccErr
+				return nil, fmt.Errorf("-- myschema:execute %q: %w", checkSQL, ccErr)
 			} else if cc {
 				return nil, fmt.Errorf("-- myschema:execute %q and -- myschema:convert-charset in the same statement: directives cannot be combined", checkSQL)
 			}

@@ -956,6 +956,23 @@ CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
 	assert.Contains(t, err.Error(), "execute")
 }
 
+func TestParseSQLRejectsMisplacedConvertCharsetInsideExecutePayload(t *testing.T) {
+	// A misplaced convert-charset directive inside an execute
+	// payload still surfaces ExtractStmtConvertCharset's
+	// "must appear before the statement it applies to" error,
+	// but the parser wraps it with the execute context so the
+	// reader knows which directive's payload caused it.
+	_, err := parser.ParseSQL(`-- myschema:execute SELECT 1
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW BEGIN
+    -- myschema:convert-charset
+    SET NEW.val = 0
+END
+`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myschema:execute")
+	assert.Contains(t, err.Error(), "must appear before")
+}
+
 func TestParseSQLRejectsConvertCharsetCombinedWithRenamedFrom(t *testing.T) {
 	// Both directives attach to the same CREATE TABLE but describe
 	// different operations (RENAME TABLE vs. CONVERT TO CHARACTER
