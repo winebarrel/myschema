@@ -57,4 +57,35 @@ func TestDiffPartitionsQuotesReservedPartitionNames(t *testing.T) {
 		"DROP PARTITION must back-tick reserved-word names; got %q", stmts[0])
 }
 
+// regression: KEY partitions where the catalog and desired strings
+// only differ in identifier casing (or whitespace, etc. that vitess
+// normalises away on re-parse) used to surface as the
+// "HASH / KEY partition diffs are not yet generated" error — the
+// raw-string fast path saw a byte-difference, then partitionHeaderEqual
+// lower-cased ColList and reported "headers equal", and the HASH/KEY
+// branch unconditionally returned the unsupported-diff error. Equal
+// `Partitions` count plus equal header should return no changes.
+func TestDiffPartitionsKEYNoOpAcrossIdentifierCasing(t *testing.T) {
+	cur := stringPtr("partition by key (userid) partitions 4")
+	des := stringPtr("partition by key (UserID) partitions 4") // same column, different casing
+
+	stmts, disallowed, err := diffPartitions("db.t", cur, des, AllowAll{})
+	require.NoError(t, err)
+	assert.Empty(t, stmts, "no executable statements expected for a KEY no-op")
+	assert.Empty(t, disallowed, "no skipped statements expected for a KEY no-op")
+}
+
+func TestDiffPartitionsKEYCountChangeStillErrors(t *testing.T) {
+	// Counterpart to the no-op case: when the count actually changes
+	// the HASH/KEY branch must still surface the unsupported-diff
+	// error so the user knows to run COALESCE / ADD PARTITION
+	// PARTITIONS by hand.
+	cur := stringPtr("partition by key (user_id) partitions 2")
+	des := stringPtr("partition by key (user_id) partitions 4")
+
+	_, _, err := diffPartitions("db.t", cur, des, AllowAll{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HASH / KEY partition diffs are not yet generated")
+}
+
 func stringPtr(s string) *string { return &s }
