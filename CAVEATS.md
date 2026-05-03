@@ -208,6 +208,18 @@ patterns:
   `--allow-drop=partition`; without that flag the DROP lands
   in the disallowed bucket as a `-- skipped:` line so the user
   sees what would have been removed.
+- *HASH / KEY (incl. LINEAR) count change* — when both sides
+  share the same partition strategy (Type / IsLinear /
+  KeyAlgorithm / ColList / Expr), only `PARTITIONS n` differs.
+  Generates the count-based grammar:
+  - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n` (no
+    data loss, new slots are empty until the next rebalance).
+  - shrinking → `ALTER TABLE … COALESCE PARTITION n`. MySQL
+    rebalances rows from the dropped slots into the survivors,
+    but the slots themselves go away — so it's gated on
+    `--allow-drop=partition` like RANGE/LIST DROP. Without
+    the flag the COALESCE lands on the disallowed bucket.
+
 **Diffs that still error (manage by hand).**
 
 - *Both ADD and DROP needed* — any diff where the
@@ -229,10 +241,6 @@ patterns:
   PARTITION` when data needs to move, or an explicit
   `DROP PARTITION` + `ADD PARTITION` pair when you really do
   want to discard rows — then re-run plan.
-- *HASH / KEY count change* — different grammar (`COALESCE
-  PARTITION n` for shrinks, `ADD PARTITION PARTITIONS n` for
-  grows). Future PR. Fails with `HASH / KEY partition diffs
-  are not yet generated`.
 - *Strategy / expression change* (e.g. RANGE → HASH, or a
   different `PARTITION BY` expression) — needs `REMOVE
   PARTITIONING` followed by a new `PARTITION BY`. Future PR.

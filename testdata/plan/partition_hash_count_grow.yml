@@ -1,0 +1,19 @@
+# HASH count grow: catalog PARTITIONS 4, desired PARTITIONS 8
+# → ALTER TABLE … ADD PARTITION PARTITIONS 4. Adds the
+# difference (8 - 4); MySQL allocates the new partitions
+# empty and rebalances rows on demand. No data loss, no
+# allow-drop gating.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 8;
+
+plan: |
+  ALTER TABLE myschema_test.events ADD PARTITION PARTITIONS 4;

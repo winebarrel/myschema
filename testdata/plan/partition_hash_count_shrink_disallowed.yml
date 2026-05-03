@@ -1,0 +1,21 @@
+# Same HASH shrink shape as partition_hash_count_shrink_with_allow
+# but without `--allow-drop=partition` — the COALESCE PARTITION
+# lands on the disallowed bucket as a `-- skipped:` line and
+# PlanResult.SQL stays empty. Mirrors the disallowed-bucket
+# handling for RANGE/LIST DROP PARTITION.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 8;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+plan: ""
+
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.events COALESCE PARTITION 4;

@@ -1,0 +1,18 @@
+# Same shape as partition_hash_count_grow but for KEY
+# partitioning. KEY partitions live in `PartitionOption.ColList`
+# rather than `Expr`; partitionHeaderEqual already covers both,
+# so the count-grow path is exercised the same way.
+init: |
+  CREATE TABLE shards (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY KEY (id) PARTITIONS 2;
+
+desired: |
+  CREATE TABLE shards (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY KEY (id) PARTITIONS 4;
+
+plan: |
+  ALTER TABLE myschema_test.shards ADD PARTITION PARTITIONS 2;

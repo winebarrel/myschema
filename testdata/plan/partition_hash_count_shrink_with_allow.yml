@@ -1,0 +1,24 @@
+# HASH count shrink: catalog PARTITIONS 8, desired PARTITIONS 4
+# + `--allow-drop=partition` → ALTER TABLE … COALESCE PARTITION 4.
+# COALESCE discards the trailing partitions and rebalances
+# their rows into the survivors — data is preserved on the
+# remaining partitions but the dropped slot itself goes away,
+# so it's gated by the same allow_drop=partition flag as a
+# RANGE/LIST DROP PARTITION.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 8;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+allow_drop:
+  - partition
+
+plan: |
+  ALTER TABLE myschema_test.events COALESCE PARTITION 4;

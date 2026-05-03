@@ -1,0 +1,24 @@
+# End-to-end pin for the HASH-shrink path. Catalog has 8
+# partitions; desired wants 4. The diff plans
+# `ALTER TABLE … COALESCE PARTITION 4` (gated on
+# `--allow-drop=partition`); apply runs it; verify_no_drift
+# confirms the next plan is clean.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 8;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+allow_drop:
+  - partition
+
+applied: |
+  ALTER TABLE myschema_test.events COALESCE PARTITION 4;
+
+verify_no_drift: true
