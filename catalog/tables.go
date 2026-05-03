@@ -372,17 +372,32 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 // *sqlparser.ColName (column reference) rather than a string literal, and
 // later round-trips break.
 //
-// We delegate the classification to vitess: try to parse `SELECT <def>`,
-// and if the resulting expression is a *ColName, MySQL stored it as a
-// quoteless literal — wrap it. Anything else (Literal, NullVal, BoolVal,
-// CurTimeFuncExpr, FuncExpr, BinaryExpr, …) is already valid SQL.
+// For non-empty defaults we delegate the classification to vitess: try
+// to parse `SELECT <def>`, and if the resulting expression is a
+// *ColName, MySQL stored it as a quoteless literal — wrap it. Anything
+// else (Literal, NullVal, BoolVal, CurTimeFuncExpr, FuncExpr,
+// BinaryExpr, …) is already valid SQL.
 //
-// typeName is unused now but kept on the signature to mark this as
-// type-aware logic (we may need to special-case BIT or BLOB defaults
-// later — see TODO.md).
+// The empty-string default is special-cased because vitess can't parse
+// `SELECT` with an empty expression. The same quoted-vs-bare drift
+// that this function wraps for non-empty barewords also bites for
+// empty ones: the parser side stores the quoted empty literal (a
+// pair of single-quote characters) while the catalog returns the
+// bare empty string. For string-shaped column types where MySQL
+// stores the empty default as the bare empty string in
+// information_schema.COLUMNS.COLUMN_DEFAULT (CHAR / VARCHAR /
+// VARBINARY / ENUM / SET) we wrap the bare empty string here so it
+// matches the parser side. TEXT / BLOB are excluded because MySQL
+// doesn't allow a literal default on those types at all. Fixed-
+// width BINARY is excluded because its empty default surfaces
+// through information_schema as a hex literal (`0x` for the
+// degenerate case, `0x000000…` for non-zero N) rather than the
+// empty string, and needs its own normalisation — see TODO.md.
 func normalizeColumnDefault(typeName, def string) string {
-	_ = typeName
 	if def == "" {
+		if columnTypeAllowsEmptyStringDefault(typeName) {
+			return "''"
+		}
 		return def
 	}
 	p, err := sqlparser.New(sqlparser.Options{})
@@ -405,6 +420,38 @@ func normalizeColumnDefault(typeName, def string) string {
 		return def
 	}
 	return "'" + strings.ReplaceAll(def, "'", "''") + "'"
+}
+
+// columnTypeAllowsEmptyStringDefault reports whether MySQL stores a
+// literal empty default as the bare empty string in
+// information_schema.COLUMNS.COLUMN_DEFAULT. typeName comes from
+// COLUMN_TYPE, lowercased upstream — it includes the size suffix
+// (e.g. `varchar(64)`) and modifiers, so we match by leading-token
+// prefix rather than full equality.
+//
+// Fixed-width BINARY is intentionally excluded: MySQL pads the empty
+// default to N zero bytes and surfaces it through information_schema
+// as a hex literal (`0x` for the degenerate case, `0x000000…` for
+// non-zero N), so it needs its own catalog-side normalisation rather
+// than the empty-string path here. VARBINARY (variable-length) does
+// surface its empty default as the bare empty string, so it round-
+// trips cleanly via this path. See TODO.md for the BINARY follow-up.
+func columnTypeAllowsEmptyStringDefault(typeName string) bool {
+	// Fixed-width BINARY is the only excluded type — see function-doc
+	// for the hex-literal reason. Check it first so the supported list
+	// below stays a flat OR.
+	if strings.HasPrefix(typeName, "binary") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(typeName, "varchar"),
+		strings.HasPrefix(typeName, "char"),
+		strings.HasPrefix(typeName, "varbinary"),
+		strings.HasPrefix(typeName, "enum"),
+		strings.HasPrefix(typeName, "set"):
+		return true
+	}
+	return false
 }
 
 func normalizeRefOpt(s string) string {

@@ -3,8 +3,8 @@
 # asserting at each that the next plan-then-apply makes drift go away.
 # Exercises the most common ALTER TABLE shapes:
 #   - CREATE TABLE (initial)
-#   - ADD COLUMN (nullable, no DEFAULT — see TODO.md note about
-#     `DEFAULT ''` round-trip drift)
+#   - ADD COLUMN (NOT NULL DEFAULT '' — also pins the catalog
+#     empty-string default normalisation)
 #   - ADD INDEX (secondary)
 #   - ADD CONSTRAINT FOREIGN KEY (separate child table + FK)
 #   - MODIFY COLUMN (widen VARCHAR)
