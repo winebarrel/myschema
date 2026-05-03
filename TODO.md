@@ -37,8 +37,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Medium — object coverage
 
-- [ ] **View `DEFINER` and `SQL SECURITY` diffing.** Catalogued but
-      `DiffViews` doesn't act on changes.
 - [ ] **Partitioning** — `PARTITION BY`, sub-partitions,
       `ADD/DROP/TRUNCATE/REORGANIZE PARTITION`.
 

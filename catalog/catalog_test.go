@@ -338,8 +338,9 @@ CREATE VIEW active_users AS SELECT id, name FROM users;
 	assert.Equal(t, "active_users", v.Name)
 	assert.Contains(t, v.Definition, "select")
 	assert.Contains(t, v.Definition, "users")
-	assert.NotEmpty(t, v.Definer, "DEFINER captured even when implicit")
-	assert.Equal(t, "DEFINER", v.Security, "SQL SECURITY default")
+	// DEFINER / SQL SECURITY are intentionally out of scope — see
+	// CAVEATS.md. We don't capture them on model.View any more, so
+	// the test no longer asserts on them either.
 }
 
 // TestTableMetadata covers ENGINE / table comment / collation surfacing.

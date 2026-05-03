@@ -31,14 +31,11 @@ func parseCreateView(s *sqlparser.CreateView, defaultDB string) (*model.View, er
 	}
 	v.Definition = def
 
-	v.Algorithm = s.Algorithm
-	v.Security = s.Security
+	// CheckOption is the only optional clause we model; ALGORITHM,
+	// DEFINER, and SQL SECURITY are out of scope (CAVEATS.md).
 	v.CheckOption = s.CheckOption
 	if v.CheckOption == "" {
 		v.CheckOption = "NONE"
-	}
-	if s.Definer != nil {
-		v.Definer = sqlparser.String(s.Definer)
 	}
 
 	return v, nil

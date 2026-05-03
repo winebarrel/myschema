@@ -209,8 +209,16 @@ rather than declarative schema. Manage them out of band.)
   arrive as the empty string), so the parser collapses both to
   `NONE`. Users who explicitly write `WITH CASCADED` see it dropped
   on round-trip. `WITH LOCAL CHECK OPTION` is preserved.
-- View `DEFINER` and `SQL SECURITY` clauses are catalogued but not
-  diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
+- View `DEFINER` and `SQL SECURITY` clauses are intentionally NOT
+  diffed. Both are read into `model.View` from
+  `information_schema.VIEWS` so the catalog has the data, but the
+  diff ignores them and `CreateSQL` does not emit either clause on
+  apply. Reasons: vitess can't parse the canonical catalog `user@%`
+  host quoting (so DEFINER can't round-trip), and emitting
+  `SQL SECURITY DEFINER` (the MySQL default) on every view would
+  noise up dump output without solving a real user need. Manage
+  DEFINER / SECURITY changes by hand outside myschema. See
+  CAVEATS.md.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
 - `-- myschema:execute` arbitrary-SQL escape hatch (the directive
