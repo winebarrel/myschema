@@ -637,6 +637,23 @@ func TestExtractExecuteDirective(t *testing.T) {
 			piece:  "-- some plain comment\nCREATE TABLE t (id INT);",
 			wantOK: false,
 		},
+		{
+			name: "multi-line block comment header before directive",
+			piece: "/*\n * generated header — keep this comment\n */\n" +
+				"-- myschema:execute SELECT 1\n" +
+				"CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+			wantOK:   true,
+			wantCS:   "SELECT 1",
+			wantRest: "CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+		},
+		{
+			name: "directive after a closed block comment on the same line",
+			piece: "/* header */ -- myschema:execute SELECT 1\n" +
+				"CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+			wantOK:   true,
+			wantCS:   "SELECT 1",
+			wantRest: "CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

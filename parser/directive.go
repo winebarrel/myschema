@@ -105,6 +105,12 @@ func ValidateDirectives(rawSQL string) error {
 // remainder of the piece (the SQL statement that the directive
 // guards) with the directive line removed.
 //
+// Comment handling mirrors ExtractStmtRenameFrom / ValidateDirectives:
+// `--` line comments, `#` line comments, and `/* … */` block comments
+// (single-line *and* multi-line) are skipped without breaking the
+// directive's anchor, and a directive after a `*/` on the same line
+// (`/* header */ -- myschema:execute …`) still counts.
+//
 // The remainder is returned verbatim — vitess can't parse the
 // typical execute payload (CREATE TRIGGER, CREATE PROCEDURE, …) so
 // the parser pipeline carries it as raw text.
@@ -118,15 +124,29 @@ func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool)
 	// before any SQL line counts — same shape as ExtractStmtRenameFrom,
 	// where the directive must precede the statement it guards.
 	lines := strings.Split(piece, "\n")
+	var inBlock bool
 	for i, line := range lines {
-		trim := strings.TrimSpace(line)
+		// Multi-line block-comment continuation — skip until we hit
+		// the closing `*/`, then re-process anything after it.
+		if inBlock {
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
+			}
+			inBlock = false
+			line = line[idx+2:]
+		}
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
 		if trim == "" {
 			continue
 		}
-		// Block-comment lines (single-line `/* … */`, `#`, plain `--`
-		// non-myschema comments) are skipped just like the rename-from
+		// `#` line-comments are skipped just like the rename-from
 		// extractor does — they don't break the directive's anchor.
-		if strings.HasPrefix(trim, "/*") || strings.HasPrefix(trim, "#") {
+		if strings.HasPrefix(trim, "#") {
 			continue
 		}
 		if strings.HasPrefix(trim, "--") {

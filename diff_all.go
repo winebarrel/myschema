@@ -103,7 +103,15 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 			return nil, fmt.Errorf("-- myschema:execute check failed: %w", err)
 		}
 		if applied {
-			disallowed = append(disallowed, "-- skipped (myschema:execute check matched): "+eg.ExecuteSQL)
+			// The skip line goes into the disallowed-drops bucket,
+			// which the CLI prints one statement per line. A multi-
+			// line ExecuteSQL (CREATE TRIGGER … BEGIN … END is the
+			// motivating case) would otherwise leak its body lines
+			// past the leading `--`, so the body becomes raw SQL in
+			// the output. Collapse internal whitespace runs to a
+			// single space so the whole statement fits on one line.
+			oneLine := strings.Join(strings.Fields(eg.ExecuteSQL), " ")
+			disallowed = append(disallowed, "-- skipped (myschema:execute check matched): "+oneLine)
 			continue
 		}
 		stmts = append(stmts, eg.ExecuteSQL)

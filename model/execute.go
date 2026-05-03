@@ -8,11 +8,13 @@ package model
 // myschema doesn't model — triggers, stored procedures / functions,
 // events, grants, ad-hoc DML, etc.
 type ExecuteGroup struct {
-	// CheckSQL is the post-directive `<check-sql>` body, taken
-	// verbatim from the directive line (no leading "-- myschema:execute"
-	// prefix, no trailing semicolon — both stripped by the parser).
-	// Run with Query(); zero-row result means "execute hasn't been
-	// applied yet, run it now".
+	// CheckSQL is the post-directive `<check-sql>` body. The parser
+	// strips the leading `-- myschema:execute` prefix but otherwise
+	// passes the rest of the directive line through verbatim — any
+	// trailing whitespace is trimmed by the regex, but a trailing
+	// semicolon if the user wrote one is preserved (MySQL accepts
+	// a single SELECT either way). Run with Query(); zero-row
+	// result means "execute hasn't been applied yet, run it now".
 	CheckSQL string
 	// ExecuteSQL is the next statement after the directive line, kept
 	// raw (no vitess parsing) because the typical contents
