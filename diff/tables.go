@@ -377,6 +377,26 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
 	b.WriteString(fqtn)
+	if desired.ConvertCharset {
+		// `-- myschema:convert-charset` opt-in: rewrite stored bytes
+		// and per-column charset metadata in one statement so a
+		// table with pre-existing string columns converges in a
+		// single apply (the default flow needs two — see CAVEATS
+		// "Changing DEFAULT CHARSET"). Note the syntax difference
+		// from the default branch: CONVERT TO uses bare `COLLATE
+		// <name>` (no `=`), DEFAULT CHARSET uses `COLLATE=<name>`.
+		// desired.Charset is guaranteed non-nil here because the
+		// parser rejects the directive when CREATE TABLE has no
+		// DEFAULT CHARSET.
+		b.WriteString(" CONVERT TO CHARACTER SET ")
+		b.WriteString(*desired.Charset)
+		if desired.Collation != nil {
+			b.WriteString(" COLLATE ")
+			b.WriteString(*desired.Collation)
+		}
+		b.WriteString(";")
+		return b.String()
+	}
 	if desired.Charset != nil {
 		b.WriteString(" DEFAULT CHARSET=")
 		b.WriteString(*desired.Charset)

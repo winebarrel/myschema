@@ -837,3 +837,94 @@ END;
 `, "shop")
 	require.Error(t, err)
 }
+
+func TestExtractStmtConvertCharsetBasic(t *testing.T) {
+	got, err := parser.ExtractStmtConvertCharset(`-- myschema:convert-charset
+CREATE TABLE t (id INT);`)
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+func TestExtractStmtConvertCharsetAbsent(t *testing.T) {
+	got, err := parser.ExtractStmtConvertCharset(`CREATE TABLE t (id INT);`)
+	require.NoError(t, err)
+	assert.False(t, got)
+}
+
+func TestExtractStmtConvertCharsetSkipsBlockComments(t *testing.T) {
+	got, err := parser.ExtractStmtConvertCharset(`/*
+generated header
+*/
+-- myschema:convert-charset
+CREATE TABLE t (id INT);`)
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+func TestExtractStmtConvertCharsetMultipleErrors(t *testing.T) {
+	_, err := parser.ExtractStmtConvertCharset(`-- myschema:convert-charset
+-- myschema:convert-charset
+CREATE TABLE t (id INT);`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple")
+}
+
+func TestValidateDirectivesRejectsMalformedConvertCharset(t *testing.T) {
+	// `-- myschema:convert-charset utf8mb4` is rejected — the
+	// directive takes no arguments, charset comes from the
+	// CREATE TABLE itself.
+	err := parser.ValidateDirectives(`-- myschema:convert-charset utf8mb4
+CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed -- myschema:convert-charset")
+}
+
+func TestParseSQLAcceptsConvertCharsetDirective(t *testing.T) {
+	res, err := parser.ParseSQL(`-- myschema:convert-charset
+CREATE TABLE t (
+    name VARCHAR(64)
+) DEFAULT CHARSET=utf8mb4;`, "shop")
+	require.NoError(t, err)
+	tbl, ok := res.Tables.GetOk("shop.t")
+	require.True(t, ok)
+	assert.True(t, tbl.ConvertCharset)
+	require.NotNil(t, tbl.Charset)
+	assert.Equal(t, "utf8mb4", *tbl.Charset)
+}
+
+func TestParseSQLRejectsConvertCharsetWithoutDefaultCharset(t *testing.T) {
+	// CONVERT TO CHARACTER SET requires a target charset; the
+	// directive takes none, so the CREATE TABLE must declare
+	// DEFAULT CHARSET. Without it there's nothing to CONVERT TO.
+	_, err := parser.ParseSQL(`-- myschema:convert-charset
+CREATE TABLE t (id INT);`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-charset")
+	assert.Contains(t, err.Error(), "DEFAULT CHARSET")
+}
+
+func TestParseSQLRejectsConvertCharsetOnNonCreateTable(t *testing.T) {
+	cases := map[string]string{
+		"on CREATE VIEW": `-- myschema:convert-charset
+CREATE VIEW v AS SELECT 1 AS x;`,
+		"on ALTER TABLE": `CREATE TABLE t (id INT);
+-- myschema:convert-charset
+ALTER TABLE t ADD INDEX ix (id);`,
+	}
+	for name, sql := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseSQL(sql, "shop")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "convert-charset")
+		})
+	}
+}
+
+func TestParseSQLRejectsConvertCharsetCombinedWithExecute(t *testing.T) {
+	_, err := parser.ParseSQL(`-- myschema:convert-charset
+-- myschema:execute SELECT 1
+CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-charset")
+	assert.Contains(t, err.Error(), "execute")
+}

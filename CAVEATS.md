@@ -156,14 +156,22 @@ note the expected follow-up plan in a comment.
 
 **Workarounds for "make it converge in one apply"**:
 
+- Add `-- myschema:convert-charset` on the line above the
+  `CREATE TABLE`. myschema then emits `ALTER TABLE … CONVERT TO
+  CHARACTER SET <new> [COLLATE <new>]` (using the desired-side
+  `DEFAULT CHARSET` / `COLLATE` clauses), which rewrites stored
+  bytes and per-column charset metadata in a single statement.
+  Heavyweight (full table rebuild), and column-level explicit
+  charsets get clobbered by `CONVERT TO`, so columns that need
+  to stay on a different charset still need their explicit
+  `CHARACTER SET …` in desired SQL — myschema's column-level
+  diff will emit the follow-up `MODIFY COLUMN` after the
+  `CONVERT TO`.
 - Spell out the per-column `CHARACTER SET …` in desired SQL alongside
   the `DEFAULT CHARSET` change. myschema's column-level diff then
   emits the `MODIFY COLUMN` in the same plan.
 - Run `myschema apply` twice. The second is a no-op once the column
   charsets have inherited the new default.
-- For full data-rewrite semantics (`ALTER TABLE … CONVERT TO CHARACTER
-  SET …`, which also rewrites stored bytes), run that DDL by hand
-  outside myschema. A future directive may wire it in.
 
 ## View `DEFINER` and `SQL SECURITY` are out of scope
 

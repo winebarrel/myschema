@@ -110,6 +110,11 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if inline := ExtractInlineRenames(piece); len(inline.Columns)+len(inline.Indexes)+len(inline.Constraints)+len(inline.ForeignKeys)+len(inline.Unsupported) > 0 {
 				return nil, fmt.Errorf("-- myschema:execute %q: -- myschema:renamed-from cannot appear inside an execute payload (the payload is held as raw SQL and never parsed)", checkSQL)
 			}
+			if cc, ccErr := ExtractStmtConvertCharset(piece); ccErr != nil {
+				return nil, ccErr
+			} else if cc {
+				return nil, fmt.Errorf("-- myschema:execute %q and -- myschema:convert-charset in the same statement: directives cannot be combined", checkSQL)
+			}
 			// Validate the check SQL is read-only: it runs on every
 			// plan / apply, so accidentally writing DDL/DML here would
 			// surprise the user. SELECT / WITH / UNION are the safe
@@ -152,6 +157,10 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		if err != nil {
 			return nil, err
 		}
+		stmtConvertCharset, err := ExtractStmtConvertCharset(piece)
+		if err != nil {
+			return nil, err
+		}
 		inlineRenames := ExtractInlineRenames(piece)
 		stmt, err := p.Parse(piece)
 		if err != nil {
@@ -166,6 +175,12 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if stmtRename != "" {
 				rn := stmtRename
 				t.RenameFrom = &rn
+			}
+			if stmtConvertCharset {
+				if t.Charset == nil {
+					return nil, fmt.Errorf("table %s: -- myschema:convert-charset requires the CREATE TABLE to declare a DEFAULT CHARSET (no charset on the table → nothing to CONVERT TO)", t.FQTN())
+				}
+				t.ConvertCharset = true
 			}
 			for name, old := range inlineRenames.Columns {
 				c, ok := t.Columns.GetOk(name)
@@ -215,6 +230,9 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "ALTER TABLE"); err != nil {
 				return nil, err
 			}
+			if err := rejectMisplacedConvertCharset(stmtConvertCharset, "ALTER TABLE"); err != nil {
+				return nil, err
+			}
 
 		case *sqlparser.CreateView:
 			v, err := parseCreateView(s, defaultDB)
@@ -228,12 +246,18 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "CREATE VIEW"); err != nil {
 				return nil, err
 			}
+			if err := rejectMisplacedConvertCharset(stmtConvertCharset, "CREATE VIEW"); err != nil {
+				return nil, err
+			}
 
 		default:
 			// Skip statements we don't model (CREATE DATABASE, COMMENT, SET,
 			// GRANT, etc).
 			kind := fmt.Sprintf("unsupported statement (%T)", s)
 			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, kind); err != nil {
+				return nil, err
+			}
+			if err := rejectMisplacedConvertCharset(stmtConvertCharset, kind); err != nil {
 				return nil, err
 			}
 		}
@@ -278,6 +302,18 @@ func validateExecuteCheckSQL(p *sqlparser.Parser, checkSQL string) error {
 	default:
 		return fmt.Errorf("check SQL must be a SELECT (or UNION / WITH … SELECT); got %T", stmt)
 	}
+}
+
+// rejectMisplacedConvertCharset errors if a convert-charset directive
+// was extracted from a statement that isn't CREATE TABLE. The directive
+// only makes sense on a desired-side CREATE TABLE — the catalog has no
+// representation for it, and the diff layer only consults
+// model.Table.ConvertCharset.
+func rejectMisplacedConvertCharset(found bool, stmtKind string) error {
+	if found {
+		return fmt.Errorf("-- myschema:convert-charset: directive is only supported on CREATE TABLE, not %s", stmtKind)
+	}
+	return nil
 }
 
 // rejectMisplacedRenameDirectives errors if any rename directives were

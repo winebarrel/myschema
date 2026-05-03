@@ -1,0 +1,26 @@
+# `-- myschema:convert-charset` opts into a one-shot
+# `ALTER TABLE … CONVERT TO CHARACTER SET …` instead of the
+# default two-stage `DEFAULT CHARSET=…` + per-column MODIFY flow
+# (see CAVEATS.md "Changing DEFAULT CHARSET").
+#
+# Catalog table is on latin1 with a string column whose charset
+# inherits the table default. Desired flips to utf8mb4 with the
+# directive on top of the CREATE TABLE. Plan must emit exactly
+# one CONVERT TO statement — no follow-up MODIFY COLUMN.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=latin1;
+
+desired: |
+  -- myschema:convert-charset
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4;
+
+plan: |
+  ALTER TABLE myschema_test.t CONVERT TO CHARACTER SET utf8mb4;

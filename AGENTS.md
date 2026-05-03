@@ -200,6 +200,17 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   non-zero means skip. Idempotent across re-applies; runs after
   every other DDL bucket so the guarded SQL can refer to brand-
   new tables. See CAVEATS.md for the workflow and limits.
+- `-- myschema:convert-charset` directive (statement-level, above
+  a `CREATE TABLE`). Opts the next charset diff into a one-shot
+  `ALTER TABLE … CONVERT TO CHARACTER SET <new> [COLLATE <new>]`
+  instead of the default two-stage `DEFAULT CHARSET=…` +
+  per-column MODIFY flow. The directive takes no arguments —
+  the target charset / collation come from the CREATE TABLE's
+  own DEFAULT CHARSET / COLLATE clauses; the parser errors at
+  parse time when CREATE TABLE has no DEFAULT CHARSET. See
+  CAVEATS.md "Changing DEFAULT CHARSET" for the trade-offs
+  (heavyweight rebuild, column-level explicit charsets get
+  clobbered).
 
 **Operational rules** (declarative-by-design constraints; see
 `CAVEATS.md` for the full list and rationale):
