@@ -384,6 +384,32 @@ CREATE TABLE t (
 	assert.Nil(t, matches.Collation, "default collation collapsed to nil")
 }
 
+// TestParseTableOptionsCollateOnly pins that a table whose only
+// charset-related option is `COLLATE=…` (no DEFAULT CHARSET) still
+// gets the same default-collation collapse as a CHARSET+COLLATE
+// table. Without the collation→charset fallback in the parser pass,
+// a redundantly-spelled default collation would survive on the
+// parser side while the catalog side (which always knows the
+// effective charset via information_schema) collapses it — endless
+// ALTER TABLE … COLLATE=… loops on every plan.
+func TestParseTableOptionsCollateOnly(t *testing.T) {
+	t.Run("default collation collapses to nil", func(t *testing.T) {
+		r, err := parser.ParseSQL(`CREATE TABLE t (id INT) COLLATE=utf8mb4_0900_ai_ci;`, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		assert.Nil(t, tbl.Charset, "no DEFAULT CHARSET → Charset stays nil")
+		assert.Nil(t, tbl.Collation, "default collation collapsed away")
+	})
+	t.Run("non-default collation survives", func(t *testing.T) {
+		r, err := parser.ParseSQL(`CREATE TABLE t (id INT) COLLATE=utf8mb4_unicode_ci;`, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		assert.Nil(t, tbl.Charset)
+		require.NotNil(t, tbl.Collation)
+		assert.Equal(t, "utf8mb4_unicode_ci", *tbl.Collation)
+	})
+}
+
 // TestParseColumnCollateOnlyInheritsTableCharset pins that a column
 // declared with `COLLATE …` and no `CHARACTER SET` participates in the
 // same default-collation collapse as a column with the explicit

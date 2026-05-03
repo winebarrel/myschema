@@ -21,6 +21,35 @@ func DefaultCollationOf(charset string) string {
 	return defaultCollations[strings.ToLower(charset)]
 }
 
+// CharsetOfCollation returns the character set implied by a collation
+// name. MySQL collation names follow `<charset>_<…>` (e.g.
+// `utf8mb4_0900_ai_ci` → `utf8mb4`, `latin1_swedish_ci` → `latin1`),
+// with one special case where the charset name and the collation
+// name coincide (`binary` → `binary`). Returns "" for empty input.
+//
+// Used by the parser when desired SQL specifies only `COLLATE=…`
+// (no `CHARACTER SET=…`): the parser inherits the collation but
+// has no charset to pass to CollapseDefaultCollation. Splitting the
+// collation gives an effective charset purely so that a redundantly-
+// spelled default collation can still be collapsed to nil and stay
+// equal to the catalog side, which always knows the effective
+// charset via information_schema.
+//
+// Input is lower-cased; return value is also lower-case.
+func CharsetOfCollation(collation string) string {
+	if collation == "" {
+		return ""
+	}
+	coll := strings.ToLower(collation)
+	if coll == "binary" {
+		return "binary"
+	}
+	if i := strings.Index(coll, "_"); i > 0 {
+		return coll[:i]
+	}
+	return coll
+}
+
 // CollapseDefaultCollation returns coll unchanged unless it equals the
 // MySQL-default collation for the given charset, in which case it
 // returns nil. Used by parser and catalog alike so a column or table

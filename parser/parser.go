@@ -264,20 +264,22 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 	// the same MySQL state. Normalising to nil here keeps the parser
 	// side aligned with the catalog side, which collapses the same
 	// case after reading information_schema.
-	t.Collation = model.CollapseDefaultCollation(t.Charset, t.Collation)
+	t.Collation = model.CollapseDefaultCollation(effectiveCharsetForCollation(t.Charset, t.Collation), t.Collation)
 	for _, c := range t.Columns.CollectValues() {
-		// Effective charset: the column's own CHARACTER SET if given,
-		// otherwise the table default. A column that spelled out only
-		// COLLATE (no CHARACTER SET) inherits its charset from the
-		// table default; without that fallback CollapseDefaultCollation
-		// has nothing to compare against and a redundant per-column
-		// COLLATE survives on the parser side while the catalog side
-		// (which knows the effective charset) collapses it — endless
-		// MODIFY COLUMN drift.
+		// Effective charset for collapsing: column's own CHARACTER SET
+		// if given, else the table default, else the charset implied
+		// by the column's COLLATE name. The last fallback covers the
+		// COLLATE-only column on a COLLATE-only table, where neither
+		// declared a CHARACTER SET; without it a redundant default
+		// collation would survive on the parser side while the catalog
+		// side (which always resolves the effective charset via
+		// information_schema) collapses it — endless MODIFY COLUMN
+		// drift.
 		effectiveCharset := c.CharacterSet
 		if effectiveCharset == nil {
 			effectiveCharset = t.Charset
 		}
+		effectiveCharset = effectiveCharsetForCollation(effectiveCharset, c.Collation)
 		c.Collation = model.CollapseDefaultCollation(effectiveCharset, c.Collation)
 	}
 
@@ -566,6 +568,22 @@ func referenceActionString(a sqlparser.ReferenceAction) string {
 		return ""
 	}
 	return ""
+}
+
+// effectiveCharsetForCollation returns charset unchanged when it's
+// already set; otherwise it derives a charset from the collation name
+// (e.g. utf8mb4_0900_ai_ci → utf8mb4) so that CollapseDefaultCollation
+// can still fire for COLLATE-only desired SQL. Returns nil unchanged
+// if there's nothing to derive from on either side.
+func effectiveCharsetForCollation(charset, collation *string) *string {
+	if charset != nil || collation == nil {
+		return charset
+	}
+	cs := model.CharsetOfCollation(*collation)
+	if cs == "" {
+		return nil
+	}
+	return &cs
 }
 
 func applyTableOption(t *model.Table, opt *sqlparser.TableOption) {

@@ -313,12 +313,21 @@ func ptrEq[T comparable](a, b *T) bool {
 // server-default charset; the user is opting in to "whatever MySQL
 // gives me", so don't fight it).
 //
-// "Don't-care" semantics on the desired side: a desired field set to
-// nil is treated as "the user didn't say, so anything matches". This
-// keeps `DEFAULT CHARSET=utf8mb4` (Collation nil) from looping
-// forever against a catalog that always returns a non-nil collation,
-// and equally lets a desired-only `COLLATE=…` (Charset nil) converge
-// against any catalog charset.
+// Comparison semantics:
+//
+//   - desired.Charset == nil → "the user didn't declare a charset, so
+//     match whatever catalog has". Lets a desired-only `COLLATE=…`
+//     converge against any catalog charset.
+//   - desired.Collation == nil with desired.Charset != nil → "use the
+//     charset's default collation". Catalog always collapses the
+//     default down to nil after CollapseDefaultCollation, so the two
+//     sides agree iff current.Collation is also nil; if catalog
+//     carries an explicit non-default collation the diff DOES emit
+//     an ALTER (`DEFAULT CHARSET=…`) so MySQL resets the table
+//     collation to that charset's default.
+//   - desired.Collation == nil with desired.Charset == nil → handled
+//     by the early return; nothing to compare.
+//   - both sides set → strict ptrEq.
 //
 // The emitted DDL spells out only the clauses the desired side
 // actually set: `ALTER TABLE … DEFAULT CHARSET=…` when only Charset
@@ -336,7 +345,18 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 		return ""
 	}
 	charsetMatches := desired.Charset == nil || ptrEq(current.Charset, desired.Charset)
-	collationMatches := desired.Collation == nil || ptrEq(current.Collation, desired.Collation)
+	var collationMatches bool
+	switch {
+	case desired.Collation != nil:
+		collationMatches = ptrEq(current.Collation, desired.Collation)
+	case desired.Charset != nil:
+		// Desired says "use the default collation for this charset" —
+		// catalog represents that as nil after CollapseDefaultCollation.
+		collationMatches = current.Collation == nil
+	default:
+		// Both nil; covered by the early return above.
+		collationMatches = true
+	}
 	if charsetMatches && collationMatches {
 		return ""
 	}

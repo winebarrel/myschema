@@ -40,6 +40,37 @@ func TestDefaultCollationOf(t *testing.T) {
 	}
 }
 
+func TestCharsetOfCollation(t *testing.T) {
+	cases := []struct {
+		collation string
+		want      string
+	}{
+		{"utf8mb4_0900_ai_ci", "utf8mb4"},
+		{"utf8mb4_unicode_ci", "utf8mb4"},
+		{"latin1_swedish_ci", "latin1"},
+		{"latin1_bin", "latin1"},
+		{"utf8mb3_general_ci", "utf8mb3"},
+		// `binary` is the special case where charset and collation
+		// share the name (no underscore-prefixed form).
+		{"binary", "binary"},
+		// Mixed-case input still resolves — charset/collation
+		// identifiers are case-insensitive in MySQL.
+		{"UTF8MB4_0900_AI_CI", "utf8mb4"},
+		{"BINARY", "binary"},
+		// Empty input is benign.
+		{"", ""},
+		// Pathological "no underscore, not binary" input falls through
+		// to the lowercased value — caller will get an empty result
+		// from DefaultCollationOf and skip the collapse.
+		{"made_up", "made"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.collation, func(t *testing.T) {
+			assert.Equal(t, tc.want, model.CharsetOfCollation(tc.collation))
+		})
+	}
+}
+
 func TestCollapseDefaultCollation(t *testing.T) {
 	utf8mb4 := "utf8mb4"
 	defaultColl := "utf8mb4_0900_ai_ci"
