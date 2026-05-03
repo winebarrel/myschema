@@ -59,10 +59,14 @@ func NormalizePartitionOption(po *sqlparser.PartitionOption) string {
 }
 
 // ExtractPartitionFromShowCreate isolates the `PARTITION BY …` clause
-// (including any `SUBPARTITION BY …` and the parenthesised partition
-// definitions) from a `SHOW CREATE TABLE` result and returns it
-// normalised through the same vitess pipeline NormalizePartitionOption
-// uses. Returns ("", nil) when the table is not partitioned.
+// (and the parenthesised partition definitions) from a
+// `SHOW CREATE TABLE` result and returns it normalised through the
+// same vitess pipeline NormalizePartitionOption uses. Returns
+// ("", nil) when the table is not partitioned. A catalog-side table
+// that uses `SUBPARTITION BY …` is rejected with an error
+// (SUBPARTITION is intentionally out of scope for v1 — see
+// CAVEATS.md "Partitioning is round-trip only in v1") so myschema
+// won't try to manage it.
 //
 // MySQL wraps the partition clause in a versioned comment like
 // `/*!50100 PARTITION BY RANGE … */`. SHOW CREATE TABLE may also
