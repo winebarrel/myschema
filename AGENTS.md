@@ -7,7 +7,7 @@ writes the desired schema as plain SQL (`CREATE TABLE` / `CREATE VIEW`
 / etc.); myschema reads the current state from MySQL's
 `information_schema`, diffs the two, and emits — or applies — the DDL
 that brings current → desired. Three subcommands: `plan` (preview the
-DDL), `apply` (run it), `dump` (serialise the live schema as SQL).
+DDL), `apply` (run it), `dump` (serialize the live schema as SQL).
 
 The desired side is parsed with `vitess.io/vitess/go/vt/sqlparser`;
 the catalog side is read with `database/sql` +
