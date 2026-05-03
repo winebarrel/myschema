@@ -210,11 +210,17 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 		// MySQL rejects a REORGANIZE whose new partitions don't
 		// cover exactly the same value range as the old ones,
 		// so we have to include the next partition too whenever
-		// the last changed slot isn't the very last in the
-		// list. LIST partitions don't have this cascade
+		// the last changed slot's *boundary* actually moved.
+		// Per-partition option-only diffs (COMMENT / MAX_ROWS /
+		// TABLESPACE / …) leave the value range untouched, so
+		// pulling p_{last+1} in just to restate it unchanged
+		// would turn a metadata-only edit into a second
+		// partition rewrite — keep the span minimal in that
+		// case. LIST partitions don't have this cascade at all
 		// (`VALUES IN (…)` is a closed set per slot), so the
 		// extension only fires for RANGE / RANGE COLUMNS.
-		if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 {
+		if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 &&
+			!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
 			last++
 		}
 		var b strings.Builder
@@ -396,6 +402,30 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 		adds = append(adds, des[di:]...)
 	}
 	return drops, adds
+}
+
+// partitionValueRangeEqual reports whether the two definitions
+// describe the same value boundary (`VALUES LESS THAN …` or
+// `VALUES IN (…)`) — i.e. whether ONLY the per-partition
+// options changed (COMMENT / MAX_ROWS / TABLESPACE / …) when
+// `partitionDefEqual` already said the full definition differs.
+// Used by the RANGE boundary cascade decision: skip the cascade
+// when the last changed slot's boundary didn't move.
+func partitionValueRangeEqual(a, b *sqlparser.PartitionDefinition) bool {
+	var ar, br *sqlparser.PartitionValueRange
+	if a.Options != nil {
+		ar = a.Options.ValueRange
+	}
+	if b.Options != nil {
+		br = b.Options.ValueRange
+	}
+	if ar == nil && br == nil {
+		return true
+	}
+	if ar == nil || br == nil {
+		return false
+	}
+	return sqlparser.String(ar) == sqlparser.String(br)
 }
 
 func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
