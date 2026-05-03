@@ -263,18 +263,17 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 
 // ExtractStmtConvertCharset returns true when the leading comment block
 // of stmtSQL contains a `-- myschema:convert-charset` directive. Same
-// scanner shape as ExtractStmtRenameFrom: blank / `--` / `#` / single-
-// and multi-line `/* … */` lines all skipped, scan stops at the first
-// real SQL line. Multiple convert-charset directives on the same
-// statement error.
+// scanner shape as ExtractStmtRenameFrom (blank / `--` / `#` / single-
+// and multi-line `/* … */` lines all skipped) but unlike that
+// extractor it keeps scanning past the first real SQL line so that
+// a directive misplaced *inside* or *after* the CREATE TABLE body
+// surfaces as an error instead of being silently ignored — the
+// directive only attaches to the leading comment block, and a stray
+// copy is almost always a typo. Multiple directives in the leading
+// block are likewise rejected.
 func ExtractStmtConvertCharset(stmtSQL string) (bool, error) {
-	var found bool
-	var inBlock bool
-	stop := false
+	var found, sawSQL, inBlock bool
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
-		if stop {
-			break
-		}
 		if inBlock {
 			idx := strings.Index(line, "*/")
 			if idx < 0 {
@@ -294,6 +293,9 @@ func ExtractStmtConvertCharset(stmtSQL string) (bool, error) {
 		switch {
 		case strings.HasPrefix(trim, "--"):
 			if convertCharsetDirectivePattern.MatchString(trim) {
+				if sawSQL {
+					return false, fmt.Errorf("-- myschema:convert-charset must appear before the CREATE TABLE statement, not inside or after it")
+				}
 				if found {
 					return false, fmt.Errorf("multiple -- myschema:convert-charset directives on the same statement; only one is allowed")
 				}
@@ -302,7 +304,7 @@ func ExtractStmtConvertCharset(stmtSQL string) (bool, error) {
 		case strings.HasPrefix(trim, "#"):
 			// non-myschema line comment, skip
 		default:
-			stop = true
+			sawSQL = true
 		}
 	}
 	return found, nil

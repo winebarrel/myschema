@@ -869,6 +869,33 @@ CREATE TABLE t (id INT);`)
 	assert.Contains(t, err.Error(), "multiple")
 }
 
+func TestExtractStmtConvertCharsetMisplacedInsideBodyErrors(t *testing.T) {
+	// The directive only attaches to the leading comment block. A
+	// stray copy inside the CREATE TABLE body must not be silently
+	// ignored — almost always a typo. This is the asymmetry with
+	// ExtractStmtRenameFrom: that one stops at the first SQL line,
+	// this one keeps scanning so the misplaced case errors instead
+	// of vanishing.
+	_, err := parser.ExtractStmtConvertCharset(`CREATE TABLE t (
+    id INT,
+    -- myschema:convert-charset
+    PRIMARY KEY (id)
+) DEFAULT CHARSET=utf8mb4;`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must appear before")
+}
+
+func TestExtractStmtConvertCharsetMisplacedAfterStatementErrors(t *testing.T) {
+	// `-- myschema:convert-charset` after the CREATE TABLE closes
+	// is also misplaced (still inside the same piece passed to
+	// ExtractStmtConvertCharset) and must error rather than
+	// silently no-op.
+	_, err := parser.ExtractStmtConvertCharset(`CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;
+-- myschema:convert-charset`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must appear before")
+}
+
 func TestValidateDirectivesRejectsMalformedConvertCharset(t *testing.T) {
 	// `-- myschema:convert-charset utf8mb4` is rejected — the
 	// directive takes no arguments, charset comes from the
