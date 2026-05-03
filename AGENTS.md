@@ -293,7 +293,14 @@ SQL-output.
 
 1. Create a feature branch before starting implementation.
 2. Write a test that asserts the expected behaviour first, confirm it fails,
-   then implement the fix / feature.
+   then implement the fix / feature. **Every behaviour-changing edit must
+   ship with a regression test in the same commit / PR — no exceptions.**
+   This applies equally to first-pass implementation and to fix-ups made
+   during PR review rounds: if a review comment causes you to change how
+   the code behaves (not just rename a symbol or rewrap a comment), add or
+   extend a test that would have failed before the fix. Picking up the
+   reviewer's listed line without pinning the new behaviour is how
+   regressions sneak back in.
 3. Prefer simplicity — avoid clever or layered implementations when a
    straightforward approach works. Match the scope of the change to what
    was actually requested; resist scope creep into adjacent cleanup.
