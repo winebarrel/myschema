@@ -688,6 +688,27 @@ CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
 	assert.True(t, ok)
 }
 
+func TestParseSQLAcceptsExecuteDirectiveWithMultilinePayload(t *testing.T) {
+	// Single-statement payloads can span multiple lines as long as
+	// they don't contain an internal `;` (which would be cut by
+	// SplitStatementToPieces — see the multi-statement pin test).
+	// A reformatted CREATE TRIGGER for readability must be held on
+	// ParseResult.Executes verbatim, newlines and indentation
+	// preserved.
+	res, err := parser.ParseSQL(`-- myschema:execute SELECT 1
+CREATE TRIGGER trg
+  BEFORE INSERT ON t
+  FOR EACH ROW
+  SET NEW.val = 0;
+`, "shop")
+	require.NoError(t, err)
+	require.Len(t, res.Executes, 1)
+	assert.Equal(t,
+		"CREATE TRIGGER trg\n  BEFORE INSERT ON t\n  FOR EACH ROW\n  SET NEW.val = 0;",
+		res.Executes[0].ExecuteSQL,
+	)
+}
+
 func TestParseSQLRejectsExecuteDirectiveWithEmptyBody(t *testing.T) {
 	// A directive whose next non-blank line is empty (no SQL to
 	// guard) must error rather than silently swallow the directive.
