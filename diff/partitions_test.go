@@ -57,6 +57,26 @@ func TestDiffPartitionsQuotesReservedPartitionNames(t *testing.T) {
 		"DROP PARTITION must back-tick reserved-word names; got %q", stmts[0])
 }
 
+// regression: ADD PARTITION must round-trip a partition whose name
+// is a MySQL reserved word. vitess's PartitionDefinition formatter
+// is supposed to back-tick those automatically; the DROP path
+// goes through model.Ident explicitly (already pinned by
+// TestDiffPartitionsQuotesReservedPartitionNames). This test
+// keeps the ADD path honest in case the upstream formatter
+// changes behaviour.
+func TestDiffPartitionsQuotesReservedPartitionNamesOnAdd(t *testing.T) {
+	cur := stringPtr("partition by range (id) (partition p0 values less than (10))")
+	des := stringPtr("partition by range (id) (partition p0 values less than (10), partition `select` values less than (20))")
+
+	stmts, disallowed, err := diffPartitions("db.t", cur, des, AllowAll{})
+	require.NoError(t, err)
+	require.Empty(t, disallowed)
+	require.Len(t, stmts, 1)
+	assert.True(t,
+		strings.Contains(stmts[0], "`select`"),
+		"ADD PARTITION must back-tick reserved-word names; got %q", stmts[0])
+}
+
 // regression: KEY partitions where the catalog and desired strings
 // only differ in identifier casing (or whitespace, etc. that vitess
 // normalises away on re-parse) used to surface as the

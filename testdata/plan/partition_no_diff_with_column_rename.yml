@@ -1,0 +1,28 @@
+# Pin the column-rename + partitioned-table case. Without the
+# rewritePartitionColumnRefs pass the catalog still carries the old
+# column name in its partition clause while desired uses the new
+# one — the diff would then misclassify "scheme / expression
+# differs" even though the partition layout itself didn't change.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      old_dt DATE NOT NULL,
+      PRIMARY KEY (id, old_dt)
+  ) PARTITION BY RANGE (YEAR(old_dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_dt
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.events RENAME COLUMN old_dt TO dt;

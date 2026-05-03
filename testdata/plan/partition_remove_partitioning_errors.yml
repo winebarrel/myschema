@@ -1,0 +1,21 @@
+# Pin the "desired drops partitioning from a partitioned catalog
+# table" error path. Counterpart to partition_add_partitioning_errors.
+# The remediation message must point at REMOVE PARTITIONING (not
+# PARTITION BY).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  );
+
+error: "REMOVE PARTITIONING is not yet generated"

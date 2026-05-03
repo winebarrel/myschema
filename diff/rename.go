@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"vitess.io/vitess/go/vt/sqlparser"
+
 	"github.com/winebarrel/myschema/model"
+	"github.com/winebarrel/myschema/parser"
 	"github.com/winebarrel/orderedmap"
 )
 
@@ -162,6 +165,55 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 			}
 		}
 	}
+}
+
+// rewritePartitionColumnRefs rewrites column references inside the table's
+// `PARTITION BY …` clause after a column rename, so a desired-side
+// `-- myschema:renamed-from` on a partition key column doesn't
+// surface as a spurious "partition strategy / expression differs"
+// error from diffPartitions.
+//
+// We re-parse current.Partition into its `*sqlparser.PartitionOption`,
+// walk the AST replacing ColName.Name and ColList entries that match
+// the rename map's old → new mapping, then re-format through the same
+// NormalizePartitionOption path the parser / catalog use so the
+// stored canonical string stays in lockstep. If re-parse fails we
+// leave Partition untouched — the upstream diff will then surface
+// whatever it finds.
+//
+// The rename map is keyed old → new. Identifier comparison is
+// case-insensitive (matches `partitionHeaderEqual`'s ColList
+// normalisation): MySQL column names are case-insensitive, the
+// parser / catalog round-trips have already lower-cased what they
+// store, and the rename map keys come from desired-side directives
+// where the user's casing might differ from the catalog's.
+func rewritePartitionColumnRefs(p **string, renames map[string]string) {
+	if p == nil || *p == nil || **p == "" || len(renames) == 0 {
+		return
+	}
+	po, err := parser.ParsePartitionClause(**p)
+	if err != nil {
+		return
+	}
+	lowered := make(map[string]string, len(renames))
+	for old, newName := range renames {
+		lowered[strings.ToLower(old)] = newName
+	}
+	sqlparser.Rewrite(po, func(c *sqlparser.Cursor) bool {
+		if n, ok := c.Node().(*sqlparser.ColName); ok {
+			if newName, hit := lowered[strings.ToLower(n.Name.String())]; hit {
+				n.Name = sqlparser.NewIdentifierCI(newName)
+			}
+		}
+		return true
+	}, nil)
+	for i, col := range po.ColList {
+		if newName, hit := lowered[strings.ToLower(col.String())]; hit {
+			po.ColList[i] = sqlparser.NewIdentifierCI(newName)
+		}
+	}
+	rewritten := parser.NormalizePartitionOption(po)
+	*p = &rewritten
 }
 
 // rewriteConstraintColumnRefs rewrites column references inside PRIMARY KEY
