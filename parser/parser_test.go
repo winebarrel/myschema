@@ -336,6 +336,54 @@ CREATE TABLE t (id INT, PRIMARY KEY (id))
 	assert.Equal(t, "utf8mb4_unicode_ci", *tbl.Collation)
 }
 
+// TestParseColumnCharacterSet pins that vitess's column-level CHARACTER
+// SET clause makes it onto model.Column. The vitess AST stores it on
+// `cd.Type.Charset.Name` (a separate struct, not under
+// cd.Type.Options), so a parser pass that only inspects `Options` —
+// as an earlier version of parseColumnDef did — silently drops every
+// per-column charset and the whole catalog-vs-parser comparison
+// degenerates into endless MODIFY COLUMN drift.
+func TestParseColumnCharacterSet(t *testing.T) {
+	sql := `
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    plain VARCHAR(64),
+    explicit_cs VARCHAR(64) CHARACTER SET latin1,
+    explicit_both VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_bin,
+    matches_default VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
+    PRIMARY KEY (id)
+) DEFAULT CHARSET=utf8mb4;
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+
+	plain, _ := tbl.Columns.GetOk("plain")
+	assert.Nil(t, plain.CharacterSet, "no CHARACTER SET on column → nil")
+	assert.Nil(t, plain.Collation)
+
+	cs, _ := tbl.Columns.GetOk("explicit_cs")
+	require.NotNil(t, cs.CharacterSet)
+	assert.Equal(t, "latin1", *cs.CharacterSet, "explicit CHARACTER SET captured")
+	// COLLATE not given → parser sets nil (catalog will fill it via
+	// information_schema; both sides collapse it through CollapseDefault
+	// so the comparison stays quiet).
+	assert.Nil(t, cs.Collation)
+
+	both, _ := tbl.Columns.GetOk("explicit_both")
+	require.NotNil(t, both.CharacterSet)
+	assert.Equal(t, "latin1", *both.CharacterSet)
+	require.NotNil(t, both.Collation)
+	assert.Equal(t, "latin1_bin", *both.Collation, "non-default collation survives")
+
+	// Spelling out the charset's default collation is redundant; parser
+	// collapses it to nil so it compares equal to the catalog side.
+	matches, _ := tbl.Columns.GetOk("matches_default")
+	require.NotNil(t, matches.CharacterSet)
+	assert.Equal(t, "utf8mb4", *matches.CharacterSet)
+	assert.Nil(t, matches.Collation, "default collation collapsed to nil")
+}
+
 // TestParseDuplicateRejection ensures the parser surfaces obvious mistakes
 // rather than silently overwriting.
 func TestParseDuplicateRejection(t *testing.T) {
