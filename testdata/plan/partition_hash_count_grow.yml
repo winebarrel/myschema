@@ -1,0 +1,21 @@
+# HASH count grow: catalog PARTITIONS 4, desired PARTITIONS 8
+# → ALTER TABLE … ADD PARTITION PARTITIONS 4 (the diff between
+# the two counts). Row-preserving but data-moving: regular
+# HASH changes the modulus so most rows shift partition,
+# whereas LINEAR HASH only touches the partitions adjacent to
+# the change. No allow-drop gating because no slot is being
+# removed.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 8;
+
+plan: |
+  ALTER TABLE myschema_test.events ADD PARTITION PARTITIONS 4;

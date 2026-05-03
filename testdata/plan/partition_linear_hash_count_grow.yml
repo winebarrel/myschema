@@ -1,0 +1,21 @@
+# LINEAR HASH count grow. partitionHeaderEqual compares
+# `IsLinear` so a non-linear catalog and a linear desired (or
+# vice versa) would surface as "scheme/expression differs" —
+# this fixture pins the matched-IsLinear path: both sides
+# linear, only the count differs, so the same
+# ADD PARTITION PARTITIONS path the plain-HASH fixture covers
+# fires.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY LINEAR HASH (id) PARTITIONS 2;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY LINEAR HASH (id) PARTITIONS 4;
+
+plan: |
+  ALTER TABLE myschema_test.events ADD PARTITION PARTITIONS 2;

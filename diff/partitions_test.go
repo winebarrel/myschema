@@ -95,17 +95,44 @@ func TestDiffPartitionsKEYNoOpAcrossIdentifierCasing(t *testing.T) {
 	assert.Empty(t, disallowed, "no skipped statements expected for a KEY no-op")
 }
 
-func TestDiffPartitionsKEYCountChangeStillErrors(t *testing.T) {
-	// Counterpart to the no-op case: when the count actually changes
-	// the HASH/KEY branch must still surface the unsupported-diff
-	// error so the user knows to run COALESCE / ADD PARTITION
-	// PARTITIONS by hand.
+func TestDiffPartitionsKEYCountGrow(t *testing.T) {
+	// Counterpart to the no-op case: when the count actually
+	// grows, the HASH/KEY branch generates ADD PARTITION
+	// PARTITIONS n. No allow-drop gating because no data is
+	// discarded.
 	cur := stringPtr("partition by key (user_id) partitions 2")
 	des := stringPtr("partition by key (user_id) partitions 4")
 
-	_, _, err := diffPartitions("db.t", cur, des, AllowAll{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "HASH / KEY partition diffs are not yet generated")
+	stmts, disallowed, err := diffPartitions("db.t", cur, des, AllowAll{})
+	require.NoError(t, err)
+	require.Empty(t, disallowed)
+	require.Len(t, stmts, 1)
+	assert.Equal(t, "ALTER TABLE db.t ADD PARTITION PARTITIONS 2;", stmts[0])
+}
+
+func TestDiffPartitionsKEYCountShrinkRequiresAllowDrop(t *testing.T) {
+	// COALESCE PARTITION merges the trailing partitions into the
+	// survivors and redistributes their rows (no row loss), but
+	// the slot structure itself goes away irreversibly, so it's
+	// gated on `--allow-drop=partition` like RANGE/LIST DROP.
+	// Without that flag the COALESCE lands on the disallowed
+	// bucket; with it, it's emitted.
+	cur := stringPtr("partition by key (user_id) partitions 4")
+	des := stringPtr("partition by key (user_id) partitions 2")
+
+	// Without allow-drop=partition.
+	stmts, disallowed, err := diffPartitions("db.t", cur, des, &AllowList{})
+	require.NoError(t, err)
+	assert.Empty(t, stmts)
+	require.Len(t, disallowed, 1)
+	assert.Equal(t, "-- skipped: ALTER TABLE db.t COALESCE PARTITION 2;", disallowed[0])
+
+	// With allow-drop=partition.
+	stmts, disallowed, err = diffPartitions("db.t", cur, des, AllowAll{})
+	require.NoError(t, err)
+	assert.Empty(t, disallowed)
+	require.Len(t, stmts, 1)
+	assert.Equal(t, "ALTER TABLE db.t COALESCE PARTITION 2;", stmts[0])
 }
 
 func stringPtr(s string) *string { return &s }

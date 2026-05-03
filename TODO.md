@@ -24,23 +24,23 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Medium — object coverage
 
-- [ ] **Partition diff generation beyond RANGE/LIST suffix add
-      + order-preserving subset drop.** Suffix `ADD PARTITION`
-      and order-preserving subset `DROP PARTITION` (head /
-      middle / tail OK) for RANGE / LIST (including `RANGE
-      COLUMNS` / `LIST COLUMNS`) already ship
-      (`--allow-drop=partition` gates DROP); see
-      CAVEATS.md "Partitioning". Still on the floor: mid-list
-      value changes (`REORGANIZE PARTITION old1, old2 INTO
-      (...)`), HASH / KEY count operations (`COALESCE PARTITION
-      n` for shrinks, `ADD PARTITION PARTITIONS n` for grows),
-      strategy / expression changes (`REMOVE PARTITIONING` + new
-      `PARTITION BY`), and both directions of "one side has no
-      partitioning" — first-time `PARTITION BY` against an
-      unpartitioned table *and* `REMOVE PARTITIONING` against an
-      already-partitioned one. SUBPARTITION is intentionally out
-      of scope (CAVEATS.md notes both the desired-side parse
-      error and the catalog-side guard).
+- [ ] **Partition diff generation beyond the supported shapes.**
+      Already shipped: RANGE / LIST suffix `ADD PARTITION` and
+      order-preserving subset `DROP PARTITION` (head / middle /
+      tail OK), including `RANGE COLUMNS` / `LIST COLUMNS`; and
+      HASH / KEY (incl. LINEAR) `PARTITIONS n` count grow /
+      shrink via `ADD PARTITION PARTITIONS` /
+      `COALESCE PARTITION` (`--allow-drop=partition` gates the
+      shrink + RANGE/LIST DROP). See CAVEATS.md "Partitioning".
+      Still on the floor: mid-list value changes (`REORGANIZE
+      PARTITION old1, old2 INTO (...)`), strategy / expression
+      changes (`REMOVE PARTITIONING` + new `PARTITION BY`), and
+      both directions of "one side has no partitioning" —
+      first-time `PARTITION BY` against an unpartitioned table
+      *and* `REMOVE PARTITIONING` against an already-partitioned
+      one. SUBPARTITION is intentionally out of scope (CAVEATS.md
+      notes both the desired-side parse error and the
+      catalog-side guard).
 
 ## Low — CLI ergonomics
 

@@ -208,6 +208,37 @@ patterns:
   `--allow-drop=partition`; without that flag the DROP lands
   in the disallowed bucket as a `-- skipped:` line so the user
   sees what would have been removed.
+- *HASH / KEY (incl. LINEAR) count change* — when both sides
+  share the same partition strategy (Type / IsLinear /
+  KeyAlgorithm / ColList / Expr), only `PARTITIONS n` differs.
+  Generates the count-based grammar:
+  - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n`.
+  - shrinking → `ALTER TABLE … COALESCE PARTITION n`. Merges
+    the trailing partitions into the survivors. Gated on
+    `--allow-drop=partition` not because rows are lost (they
+    aren't — they're redistributed) but because the slot
+    structure itself changes irreversibly: you can't
+    un-COALESCE without another ALTER that rewrites data
+    again, so it lines up with the same "destructive / heavy"
+    treatment RANGE/LIST DROP gets. Without the flag the
+    COALESCE lands on the disallowed bucket.
+
+  Both directions are **row-preserving but data-moving**:
+  changing the partition count moves rows between partitions
+  on disk. The cost depends on which sub-strategy the table
+  uses. Regular `HASH` / `KEY` use the partition-function
+  modulus, so almost every row's target partition shifts and
+  MySQL effectively rewrites the table — expect I/O
+  proportional to table size on a large table. `LINEAR HASH`
+  / `LINEAR KEY` use the linear-powers-of-two algorithm
+  documented in the MySQL manual as making "adding, dropping,
+  merging, and splitting of partitions … much faster" because
+  only the partitions adjacent to the change need to be
+  touched. If your table is large enough that the rewrite
+  cost is the question driving the schema design, the
+  regular vs. linear choice matters more than how
+  myschema phrases the diff.
+
 **Diffs that still error (manage by hand).**
 
 - *Both ADD and DROP needed* — any diff where the
@@ -229,10 +260,6 @@ patterns:
   PARTITION` when data needs to move, or an explicit
   `DROP PARTITION` + `ADD PARTITION` pair when you really do
   want to discard rows — then re-run plan.
-- *HASH / KEY count change* — different grammar (`COALESCE
-  PARTITION n` for shrinks, `ADD PARTITION PARTITIONS n` for
-  grows). Future PR. Fails with `HASH / KEY partition diffs
-  are not yet generated`.
 - *Strategy / expression change* (e.g. RANGE → HASH, or a
   different `PARTITION BY` expression) — needs `REMOVE
   PARTITIONING` followed by a new `PARTITION BY`. Future PR.
