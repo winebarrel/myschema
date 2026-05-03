@@ -50,8 +50,8 @@ myschema deliberately does not try to detect and skip implicit FK
 covering indexes. The judgement call: declarative tools work best
 when "what you wrote" is what gets applied, and an implicit-index
 heuristic would silently rewrite the user's intent. Requiring an
-explicit `KEY` keeps the desired SQL self-documenting and matches
-what `dump` already emits.
+explicit covering index (PRIMARY KEY / UNIQUE / KEY) keeps the
+desired SQL self-documenting and matches what `dump` already emits.
 
 **Round-trip via `dump` is unaffected.** `myschema dump` always
 materialises the covering index, so `dump → apply` (or `dump →

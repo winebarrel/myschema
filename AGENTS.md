@@ -170,8 +170,11 @@ them off.
 - Foreign keys must declare a covering index in desired SQL. myschema
   does not auto-skip the implicit covering index that MySQL creates
   for un-indexed FK columns, so a desired-side FK without an explicit
-  matching `KEY` shows up as drift and apply errors. `dump` always
-  emits the covering index, so `dump → apply` is unaffected.
+  matching index (PRIMARY KEY / UNIQUE / KEY) shows up as drift —
+  surfaced as a `-- skipped: DROP INDEX` line in plan by default.
+  Running apply with `--allow-drop=index` will then error 1553 because
+  the FK still needs the index. `dump` always emits the covering
+  index, so `dump → apply` is unaffected.
 
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 
