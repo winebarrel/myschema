@@ -65,6 +65,51 @@ against the live database first and use that output as your starting
 point — every implicit FK covering index will be materialised in the
 output, so the first `apply` is a no-op.
 
+## Integer display widths drift; type-name casing doesn't
+
+**Display widths.** Writing `INT(11)`, `BIGINT(20)`, `TINYINT(4)`,
+etc. in desired SQL surfaces as drift on **every** plan and `apply`
+never converges. Use the bare integer type (`INT`, `BIGINT`, …)
+instead.
+
+```sql
+-- desired
+CREATE TABLE t (id INT(11) NOT NULL);
+-- catalog (after apply)
+CREATE TABLE t (id int NOT NULL);
+```
+
+The next plan still shows `MODIFY COLUMN id int(11) NOT NULL`
+because vitess keeps whatever the user wrote (`int(11)`) on the
+desired side, while MySQL 8.0+ strips the display width from
+`information_schema.COLUMNS.COLUMN_TYPE` (so the catalog returns
+`int`). myschema does not normalise either side — comparing the
+two literally produces a permanent diff.
+
+**Why myschema doesn't auto-strip the width.** Two MySQL-8.0
+edges make a "just strip `(N)`" rewrite unsafe at the parser
+level: `TINYINT(1)` is the canonical storage type for `BOOLEAN` /
+`BOOL` and the catalog *does* keep the `(1)`, and `ZEROFILL`
+columns keep the width too (see below). Until myschema knows how
+to differentiate those cases reliably, the rule is "write what
+the catalog will hand back".
+
+**`ZEROFILL` is the exception.** MySQL keeps the width in
+`COLUMN_TYPE` for ZEROFILL columns (e.g. `int(5) unsigned
+zerofill`), so writing the column the same way on the desired
+side is round-trip safe — as long as the implicit `UNSIGNED` is
+also spelled out (`ZEROFILL` implies `UNSIGNED`, but the catalog
+emits both keywords explicitly):
+
+```sql
+-- round-trips fine
+CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
+```
+
+**Type-name casing.** `BIGINT` vs `bigint`, `VARCHAR` vs
+`varchar`, etc. don't trigger drift — both sides are lower-cased
+before comparison. Write whichever you find readable.
+
 ## Changing `DEFAULT CHARSET` on a table with string columns
 
 **Behaviour.** `ALTER TABLE … DEFAULT CHARSET=…` only updates the
