@@ -287,10 +287,14 @@ SQL-output.
 - Foreign keys live in `Table.ForeignKeys`, not in `Constraints`. The diff
   orders FK drops first, then table / column / index changes, then FK
   adds — never combine these phases.
-- Index parts: vitess uses `Length *int` (nil = no prefix length); the
-  catalog returns `0`. The parser dereferences the pointer when set,
-  so both sides land on `0` for "no prefix". Index types: treat `""`
-  and `"BTREE"` as equivalent (BTREE is the InnoDB default).
+- Index parts: prefix length is `*int` on both sides — vitess's
+  `IndexColumn.Length` and the catalog's
+  `information_schema.STATISTICS.SUB_PART` scan target, both `nil`
+  when the user didn't specify one. Each loader dereferences when
+  set; otherwise `model.IndexPart.Length` keeps its struct zero-value
+  (`0`), so both sides compare equal at `0` for "no prefix". Index
+  types: treat `""` and `"BTREE"` as equivalent (BTREE is the InnoDB
+  default).
 - The CHECK-constraint diff uses a deliberately loose normaliser
   (`strings.ToLower` + strip whitespace + strip backticks). Replace with a
   proper parser/restore pass when adding richer CHECK support.
