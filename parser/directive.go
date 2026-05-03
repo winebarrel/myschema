@@ -11,6 +11,7 @@ import (
 // validator below errors on any directive whose name isn't listed.
 var knownDirectives = map[string]bool{
 	"renamed-from": true,
+	"execute":      true,
 }
 
 var (
@@ -36,6 +37,14 @@ var (
 	// myschema operates on a single database per invocation, so the
 	// directive only ever refers to an object inside that database.
 	renameDirectivePattern = regexp.MustCompile("(?m)^\\s*--+\\s*myschema:renamed-from\\s+(`[^`]+`|[A-Za-z_][A-Za-z0-9_$]*)\\s*$")
+
+	// executeDirectivePattern captures the check-SQL body from an
+	// execute directive. Group 1 is the rest-of-line after the
+	// directive prefix, trimmed of leading whitespace; the body is
+	// taken verbatim (free-form SELECT, no escaping or quoting rules).
+	// At least one non-space character is required so the body
+	// can't be empty.
+	executeDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:execute\s+(\S.*?)\s*$`)
 )
 
 // ValidateDirectives scans rawSQL for any -- myschema:<name> comment and
@@ -81,9 +90,61 @@ func ValidateDirectives(rawSQL string) error {
 			if !renameDirectivePattern.MatchString(trim) {
 				return fmt.Errorf("malformed -- myschema:renamed-from directive: %q (expected exactly one bareword or `backticked` identifier; schema-qualified names are not supported)", strings.TrimSpace(trim))
 			}
+		case "execute":
+			if !executeDirectivePattern.MatchString(trim) {
+				return fmt.Errorf("malformed -- myschema:execute directive: %q (expected `-- myschema:execute <check-sql>` with a non-empty check SQL on the same line)", strings.TrimSpace(trim))
+			}
 		}
 	}
 	return nil
+}
+
+// ExtractExecuteDirective looks at the first non-blank, non-comment-
+// stripped line of piece and, if it is an `-- myschema:execute
+// <check-sql>` directive, returns the check-SQL body and the
+// remainder of the piece (the SQL statement that the directive
+// guards) with the directive line removed.
+//
+// The remainder is returned verbatim — vitess can't parse the
+// typical execute payload (CREATE TRIGGER, CREATE PROCEDURE, …) so
+// the parser pipeline carries it as raw text.
+//
+// `ok` is false when the piece doesn't start with an execute
+// directive; the caller falls through to the regular vitess parse
+// path in that case.
+func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool) {
+	// Walk the leading lines to find either the execute directive or
+	// the first real SQL line. Only an execute directive that sits
+	// before any SQL line counts — same shape as ExtractStmtRenameFrom,
+	// where the directive must precede the statement it guards.
+	lines := strings.Split(piece, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			continue
+		}
+		// Block-comment lines (single-line `/* … */`, `#`, plain `--`
+		// non-myschema comments) are skipped just like the rename-from
+		// extractor does — they don't break the directive's anchor.
+		if strings.HasPrefix(trim, "/*") || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.HasPrefix(trim, "--") {
+			m := executeDirectivePattern.FindStringSubmatch(trim)
+			if m == nil {
+				continue // some other `--` comment, skip
+			}
+			// Strip the directive line and any leading blanks from
+			// what's left; the remainder is the SQL the directive
+			// guards.
+			rest := strings.TrimLeft(strings.Join(lines[i+1:], "\n"), " \t\n")
+			return m[1], rest, true
+		}
+		// Real SQL line reached without seeing the directive — not
+		// an execute group.
+		return "", "", false
+	}
+	return "", "", false
 }
 
 // ExtractStmtRenameFrom returns the old name from a leading

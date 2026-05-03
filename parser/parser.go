@@ -20,6 +20,11 @@ import (
 type ParseResult struct {
 	Tables *orderedmap.Map[string, *model.Table]
 	Views  *orderedmap.Map[string, *model.View]
+	// Executes are the `-- myschema:execute <check-sql>` blocks in
+	// desired-side order. plan / apply iterate them after every other
+	// table / view DDL so triggers / routines / events created via the
+	// directive can refer to brand-new tables.
+	Executes []*model.ExecuteGroup
 }
 
 // ReadSQLFile reads a SQL file (or "-" for stdin).
@@ -73,10 +78,36 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 
 	tables := orderedmap.New[string, *model.Table]()
 	views := orderedmap.New[string, *model.View]()
+	var executes []*model.ExecuteGroup
 
 	for _, piece := range pieces {
 		piece = strings.TrimSpace(piece)
 		if piece == "" {
+			continue
+		}
+		// `-- myschema:execute <check-sql>` short-circuits the vitess
+		// pass: the typical payload (CREATE TRIGGER, CREATE PROCEDURE,
+		// …) lives outside vitess's grammar, so the parser hands the
+		// remainder of the piece to the model as raw SQL and lets
+		// plan / apply talk to MySQL directly. Done before the rename
+		// extractors so an `execute` block doesn't waste cycles
+		// looking for renames inside an opaque payload.
+		if checkSQL, executeSQL, ok := ExtractExecuteDirective(piece); ok {
+			executeSQL = strings.TrimSpace(executeSQL)
+			if executeSQL == "" {
+				return nil, fmt.Errorf("-- myschema:execute %q: missing the SQL statement that the directive guards (write the SQL on the line(s) after the directive)", checkSQL)
+			}
+			// SplitStatementToPieces strips the trailing `;`. Re-add
+			// it so plan output looks like every other emitted
+			// statement and apply hands MySQL a syntactically clean
+			// piece either way.
+			if !strings.HasSuffix(executeSQL, ";") {
+				executeSQL += ";"
+			}
+			executes = append(executes, &model.ExecuteGroup{
+				CheckSQL:   checkSQL,
+				ExecuteSQL: executeSQL,
+			})
 			continue
 		}
 		// Directive extraction runs against the raw piece before vitess
@@ -177,7 +208,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		}
 	}
 
-	return &ParseResult{Tables: tables, Views: views}, nil
+	return &ParseResult{Tables: tables, Views: views, Executes: executes}, nil
 }
 
 // rejectMisplacedRenameDirectives errors if any rename directives were

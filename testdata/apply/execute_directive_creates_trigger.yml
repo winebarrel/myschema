@@ -1,0 +1,30 @@
+# `-- myschema:execute <check-sql>` is the escape hatch for objects
+# myschema doesn't model — triggers, routines, events, grants. The
+# check-sql is run against the live database; zero rows back means
+# "not applied yet, run the guarded SQL", non-zero means skip.
+#
+# Idempotent on second apply: this fixture's verify_no_drift: true
+# is only honoured because the check SQL hits the now-existing
+# trigger and the diff layer slots the execute group into the
+# `disallowed` (skipped) bucket on subsequent plans.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+  -- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg' AND TRIGGER_SCHEMA=DATABASE()
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+
+applied: |
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+
+verify_no_drift: true

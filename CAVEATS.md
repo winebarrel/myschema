@@ -211,3 +211,55 @@ schema apply.
 A `--strict` mode that rejects unmodelled SQL instead of skipping
 it would be useful for production CI but is out of scope for v1.
 
+## `-- myschema:execute` is the only escape hatch for unmodelled objects
+
+**Workflow.** myschema doesn't model triggers, stored
+procedures / functions, events, or grants — they're imperative,
+version-tagged code rather than declarative state. To manage
+them alongside myschema's tables and views without leaving the
+desired-side SQL file, prefix the unmodelled DDL with a
+`-- myschema:execute <check-sql>` directive:
+
+```sql
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    val INT,
+    PRIMARY KEY (id)
+);
+
+-- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg' AND TRIGGER_SCHEMA=DATABASE()
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+```
+
+**Idempotency.** At plan / apply time myschema runs the check SQL
+against the live database. Zero rows back means "not applied yet,
+run the guarded statement"; one or more rows means "already
+applied, skip". The guarded statement is therefore safe to leave
+in desired SQL across re-applies — the second `apply` is a no-op
+(the trigger now exists, the check SELECT returns a row, the
+guarded `CREATE TRIGGER` is skipped).
+
+**Apply order.** Execute groups run **after** every other DDL
+bucket — table renames, FK drops, table CREATE / ALTER, table
+drops, FK adds, view CREATE OR REPLACE — so a guarded `CREATE
+TRIGGER` can reference brand-new tables.
+
+**Limits (v1).**
+
+- Each directive guards exactly one statement (the next non-blank
+  line in the file). Multi-statement payloads aren't supported;
+  write a separate directive per statement.
+- The check SQL is taken verbatim from the directive line and
+  passed to `db.Query`. No syntactic or semantic validation —
+  myschema only inspects whether the result set has at least one
+  row. Use a SELECT (any shape) that returns a row when the
+  guarded statement is "already applied" and zero rows otherwise.
+- The guarded statement is held as raw SQL — myschema doesn't
+  parse it (vitess can't parse `CREATE TRIGGER` and friends), so
+  a syntax error surfaces only at apply time when MySQL rejects
+  the statement.
+- `dump` does not emit execute groups: the catalog has no
+  awareness of them, and re-emitting trigger / routine bodies
+  would require a separate `SHOW CREATE` pipeline that's out of
+  scope. Keep the source-of-truth desired SQL file under version
+  control alongside the guarded objects.

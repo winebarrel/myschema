@@ -84,6 +84,31 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 	disallowed = append(disallowed, tableDiff.DisallowedDropStmts...)
 	disallowed = append(disallowed, viewDiff.DisallowedDropStmts...)
 
+	// `-- myschema:execute <check-sql>` blocks run after every other
+	// DDL bucket so triggers / routines / events created via the
+	// directive can refer to brand-new tables. For each block:
+	//   - run the check SQL against the live database
+	//   - 1+ rows → consider already-applied, push the SQL into
+	//     disallowed as a `-- skipped (execute check matched)`
+	//     comment so users still see what was suppressed
+	//   - 0 rows → push the execute SQL into stmts so plan prints it
+	//     and apply runs it
+	// The check itself is a SELECT so plan / apply both poll it; this
+	// is intentional — the directive is the only way myschema talks to
+	// objects it doesn't model, so "what's already there" can only be
+	// answered by asking the server.
+	for _, eg := range desired.Executes {
+		applied, err := executeCheckMatched(ctx, conn, eg.CheckSQL)
+		if err != nil {
+			return nil, fmt.Errorf("-- myschema:execute check failed: %w", err)
+		}
+		if applied {
+			disallowed = append(disallowed, "-- skipped (myschema:execute check matched): "+eg.ExecuteSQL)
+			continue
+		}
+		stmts = append(stmts, eg.ExecuteSQL)
+	}
+
 	count := ObjectCount{
 		Database: database,
 		Tables:   currentTables.Len(),
@@ -95,6 +120,24 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 		DisallowedDrops: disallowed,
 		Count:           count,
 	}, nil
+}
+
+// executeCheckMatched runs the check-SQL of a `-- myschema:execute`
+// directive and returns true when the result set has at least one
+// row — meaning the guarded execute SQL has already been applied
+// and should be skipped. The function never inspects column values;
+// only row presence matters.
+func executeCheckMatched(ctx context.Context, conn *sql.Conn, checkSQL string) (bool, error) {
+	rows, err := conn.QueryContext(ctx, checkSQL)
+	if err != nil {
+		return false, fmt.Errorf("query %q: %w", checkSQL, err)
+	}
+	defer rows.Close() //nolint:errcheck
+	matched := rows.Next()
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("scan %q: %w", checkSQL, err)
+	}
+	return matched, nil
 }
 
 // appendAlterHints adds the user-supplied ALGORITHM= / LOCK= clauses

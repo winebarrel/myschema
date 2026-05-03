@@ -5,7 +5,7 @@ Open items only. Done work is in `git log` / closed PRs.
 **Out of scope** for myschema, with different reasons:
 - *Triggers, stored procedures / functions, events.* Imperative,
   version-tagged code rather than declarative schema. Manage out of
-  band, or use the planned `-- myschema:execute` directive.
+  band, or use the `-- myschema:execute` directive (see CAVEATS.md).
 - *Sequences.* MySQL has no sequence object; TiDB does, but myschema
   is MySQL-targeted. A TiDB profile could lift this later.
 
@@ -55,10 +55,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Low — directives
 
-- [ ] **`-- myschema:execute <check-sql>`** arbitrary-SQL escape hatch
-      for objects we don't model (triggers, routines, events, grants).
-      The only sanctioned way to manage that SQL alongside
-      myschema-managed tables.
 - [ ] **`-- myschema:invisible`** shortcut so an index can be added
       invisible first (lock-friendly) and made visible in a follow-up
       apply.

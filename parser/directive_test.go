@@ -597,3 +597,92 @@ func TestExtractInlineRenamesColumnIndexNameCollision(t *testing.T) {
 	assert.Equal(t, "old_col", got.Columns["user_id"], "column 'user_id' rename")
 	assert.Equal(t, "old_idx", got.Indexes["user_id"], "index 'user_id' rename")
 }
+
+func TestExtractExecuteDirective(t *testing.T) {
+	cases := []struct {
+		name     string
+		piece    string
+		wantOK   bool
+		wantCS   string
+		wantRest string
+	}{
+		{
+			name: "single-line SQL after directive",
+			piece: "-- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'\n" +
+				"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0",
+			wantOK:   true,
+			wantCS:   "SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'",
+			wantRest: "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0",
+		},
+		{
+			name: "leading blank lines + comment skipped before directive",
+			piece: "\n\n# comment\n-- myschema:execute SELECT 1\n" +
+				"CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+			wantOK:   true,
+			wantCS:   "SELECT 1",
+			wantRest: "CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+		},
+		{
+			name:   "no directive at the head → not an execute group",
+			piece:  "CREATE TABLE t (id INT, PRIMARY KEY (id));",
+			wantOK: false,
+		},
+		{
+			name:   "directive after a real SQL line is ignored (top-of-piece only)",
+			piece:  "CREATE TABLE t (id INT);\n-- myschema:execute SELECT 1\nCREATE TRIGGER tr ...",
+			wantOK: false,
+		},
+		{
+			name:   "non-execute -- comment before SQL is skipped, not treated as directive",
+			piece:  "-- some plain comment\nCREATE TABLE t (id INT);",
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs, rest, ok := parser.ExtractExecuteDirective(tc.piece)
+			assert.Equal(t, tc.wantOK, ok)
+			if tc.wantOK {
+				assert.Equal(t, tc.wantCS, cs)
+				assert.Equal(t, tc.wantRest, rest)
+			}
+		})
+	}
+}
+
+func TestParseSQLAcceptsExecuteDirective(t *testing.T) {
+	// End-to-end: ParseSQL parses CREATE TABLE + execute block,
+	// landing the trigger SQL on ParseResult.Executes verbatim
+	// (with `;` re-appended) without ever handing it to vitess.
+	res, err := parser.ParseSQL(`
+CREATE TABLE t (id BIGINT NOT NULL, val INT, PRIMARY KEY (id));
+
+-- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+`, "shop")
+	require.NoError(t, err)
+	require.Len(t, res.Executes, 1)
+	eg := res.Executes[0]
+	assert.Equal(t, "SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'", eg.CheckSQL)
+	assert.Equal(t, "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;", eg.ExecuteSQL)
+	// Tables side still parses cleanly.
+	_, ok := res.Tables.GetOk("shop.t")
+	assert.True(t, ok)
+}
+
+func TestParseSQLRejectsExecuteDirectiveWithEmptyBody(t *testing.T) {
+	// A directive whose next non-blank line is empty (no SQL to
+	// guard) must error rather than silently swallow the directive.
+	_, err := parser.ParseSQL("-- myschema:execute SELECT 1\n", "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myschema:execute")
+	assert.Contains(t, err.Error(), "missing the SQL")
+}
+
+func TestValidateDirectivesRejectsMalformedExecute(t *testing.T) {
+	// Validator runs before extraction, so an `-- myschema:execute`
+	// with no check-SQL on the same line is caught upfront.
+	err := parser.ValidateDirectives("-- myschema:execute\nCREATE TRIGGER tr ...")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed -- myschema:execute")
+}
