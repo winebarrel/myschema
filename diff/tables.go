@@ -152,13 +152,20 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	rewriteIndexColumnRefs(current.Indexes, renames)
 	rewriteFKColumnRefs(current.ForeignKeys, current.Database, current.Name, renames)
 	rewriteConstraintColumnRefs(current.Constraints, current.Indexes, renames)
-	if current.Partition != nil {
+	if current.Partition != nil && desired.Partition != nil {
 		// Same `Error 3855: Column ... has a partitioning function
 		// dependency and cannot be dropped or renamed` from MySQL
 		// blocks both renaming and dropping a partition-key column.
 		// Surface either operation as a plan-time error so the user
 		// runs the partition-dependency removal by hand instead of
 		// shipping an ALTER the apply step would always reject.
+		//
+		// Only run the check when *both* sides are partitioned: if
+		// desired drops the PARTITION BY clause entirely the right
+		// error is `REMOVE PARTITIONING is not yet generated`
+		// (raised below by diffPartitions), and conflating it with
+		// the rename/drop-conflict message would hide the actual
+		// unsupported operation.
 		renameSources := make([]string, 0, len(renames))
 		for old := range renames {
 			renameSources = append(renameSources, old)
