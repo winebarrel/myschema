@@ -1,21 +1,17 @@
 # End-to-end pin for the column-rename pass on a partitioned
 # table — the renamed column is *not* referenced by the
-# partition clause, so the partitionColumnConflicts guard
-# finds nothing and the rest of the table-diff pipeline emits
-# a clean RENAME COLUMN. verify_no_drift then confirms
-# convergence in one apply.
+# partition clause, so the table-diff pipeline emits a clean
+# RENAME COLUMN. verify_no_drift then confirms convergence in
+# one apply.
 #
 # Note: MySQL itself rejects renaming a column that the
 # `PARTITION BY` expression depends on (Error 3855:
 # "Column ... has a partitioning function dependency and cannot
-# be dropped or renamed"). myschema therefore surfaces that
-# rejection at plan time — either upstream as
-# "partition strategy / expression differs" when the desired
-# side updated the PARTITION BY clause too (see the
+# be dropped or renamed"). For any *valid* desired CREATE TABLE
+# the diff catches that upstream as
+# "partition strategy / expression differs" — see
 # `partition_key_rename_implicit_scheme_change_*` plan
-# fixtures), or via the rename-conflict guard when the desired
-# clause was left unchanged (see
-# `partition_key_rename_clause_unchanged_errors`).
+# fixtures.
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,
