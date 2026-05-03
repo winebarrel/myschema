@@ -33,4 +33,4 @@ desired: |
 allow_drop:
   - partition
 
-error: "REORGANIZE PARTITION generation is not yet implemented"
+error: "split / merge / reorder"

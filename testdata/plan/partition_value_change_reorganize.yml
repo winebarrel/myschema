@@ -1,0 +1,30 @@
+# Value-change on existing partitions (same names, different
+# `VALUES LESS THAN`). Diff emits a single REORGANIZE PARTITION
+# that re-defines each in place; MySQL redistributes rows into
+# the new boundaries (row-preserving). No allow-drop gating
+# because every dropped name is reused on the add side.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2025),
+      PARTITION p2021 VALUES LESS THAN (2026)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION p2020, p2021 INTO (
+    partition p2020 values less than (2025),
+    partition p2021 values less than (2026)
+  );

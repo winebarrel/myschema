@@ -27,20 +27,23 @@ Open items only. Done work is in `git log` / closed PRs.
 - [ ] **Partition diff generation beyond the supported shapes.**
       Already shipped: RANGE / LIST suffix `ADD PARTITION` and
       order-preserving subset `DROP PARTITION` (head / middle /
-      tail OK), including `RANGE COLUMNS` / `LIST COLUMNS`; and
+      tail OK), including `RANGE COLUMNS` / `LIST COLUMNS`;
       HASH / KEY (incl. LINEAR) `PARTITIONS n` count grow /
       shrink via `ADD PARTITION PARTITIONS` /
       `COALESCE PARTITION` (`--allow-drop=partition` gates the
-      shrink + RANGE/LIST DROP). See CAVEATS.md "Partitioning".
-      Still on the floor: mid-list value changes (`REORGANIZE
-      PARTITION old1, old2 INTO (...)`), strategy / expression
-      changes (`REMOVE PARTITIONING` + new `PARTITION BY`), and
-      both directions of "one side has no partitioning" —
-      first-time `PARTITION BY` against an unpartitioned table
-      *and* `REMOVE PARTITIONING` against an already-partitioned
-      one. SUBPARTITION is intentionally out of scope (CAVEATS.md
-      notes both the desired-side parse error and the
-      catalog-side guard).
+      shrink + RANGE/LIST DROP); and pure RANGE/LIST
+      value-change via `REORGANIZE PARTITION` (same names,
+      only the `VALUES …` differs). See CAVEATS.md
+      "Partitioning". Still on the floor: split / merge /
+      reorder REORGANIZE shapes (the diff layer can't infer
+      the right boundaries from a name-only diff), strategy /
+      expression changes (`REMOVE PARTITIONING` + new
+      `PARTITION BY`), and both directions of "one side has
+      no partitioning" — first-time `PARTITION BY` against an
+      unpartitioned table *and* `REMOVE PARTITIONING` against
+      an already-partitioned one. SUBPARTITION is intentionally
+      out of scope (CAVEATS.md notes both the desired-side
+      parse error and the catalog-side guard).
 
 ## Low — CLI ergonomics
 

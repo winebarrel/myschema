@@ -29,4 +29,4 @@ desired: |
       PARTITION pmax VALUES LESS THAN MAXVALUE
   );
 
-error: "REORGANIZE PARTITION generation is not yet implemented"
+error: "split / merge / reorder"

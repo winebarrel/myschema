@@ -142,7 +142,7 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// Order-preserving subset diff. Each current partition is either
 	// kept (matched by the next-unconsumed desired partition) or
 	// dropped; anything left in desired after the walk is a suffix
-	// add. The three observable outcomes:
+	// add. The four observable outcomes:
 	//   - both empty → no-op (catches the equality cases the raw-
 	//     string fast path missed because of formatting drift).
 	//   - pure ADD (drops empty, adds non-empty) → suffix grow.
@@ -150,21 +150,49 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//     dropped while preserving the remaining order; head /
 	//     tail / interior drops all generated as
 	//     `DROP PARTITION p1, p2, …`.
-	//   - drops AND adds both non-empty → REORGANIZE territory.
-	//     A previous attempt to emit DROP + ADD whenever the name
-	//     sets were disjoint was unsafe: a "merge" shape like
-	//     `[p0<10,p1<20,p2<30] -> [p0<10,q1<40]` has disjoint
-	//     names yet semantically expects q1 to inherit the rows
-	//     from p1 and p2. Plain DROP + ADD would silently lose
-	//     that data. Disjoint-name detection isn't enough on its
-	//     own to tell merge / split / replace shapes apart from a
-	//     pure retention roll-forward, so we conservatively error
-	//     and let the user run REORGANIZE PARTITION (or the
-	//     individual DROP / ADD pair, when they really do want to
-	//     discard the partitioned data) by hand.
+	//   - drops AND adds both non-empty:
+	//     - if the two name lists match position-by-position, the
+	//       only thing that changed is each partition's
+	//       value clause — a pure value-change. Generates a
+	//       single `REORGANIZE PARTITION old1, old2, …
+	//       INTO (PARTITION old1 VALUES …, PARTITION old2 VALUES …,
+	//       …)` that re-defines each in place. Row-preserving
+	//       (REORGANIZE redistributes rows into the new value
+	//       boundaries).
+	//     - any other shape (merge / split / interior insert /
+	//       reorder / "retention roll-forward") falls through to
+	//       error. Disjoint-name detection isn't enough to tell
+	//       merge / split / replace apart from a pure retention
+	//       discard, and split-point inference is out of scope
+	//       for v1, so the user runs the right ALTER (REORGANIZE
+	//       with explicit boundaries, or DROP+ADD if discarding
+	//       data is intended) by hand.
 	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
 	if len(drops) > 0 && len(adds) > 0 {
-		return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs both ADD and DROP (a value change, an interior insert, a reorder, or a merge / split using new partition names); REORGANIZE PARTITION generation is not yet implemented, and a plain DROP + ADD pair would silently lose any rows that should have moved into the new partition. Run the ALTER by hand and let the next plan reconverge", fqtn)
+		if !partitionNameListEqual(drops, adds) {
+			return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs split / merge / reorder (the dropped and added partition name lists don't line up position-by-position); only a pure value-change of the same partitions is generated automatically. Run REORGANIZE PARTITION (with the boundaries you want), or a DROP + ADD pair if you really do want to discard data, by hand", fqtn)
+		}
+		var b strings.Builder
+		b.WriteString("ALTER TABLE ")
+		b.WriteString(fqtn)
+		b.WriteString(" REORGANIZE PARTITION ")
+		for i, d := range drops {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(model.Ident(d.Name.String()))
+		}
+		b.WriteString(" INTO (")
+		for i, a := range adds {
+			if i > 0 {
+				b.WriteString(",\n  ")
+			} else {
+				b.WriteString("\n  ")
+			}
+			b.WriteString(parser.FormatPartitionDefinition(a))
+		}
+		b.WriteString("\n);")
+		return []string{b.String()}, nil, nil
 	}
 
 	var stmts, disallowed []string
@@ -257,6 +285,25 @@ func stringSliceEqual(a, b []string) bool {
 	}
 	for i := range a {
 		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// partitionNameListEqual reports whether the two definition slices
+// have the same partition names in the same order. Used by the
+// REORGANIZE branch to confirm "pure value-change" — every
+// partition that's about to be dropped corresponds positionally
+// to one in the add list with the same name. Comparison is
+// case-insensitive (MySQL identifier rule + the parser /
+// catalog round-trip already lower-cases what they store).
+func partitionNameListEqual(a, b []*sqlparser.PartitionDefinition) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(a[i].Name.String(), b[i].Name.String()) {
 			return false
 		}
 	}

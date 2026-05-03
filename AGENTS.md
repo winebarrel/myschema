@@ -160,8 +160,10 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   CREATE OR REPLACE / DROP VIEW, RANGE / LIST partition suffix
   ADD PARTITION + order-preserving subset DROP PARTITION (head /
   middle / tail), including the `RANGE COLUMNS` / `LIST COLUMNS`
-  variants, and HASH / KEY (incl. LINEAR) `PARTITIONS n` count
-  changes via ADD PARTITION PARTITIONS / COALESCE PARTITION —
+  variants, HASH / KEY (incl. LINEAR) `PARTITIONS n` count
+  changes via ADD PARTITION PARTITIONS / COALESCE PARTITION,
+  and pure RANGE / LIST partition value-change via REORGANIZE
+  PARTITION (same names, different `VALUES …` clauses) —
   see CAVEATS.md "Partitioning" for the full scope
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
@@ -262,12 +264,14 @@ rather than declarative schema. Manage them out of band.)
 - Partition diffs beyond the supported shapes. v1 generates
   RANGE / LIST suffix `ADD PARTITION` and order-preserving
   subset `DROP PARTITION` (gated by `--allow-drop=partition`),
-  including the `RANGE COLUMNS` / `LIST COLUMNS` variants,
-  and HASH / KEY (incl. LINEAR) `PARTITIONS n` count grow /
+  including the `RANGE COLUMNS` / `LIST COLUMNS` variants;
+  HASH / KEY (incl. LINEAR) `PARTITIONS n` count grow /
   shrink via `ADD PARTITION PARTITIONS` /
   `COALESCE PARTITION` (the shrink path is also gated on
-  `--allow-drop=partition`). Anything else —
-  mid-list value changes (REORGANIZE PARTITION), strategy /
+  `--allow-drop=partition`); and pure value-change of
+  RANGE / LIST partitions via `REORGANIZE PARTITION` (same
+  names, only the `VALUES` clauses differ). Anything else —
+  split / merge / reorder REORGANIZE shapes, strategy /
   expression changes (REMOVE PARTITIONING + new PARTITION BY),
   *or* either direction of "one side has no partitioning"
   (first-time `PARTITION BY` against an unpartitioned table,

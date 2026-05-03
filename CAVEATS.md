@@ -239,27 +239,36 @@ patterns:
   regular vs. linear choice matters more than how
   myschema phrases the diff.
 
+- *Pure value-change of existing partitions* — drop and add
+  lists line up position-by-position with identical names,
+  only the `VALUES LESS THAN` / `VALUES IN` clauses differ
+  (e.g. `p2020 LESS THAN (2021)` → `p2020 LESS THAN (2025)`).
+  Generates a single `ALTER TABLE … REORGANIZE PARTITION
+  p1, p2, … INTO (PARTITION p1 VALUES …, PARTITION p2
+  VALUES …, …)` that re-defines each in place. MySQL
+  redistributes existing rows into the new boundaries
+  (row-preserving). No `--allow-drop` gating because every
+  dropped name is reused on the add side.
+
 **Diffs that still error (manage by hand).**
 
-- *Both ADD and DROP needed* — any diff where the
-  order-preserving subset walk produces both a non-empty
-  drops list and a non-empty adds list. Covers the obvious
-  REORGANIZE shapes (a value change on an existing partition,
-  an interior insert in front of a catch-all, a reorder), but
-  also "merge / split / replace" shapes that *look* harmless
-  because the dropped and added partition names are disjoint
-  — e.g. `[p0<10,p1<20,p2<30] → [p0<10,q1<40]`, where `q1`
-  semantically inherits the rows from `p1` and `p2` and a
-  plain DROP+ADD pair would silently lose them. Even
-  retention roll-forward (`[p2020,p2021] → [p2021,p2022]`)
-  falls here for the same reason: the diff layer can't tell
-  "discard the old data" from "merge it into the new
-  partition" by inspecting names alone. Fails with
-  `REORGANIZE PARTITION generation is not yet implemented`.
-  Workaround: run the right ALTER by hand — `REORGANIZE
-  PARTITION` when data needs to move, or an explicit
-  `DROP PARTITION` + `ADD PARTITION` pair when you really do
-  want to discard rows — then re-run plan.
+- *Split / merge / reorder* — any other "drops AND adds both
+  non-empty" shape where the name lists don't line up
+  position-by-position. Covers split / merge shapes whose
+  add and drop names are disjoint (e.g. `[p0<10,p1<20,p2<30]
+  → [p0<10,q1<40]`, where `q1` semantically inherits the
+  rows from `p1` and `p2`), interior inserts in front of a
+  catch-all, partition reorders, and the "retention
+  roll-forward" pair (`[p2020,p2021] → [p2021,p2022]` —
+  drops `p2020`, adds `p2022`, names disjoint). Inferring
+  the right `REORGANIZE PARTITION old INTO (…)` boundaries
+  from a name-only diff isn't safe (a DROP+ADD pair would
+  silently lose data when the user really meant a split or
+  merge), so the diff layer errors with `split / merge /
+  reorder`. Workaround: run the appropriate ALTER by hand —
+  `REORGANIZE PARTITION old1, old2 INTO (…)` with the
+  boundaries you want, or `DROP PARTITION` + `ADD PARTITION`
+  if discarding data is intended — then re-run plan.
 - *Strategy / expression change* (e.g. RANGE → HASH, or a
   different `PARTITION BY` expression) — needs `REMOVE
   PARTITIONING` followed by a new `PARTITION BY`. Future PR.
