@@ -703,3 +703,23 @@ func TestValidateDirectivesRejectsMalformedExecute(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "malformed -- myschema:execute")
 }
+
+func TestParseSQLExecutePayloadWithInternalSemicolonsFails(t *testing.T) {
+	// CAVEATS pin: vitess's SplitStatementToPieces cuts on every `;`,
+	// so a `CREATE TRIGGER … BEGIN …; …; END;` body splits into
+	// multiple pieces and the orphan inner pieces (`SET NEW.val = …`,
+	// `END`) can't parse on their own. Documented as a v1 limit on
+	// the directive — equivalent to MySQL CLI requiring `DELIMITER //`
+	// for multi-statement bodies. This test pins the failure mode so
+	// future changes that add multi-statement support do so
+	// deliberately rather than by accident.
+	_, err := parser.ParseSQL(`CREATE TABLE t (id INT, val INT, PRIMARY KEY(id));
+
+-- myschema:execute SELECT 1
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW BEGIN
+  SET NEW.val = 0;
+  SET NEW.val = NEW.val + 1;
+END;
+`, "shop")
+	require.Error(t, err)
+}

@@ -249,6 +249,17 @@ TRIGGER` can reference brand-new tables.
 - Each directive guards exactly one statement (the next non-blank
   line in the file). Multi-statement payloads aren't supported;
   write a separate directive per statement.
+- The guarded payload must contain **no internal `;`**. Vitess's
+  `SplitStatementToPieces` (which myschema runs over the desired
+  file before extracting directives) cuts pieces at every `;`, so
+  a `CREATE TRIGGER … BEGIN …; …; END;` body splits across
+  multiple pieces and either fails to parse on the orphan inner
+  pieces or hands MySQL a truncated payload at apply time. This
+  is the same reason MySQL CLI requires `DELIMITER //` for
+  multi-statement TRIGGER / PROCEDURE bodies — myschema doesn't
+  recognise `DELIMITER`. Workarounds: use the single-statement
+  TRIGGER form (`FOR EACH ROW SET …`) when possible, or run the
+  multi-statement body by hand outside myschema.
 - The check SQL is taken verbatim from the directive line and
   passed to `db.Query`. No syntactic or semantic validation —
   myschema only inspects whether the result set has at least one

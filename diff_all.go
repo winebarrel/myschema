@@ -143,7 +143,7 @@ func executeCheckMatched(ctx context.Context, conn *sql.Conn, checkSQL string) (
 	defer rows.Close() //nolint:errcheck
 	matched := rows.Next()
 	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("scan %q: %w", checkSQL, err)
+		return false, fmt.Errorf("iterate %q: %w", checkSQL, err)
 	}
 	return matched, nil
 }
