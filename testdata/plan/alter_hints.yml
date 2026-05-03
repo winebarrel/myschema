@@ -1,0 +1,27 @@
+# Pins the per-DDL syntax of --alter-algorithm / --alter-lock:
+# ALTER TABLE statements get comma-separated `, ALGORITHM=…, LOCK=…`
+# while standalone CREATE INDEX statements get space-separated
+# `ALGORITHM=… LOCK=…` (MySQL accepts the two forms only, mixing them
+# is a syntax error). Single change set exercises both shapes —
+# adding a column triggers ALTER TABLE; adding a separate index
+# triggers a standalone CREATE INDEX in the same plan output.
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      email VARCHAR(255),
+      PRIMARY KEY (id),
+      KEY idx_email (email)
+  );
+
+alter_algorithm: INPLACE
+alter_lock: NONE
+
+plan: |
+  ALTER TABLE myschema_test.users ADD COLUMN email varchar(255), ALGORITHM=INPLACE, LOCK=NONE;
+  CREATE INDEX idx_email ON myschema_test.users (email) ALGORITHM=INPLACE LOCK=NONE;

@@ -11,6 +11,7 @@ import (
 type ApplyOptions struct {
 	FilterOptions
 	DropPolicy
+	AlterOption
 	Files []string `arg:"" help:"Path to the desired schema SQL file(s)."`
 }
 
@@ -36,6 +37,7 @@ func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) 
 	r, err := c.diffAll(ctx, conn.Conn, database, &diffAllOptions{
 		FilterOptions: options.FilterOptions,
 		DropPolicy:    options.DropPolicy,
+		AlterOption:   options.AlterOption,
 		Files:         options.Files,
 	})
 	if err != nil {

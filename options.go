@@ -56,6 +56,19 @@ func (f *FilterOptions) AfterApply() error {
 	return nil
 }
 
+// AlterOption carries the MySQL online-DDL hints that get appended to
+// every generated `ALTER TABLE …` and `CREATE INDEX …` statement.
+// myschema absorbs the syntax mismatch between the two DDLs (ALTER
+// TABLE wants `, ALGORITHM=…, LOCK=…`; CREATE INDEX wants the same
+// clauses separated by spaces with no leading comma) so the user
+// supplies just the values. myschema does not validate which
+// algorithm / lock combination MySQL will accept for a given change —
+// apply lets MySQL reject unsupported combinations at execution time.
+type AlterOption struct {
+	AlterAlgorithm string `env:"MYSCHEMA_ALTER_ALGORITHM" enum:",DEFAULT,INSTANT,INPLACE,COPY" default:"" help:"ALGORITHM= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, INSTANT, INPLACE, COPY (MySQL 8.0+)."`
+	AlterLock      string `env:"MYSCHEMA_ALTER_LOCK" enum:",DEFAULT,NONE,SHARED,EXCLUSIVE" default:"" help:"LOCK= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, NONE, SHARED, EXCLUSIVE."`
+}
+
 // DropPolicy decides which DROP categories the diff is allowed to emit.
 type DropPolicy struct {
 	AllowDrop []string `env:"MYSCHEMA_ALLOW_DROP" enum:"all,table,view,column,constraint,foreign_key,index" help:"Comma-separated drop categories to allow."`
