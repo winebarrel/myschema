@@ -1,10 +1,13 @@
-# Counterpart to partition_key_rename_conflict_errors but for
-# DROP COLUMN: MySQL Error 3855 covers both rename AND drop of a
-# column the PARTITION BY expression depends on. The desired
-# CREATE TABLE here omits the partition-key column entirely; the
-# diff's drop-conflict guard rejects the implicit DROP COLUMN at
-# plan time so the apply doesn't ship an ALTER MySQL would
-# always reject.
+# Drop-side counterpart to
+# `partition_key_rename_clause_unchanged_errors` (rename-side):
+# MySQL Error 3855 covers both rename AND drop of a column the
+# PARTITION BY expression depends on. The desired CREATE TABLE
+# here omits the partition-key column entirely; the diff's
+# drop-conflict guard rejects the implicit DROP COLUMN at plan
+# time so the apply doesn't ship an ALTER MySQL would always
+# reject. `--allow-drop=column` is set — without it the DROP
+# would land on the disallowed bucket and the guard wouldn't
+# need to run (see `partition_key_drop_disallowed`).
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,
