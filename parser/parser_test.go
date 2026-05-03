@@ -309,12 +309,137 @@ CREATE TABLE t (id INT, PRIMARY KEY (id))
 	assert.Equal(t, "InnoDB", *tbl.Engine)
 	require.NotNil(t, tbl.Charset)
 	assert.Equal(t, "utf8mb4", *tbl.Charset)
-	require.NotNil(t, tbl.Collation)
-	assert.Equal(t, "utf8mb4_0900_ai_ci", *tbl.Collation)
+	// utf8mb4_0900_ai_ci is the MySQL 8.0 default collation for utf8mb4,
+	// so it's collapsed to nil — the parser side mirrors what the
+	// catalog side does after reading information_schema, keeping
+	// `CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci` and bare
+	// `CHARSET=utf8mb4` describing the same MySQL state.
+	assert.Nil(t, tbl.Collation)
 	require.NotNil(t, tbl.AutoIncrement)
 	assert.Equal(t, uint64(100), *tbl.AutoIncrement)
 	require.NotNil(t, tbl.Comment)
 	assert.Equal(t, "hello world", *tbl.Comment)
+}
+
+func TestParseTableOptionsExplicitNonDefaultCollation(t *testing.T) {
+	// A non-default collation (utf8mb4_unicode_ci is not utf8mb4's
+	// default) survives parser-side normalisation.
+	sql := `
+CREATE TABLE t (id INT, PRIMARY KEY (id))
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	require.NotNil(t, tbl.Collation)
+	assert.Equal(t, "utf8mb4_unicode_ci", *tbl.Collation)
+}
+
+// TestParseColumnCharacterSet pins that vitess's column-level CHARACTER
+// SET clause makes it onto model.Column. The vitess AST stores it on
+// `cd.Type.Charset.Name` (a separate struct, not under
+// cd.Type.Options), so a parser pass that only inspects `Options` —
+// as an earlier version of parseColumnDef did — silently drops every
+// per-column charset and the whole catalog-vs-parser comparison
+// degenerates into endless MODIFY COLUMN drift.
+func TestParseColumnCharacterSet(t *testing.T) {
+	sql := `
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    plain VARCHAR(64),
+    explicit_cs VARCHAR(64) CHARACTER SET latin1,
+    explicit_both VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_bin,
+    matches_default VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
+    PRIMARY KEY (id)
+) DEFAULT CHARSET=utf8mb4;
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+
+	plain, _ := tbl.Columns.GetOk("plain")
+	assert.Nil(t, plain.CharacterSet, "no CHARACTER SET on column → nil")
+	assert.Nil(t, plain.Collation)
+
+	cs, _ := tbl.Columns.GetOk("explicit_cs")
+	require.NotNil(t, cs.CharacterSet)
+	assert.Equal(t, "latin1", *cs.CharacterSet, "explicit CHARACTER SET captured")
+	// COLLATE not given → parser sets nil (catalog will fill it via
+	// information_schema; both sides collapse it through CollapseDefault
+	// so the comparison stays quiet).
+	assert.Nil(t, cs.Collation)
+
+	both, _ := tbl.Columns.GetOk("explicit_both")
+	require.NotNil(t, both.CharacterSet)
+	assert.Equal(t, "latin1", *both.CharacterSet)
+	require.NotNil(t, both.Collation)
+	assert.Equal(t, "latin1_bin", *both.Collation, "non-default collation survives")
+
+	// Spelling out the charset's default collation is redundant; parser
+	// collapses it to nil so it compares equal to the catalog side.
+	matches, _ := tbl.Columns.GetOk("matches_default")
+	require.NotNil(t, matches.CharacterSet)
+	assert.Equal(t, "utf8mb4", *matches.CharacterSet)
+	assert.Nil(t, matches.Collation, "default collation collapsed to nil")
+}
+
+// TestParseTableOptionsCollateOnly pins that a table whose only
+// charset-related option is `COLLATE=…` (no DEFAULT CHARSET) still
+// gets the same default-collation collapse as a CHARSET+COLLATE
+// table. Without the collation→charset fallback in the parser pass,
+// a redundantly-spelled default collation would survive on the
+// parser side while the catalog side (which always knows the
+// effective charset via information_schema) collapses it — endless
+// ALTER TABLE … COLLATE=… loops on every plan.
+func TestParseTableOptionsCollateOnly(t *testing.T) {
+	t.Run("default collation collapses to nil", func(t *testing.T) {
+		r, err := parser.ParseSQL(`CREATE TABLE t (id INT) COLLATE=utf8mb4_0900_ai_ci;`, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		assert.Nil(t, tbl.Charset, "no DEFAULT CHARSET → Charset stays nil")
+		assert.Nil(t, tbl.Collation, "default collation collapsed away")
+	})
+	t.Run("non-default collation survives", func(t *testing.T) {
+		r, err := parser.ParseSQL(`CREATE TABLE t (id INT) COLLATE=utf8mb4_unicode_ci;`, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		assert.Nil(t, tbl.Charset)
+		require.NotNil(t, tbl.Collation)
+		assert.Equal(t, "utf8mb4_unicode_ci", *tbl.Collation)
+	})
+}
+
+// TestParseColumnCollateOnlyInheritsTableCharset pins that a column
+// declared with `COLLATE …` and no `CHARACTER SET` participates in the
+// same default-collation collapse as a column with the explicit
+// charset — the effective charset is the table default, and a COLLATE
+// that matches the table charset's default collation drops to nil so
+// the parser side compares equal to the catalog side (which always
+// resolves the effective charset before collapsing).
+func TestParseColumnCollateOnlyInheritsTableCharset(t *testing.T) {
+	sql := `
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    redundant VARCHAR(64) COLLATE utf8mb4_0900_ai_ci,
+    explicit VARCHAR(64) COLLATE utf8mb4_unicode_ci,
+    PRIMARY KEY (id)
+) DEFAULT CHARSET=utf8mb4;
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+
+	// The COLLATE matches utf8mb4's default → collapsed to nil.
+	redundant, _ := tbl.Columns.GetOk("redundant")
+	assert.Nil(t, redundant.CharacterSet, "COLLATE-only column has no explicit charset")
+	assert.Nil(t, redundant.Collation, "default collation for the table-default charset collapses to nil")
+
+	// A non-default collation on a COLLATE-only column survives.
+	explicit, _ := tbl.Columns.GetOk("explicit")
+	assert.Nil(t, explicit.CharacterSet)
+	require.NotNil(t, explicit.Collation)
+	assert.Equal(t, "utf8mb4_unicode_ci", *explicit.Collation)
 }
 
 // TestParseDuplicateRejection ensures the parser surfaces obvious mistakes

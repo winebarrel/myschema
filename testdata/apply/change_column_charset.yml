@@ -1,0 +1,25 @@
+# Column-level CHARACTER SET diff: an explicit per-column charset
+# override survives the catalog-side normalisation (the value differs
+# from the table default), and changing it emits `MODIFY COLUMN`.
+# Verifies the asymmetric case where the table default is NOT changed
+# but a single column is.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      legacy VARCHAR(64) CHARACTER SET latin1,
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      legacy VARCHAR(64) CHARACTER SET ascii,
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+applied: |
+  ALTER TABLE myschema_test.t MODIFY COLUMN legacy varchar(64) CHARACTER SET ascii;
+
+verify_no_drift: true

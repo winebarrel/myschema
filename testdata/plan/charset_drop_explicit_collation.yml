@@ -1,0 +1,24 @@
+# Pins the diff-side semantics for "drop the explicit COLLATE": when
+# desired SQL keeps DEFAULT CHARSET but omits COLLATE, the user is
+# asking for the charset's default collation. Catalog side carries an
+# explicit non-default collation, so they don't agree and the diff
+# emits an `ALTER TABLE … DEFAULT CHARSET=…` (no COLLATE clause)
+# which makes MySQL reset the table collation to the charset default.
+#
+# Without the "desired.Collation==nil + desired.Charset!=nil ⇒ catalog
+# must be at default collation" rule, a strict ptrEq would fire forever
+# and a too-loose don't-care would never fire — both broken.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4;
+
+plan: |
+  ALTER TABLE myschema_test.t DEFAULT CHARSET=utf8mb4;

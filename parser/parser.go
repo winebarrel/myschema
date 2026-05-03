@@ -259,6 +259,29 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 	for _, opt := range s.TableSpec.Options {
 		applyTableOption(t, opt)
 	}
+	// Drop a redundantly-spelled COLLATE: `CHARSET=utf8mb4
+	// COLLATE=utf8mb4_0900_ai_ci` and bare `CHARSET=utf8mb4` describe
+	// the same MySQL state. Normalising to nil here keeps the parser
+	// side aligned with the catalog side, which collapses the same
+	// case after reading information_schema.
+	t.Collation = model.CollapseDefaultCollation(effectiveCharsetForCollation(t.Charset, t.Collation), t.Collation)
+	for _, c := range t.Columns.CollectValues() {
+		// Effective charset for collapsing: column's own CHARACTER SET
+		// if given, else the table default, else the charset implied
+		// by the column's COLLATE name. The last fallback covers the
+		// COLLATE-only column on a COLLATE-only table, where neither
+		// declared a CHARACTER SET; without it a redundant default
+		// collation would survive on the parser side while the catalog
+		// side (which always resolves the effective charset via
+		// information_schema) collapses it — endless MODIFY COLUMN
+		// drift.
+		effectiveCharset := c.CharacterSet
+		if effectiveCharset == nil {
+			effectiveCharset = t.Charset
+		}
+		effectiveCharset = effectiveCharsetForCollation(effectiveCharset, c.Collation)
+		c.Collation = model.CollapseDefaultCollation(effectiveCharset, c.Collation)
+	}
 
 	return t, nil
 }
@@ -267,6 +290,13 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 	c := &model.Column{
 		Name:     cd.Name.String(),
 		TypeName: columnTypeString(cd.Type),
+	}
+	if cd.Type.Charset.Name != "" {
+		// vitess preserves the user's original casing; the catalog
+		// always reports lower-case in information_schema.COLUMNS, so
+		// normalise here to keep the two sides comparable.
+		cs := strings.ToLower(cd.Type.Charset.Name)
+		c.CharacterSet = &cs
 	}
 	opts := cd.Type.Options
 	if opts == nil {
@@ -294,7 +324,9 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 		c.Comment = &raw
 	}
 	if opts.Collate != "" {
-		coll := opts.Collate
+		// Lowercase to match information_schema.COLUMNS, which always
+		// reports collations in canonical lower-case.
+		coll := strings.ToLower(opts.Collate)
 		c.Collation = &coll
 	}
 	if opts.As != nil {
@@ -538,16 +570,37 @@ func referenceActionString(a sqlparser.ReferenceAction) string {
 	return ""
 }
 
+// effectiveCharsetForCollation returns charset unchanged when it's
+// already set; otherwise it derives a charset from the collation name
+// (e.g. utf8mb4_0900_ai_ci → utf8mb4) so that CollapseDefaultCollation
+// can still fire for COLLATE-only desired SQL. Returns nil unchanged
+// if there's nothing to derive from on either side.
+func effectiveCharsetForCollation(charset, collation *string) *string {
+	if charset != nil || collation == nil {
+		return charset
+	}
+	cs := model.CharsetOfCollation(*collation)
+	if cs == "" {
+		return nil
+	}
+	return &cs
+}
+
 func applyTableOption(t *model.Table, opt *sqlparser.TableOption) {
 	switch strings.ToUpper(opt.Name) {
 	case "ENGINE":
 		v := opt.String
 		t.Engine = &v
 	case "CHARSET", "CHARACTER SET", "DEFAULT CHARSET", "DEFAULT CHARACTER SET":
-		v := opt.String
+		// MySQL identifiers for charsets and collations are case-
+		// insensitive; information_schema always reports the canonical
+		// lower-case form, so normalise here so parser-side and
+		// catalog-side values compare equal regardless of how the user
+		// spelled them in the desired SQL.
+		v := strings.ToLower(opt.String)
 		t.Charset = &v
 	case "COLLATE", "DEFAULT COLLATE":
-		v := opt.String
+		v := strings.ToLower(opt.String)
 		t.Collation = &v
 	case "COMMENT":
 		if opt.Value != nil {
