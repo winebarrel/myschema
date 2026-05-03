@@ -320,13 +320,17 @@ func ptrEq[T comparable](a, b *T) bool {
 // and equally lets a desired-only `COLLATE=…` (Charset nil) converge
 // against any catalog charset.
 //
-// The emitted DDL (`ALTER TABLE … DEFAULT CHARSET=… COLLATE=…`) only
-// changes the table default; it does NOT rewrite existing column data
-// (that would require `CONVERT TO CHARACTER SET …`, which rebuilds
-// the table — heavyweight, and rare enough to leave to a future
-// dedicated flag). Per-column drift is picked up by the column diff
-// below; the catalog-side normalisation of column charset/collation
-// against the new default keeps that comparison honest.
+// The emitted DDL spells out only the clauses the desired side
+// actually set: `ALTER TABLE … DEFAULT CHARSET=…` when only Charset
+// changes, `ALTER TABLE … COLLATE=…` when only Collation changes,
+// and `ALTER TABLE … DEFAULT CHARSET=… COLLATE=…` when both do. In
+// any shape it only changes the table default; it does NOT rewrite
+// existing column data (that would require `CONVERT TO CHARACTER
+// SET …`, which rebuilds the table — heavyweight, and rare enough
+// to leave to a future dedicated flag). Per-column drift is picked
+// up by the column diff below; the catalog-side normalisation of
+// column charset/collation against the new default keeps that
+// comparison honest.
 func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string {
 	if desired.Charset == nil && desired.Collation == nil {
 		return ""
