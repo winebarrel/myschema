@@ -253,11 +253,11 @@ CREATE TABLE defs (
 }
 
 // TestColumnDefaultEmptyStringNormalisation pins the type-aware
-// normalisation of `DEFAULT ”`. Without it, the catalog reads the
-// empty literal back as the bare empty string, parser produces ”
-// (two single quotes), and every post-apply plan re-emits MODIFY
-// COLUMN. For string-shaped types we normalise to ” on the catalog
-// side so the two compare equal.
+// normalisation of the empty-string column default. Without it the
+// catalog reads back the bare empty string while the parser produces
+// the quoted empty literal, and every post-apply plan re-emits
+// MODIFY COLUMN. For string-shaped types we wrap the bare empty
+// string on the catalog side so the two sides compare equal.
 func TestColumnDefaultEmptyStringNormalisation(t *testing.T) {
 	db := testutil.ConnectDB(t)
 	ctx := context.Background()
@@ -287,16 +287,17 @@ CREATE TABLE empty_defs (
 }
 
 // TestColumnDefaultBinaryEmptyStringIsHex pins the documented
-// limitation: a fixed-width BINARY column with `DEFAULT ”` does NOT
-// round-trip cleanly because MySQL surfaces the empty default as a
-// hex literal (`0x` for the degenerate case, `0x000000…` for non-zero
+// limitation: a fixed-width BINARY column with an empty default does
+// NOT round-trip cleanly because MySQL surfaces the value as a hex
+// literal (`0x` for the degenerate case, `0x000000…` for non-zero
 // N), and `columnTypeAllowsEmptyStringDefault` intentionally excludes
-// it from the empty-string normalisation. The test exists to (a)
-// document the current behaviour and (b) catch a future refactor that
-// accidentally normalises the hex literal to ” before the proper
-// BINARY-side fix lands. See TODO.md. (VARBINARY does round-trip
-// cleanly — its empty default surfaces as the bare empty string, and
-// is asserted in TestColumnDefaultEmptyStringNormalisation.)
+// it from the empty-string normalisation. The test exists to
+// (a) document the current behaviour and (b) catch a future
+// refactor that accidentally normalises the hex literal to the
+// quoted empty literal before the proper BINARY-side fix lands.
+// See TODO.md. (VARBINARY does round-trip cleanly — its empty
+// default surfaces as the bare empty string, and is asserted in
+// TestColumnDefaultEmptyStringNormalisation.)
 func TestColumnDefaultBinaryEmptyStringIsHex(t *testing.T) {
 	db := testutil.ConnectDB(t)
 	ctx := context.Background()
