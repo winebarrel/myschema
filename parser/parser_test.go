@@ -384,6 +384,38 @@ CREATE TABLE t (
 	assert.Nil(t, matches.Collation, "default collation collapsed to nil")
 }
 
+// TestParseColumnCollateOnlyInheritsTableCharset pins that a column
+// declared with `COLLATE …` and no `CHARACTER SET` participates in the
+// same default-collation collapse as a column with the explicit
+// charset — the effective charset is the table default, and a COLLATE
+// that matches the table charset's default collation drops to nil so
+// the parser side compares equal to the catalog side (which always
+// resolves the effective charset before collapsing).
+func TestParseColumnCollateOnlyInheritsTableCharset(t *testing.T) {
+	sql := `
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    redundant VARCHAR(64) COLLATE utf8mb4_0900_ai_ci,
+    explicit VARCHAR(64) COLLATE utf8mb4_unicode_ci,
+    PRIMARY KEY (id)
+) DEFAULT CHARSET=utf8mb4;
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+
+	// The COLLATE matches utf8mb4's default → collapsed to nil.
+	redundant, _ := tbl.Columns.GetOk("redundant")
+	assert.Nil(t, redundant.CharacterSet, "COLLATE-only column has no explicit charset")
+	assert.Nil(t, redundant.Collation, "default collation for the table-default charset collapses to nil")
+
+	// A non-default collation on a COLLATE-only column survives.
+	explicit, _ := tbl.Columns.GetOk("explicit")
+	assert.Nil(t, explicit.CharacterSet)
+	require.NotNil(t, explicit.Collation)
+	assert.Equal(t, "utf8mb4_unicode_ci", *explicit.Collation)
+}
+
 // TestParseDuplicateRejection ensures the parser surfaces obvious mistakes
 // rather than silently overwriting.
 func TestParseDuplicateRejection(t *testing.T) {

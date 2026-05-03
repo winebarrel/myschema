@@ -1,0 +1,20 @@
+# Pins the diff-side "don't-care" semantics in tableCharsetCollationSQL:
+# desired SQL that spells out only `COLLATE=…` (without `DEFAULT
+# CHARSET=…`) compares as a no-op against a catalog that carries a
+# matching collation, even though catalog has a non-nil charset and
+# desired's charset is nil. Without the don't-care guard the strict
+# ptrEq comparison would emit `ALTER TABLE … COLLATE=…;` on every
+# plan and never converge.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COLLATE=utf8mb4_unicode_ci;
+
+plan: ""

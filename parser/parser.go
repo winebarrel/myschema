@@ -266,7 +266,19 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 	// case after reading information_schema.
 	t.Collation = model.CollapseDefaultCollation(t.Charset, t.Collation)
 	for _, c := range t.Columns.CollectValues() {
-		c.Collation = model.CollapseDefaultCollation(c.CharacterSet, c.Collation)
+		// Effective charset: the column's own CHARACTER SET if given,
+		// otherwise the table default. A column that spelled out only
+		// COLLATE (no CHARACTER SET) inherits its charset from the
+		// table default; without that fallback CollapseDefaultCollation
+		// has nothing to compare against and a redundant per-column
+		// COLLATE survives on the parser side while the catalog side
+		// (which knows the effective charset) collapses it — endless
+		// MODIFY COLUMN drift.
+		effectiveCharset := c.CharacterSet
+		if effectiveCharset == nil {
+			effectiveCharset = t.Charset
+		}
+		c.Collation = model.CollapseDefaultCollation(effectiveCharset, c.Collation)
 	}
 
 	return t, nil

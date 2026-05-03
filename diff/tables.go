@@ -313,6 +313,13 @@ func ptrEq[T comparable](a, b *T) bool {
 // server-default charset; the user is opting in to "whatever MySQL
 // gives me", so don't fight it).
 //
+// "Don't-care" semantics on the desired side: a desired field set to
+// nil is treated as "the user didn't say, so anything matches". This
+// keeps `DEFAULT CHARSET=utf8mb4` (Collation nil) from looping
+// forever against a catalog that always returns a non-nil collation,
+// and equally lets a desired-only `COLLATE=…` (Charset nil) converge
+// against any catalog charset.
+//
 // The emitted DDL (`ALTER TABLE … DEFAULT CHARSET=… COLLATE=…`) only
 // changes the table default; it does NOT rewrite existing column data
 // (that would require `CONVERT TO CHARACTER SET …`, which rebuilds
@@ -324,7 +331,9 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 	if desired.Charset == nil && desired.Collation == nil {
 		return ""
 	}
-	if ptrEq(current.Charset, desired.Charset) && ptrEq(current.Collation, desired.Collation) {
+	charsetMatches := desired.Charset == nil || ptrEq(current.Charset, desired.Charset)
+	collationMatches := desired.Collation == nil || ptrEq(current.Collation, desired.Collation)
+	if charsetMatches && collationMatches {
 		return ""
 	}
 	var b strings.Builder
