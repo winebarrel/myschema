@@ -171,40 +171,70 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//       for v1, so the user runs the right ALTER (REORGANIZE
 	//       with explicit boundaries, or DROP+ADD if discarding
 	//       data is intended) by hand.
-	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
-	if len(drops) > 0 && len(adds) > 0 {
-		// "Pure value-change" requires more than just drops and adds
-		// having matching names — the *whole* partition list has to
-		// be in the same order on both sides. Otherwise a reorder
-		// like `[p0,p1,p2] → [p0,p2,p1]` would slip through (the
-		// subset walk drops `p1`, matches `p2`, leaves `adds=[p1]`,
-		// drops/adds names line up) and we'd emit a REORGANIZE that
-		// can't actually reorder partitions on disk. Compare the
-		// full name lists instead.
-		if !partitionNameListEqual(curDefs, desDefs) {
-			return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs split / merge / reorder (the catalog and desired partition name lists don't line up position-by-position); only a pure value-change of the same partitions in the same order is generated automatically. Run REORGANIZE PARTITION (with the boundaries you want), or a DROP + ADD pair if you really do want to discard data, by hand", fqtn)
+	// "Pure per-partition definition change" path. When the
+	// catalog and desired name lists line up position-by-position
+	// (every partition stays in the same slot, every name
+	// matches case-insensitively) the diff is necessarily an
+	// in-place change to one or more definitions — value
+	// boundaries, COMMENT, MAX_ROWS, etc. all flow through
+	// `parser.FormatPartitionDefinition`'s identity check. Emit
+	// a single REORGANIZE PARTITION over the *minimal* contiguous
+	// span from the first to the last differing slot:
+	// MySQL requires the new partitions to cover exactly the
+	// same value range as the old ones, so we have to include
+	// every partition between the first and the last mismatch
+	// (matched ones in between get re-stated unchanged), but
+	// untouched partitions on either side can be left alone.
+	// That keeps a small edit small instead of REORGANIZing the
+	// whole tail just because the first slot's value moved.
+	if partitionNameListEqual(curDefs, desDefs) {
+		first, last := -1, -1
+		for i := range curDefs {
+			if !partitionDefEqual(curDefs[i], desDefs[i]) {
+				if first < 0 {
+					first = i
+				}
+				last = i
+			}
+		}
+		if first < 0 {
+			// Every position byte-equal already — only reachable
+			// when the raw-string fast path missed a formatting
+			// drift the formatter can resolve.
+			return nil, nil, nil
 		}
 		var b strings.Builder
 		b.WriteString("ALTER TABLE ")
 		b.WriteString(fqtn)
 		b.WriteString(" REORGANIZE PARTITION ")
-		for i, d := range drops {
-			if i > 0 {
+		for i := first; i <= last; i++ {
+			if i > first {
 				b.WriteString(", ")
 			}
-			b.WriteString(model.Ident(d.Name.String()))
+			b.WriteString(model.Ident(curDefs[i].Name.String()))
 		}
 		b.WriteString(" INTO (")
-		for i, a := range adds {
-			if i > 0 {
+		for i := first; i <= last; i++ {
+			if i > first {
 				b.WriteString(",\n  ")
 			} else {
 				b.WriteString("\n  ")
 			}
-			b.WriteString(parser.FormatPartitionDefinition(a))
+			b.WriteString(parser.FormatPartitionDefinition(desDefs[i]))
 		}
 		b.WriteString("\n);")
 		return []string{b.String()}, nil, nil
+	}
+
+	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
+	if len(drops) > 0 && len(adds) > 0 {
+		// Name lists differ by both add(s) and drop(s) — the
+		// shape needs more than a per-slot value rewrite (split,
+		// merge, reorder, interior insert, retention discard).
+		// myschema can't safely infer the right REORGANIZE
+		// boundaries from a name-only diff, so the user runs the
+		// ALTER by hand.
+		return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way the diff layer can't generate — the catalog and desired partition name lists don't line up position-by-position, so this is some shape of split / merge / reorder / interior insert / retention roll-forward. Run REORGANIZE PARTITION (with explicit boundaries) or a DROP + ADD pair (when discarding data is intended) by hand", fqtn)
 	}
 
 	var stmts, disallowed []string
@@ -352,7 +382,12 @@ func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	if a.Name.String() != b.Name.String() {
+	// MySQL identifiers are case-insensitive, and the parser /
+	// catalog round-trip preserves whatever case the user wrote
+	// — so compare names with EqualFold to match
+	// partitionNameListEqual and avoid misclassifying a
+	// `pAB → PAB` style diff as a value-change REORGANIZE.
+	if !strings.EqualFold(a.Name.String(), b.Name.String()) {
 		return false
 	}
 	return parser.FormatPartitionDefinition(a) == parser.FormatPartitionDefinition(b)

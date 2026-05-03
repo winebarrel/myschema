@@ -239,13 +239,24 @@ patterns:
   regular vs. linear choice matters more than how
   myschema phrases the diff.
 
-- *Pure value-change of existing partitions* — drop and add
-  lists line up position-by-position with identical names,
-  only the `VALUES LESS THAN` / `VALUES IN` clauses differ
-  (e.g. `p2020 LESS THAN (2021)` → `p2020 LESS THAN (2025)`).
-  Generates a single `ALTER TABLE … REORGANIZE PARTITION
-  p1, p2, … INTO (PARTITION p1 VALUES …, PARTITION p2
-  VALUES …, …)` that re-defines each in place. MySQL
+- *Per-partition definition change* — when the catalog and
+  desired partition name lists line up position-by-position
+  (every partition stays in the same slot, every name matches
+  case-insensitively), any per-partition definition difference
+  is generated as a single `ALTER TABLE … REORGANIZE PARTITION
+  p_i, p_{i+1}, … INTO (PARTITION p_i …, PARTITION p_{i+1} …,
+  …)`. The most common shape is a `VALUES LESS THAN` /
+  `VALUES IN` boundary tweak (e.g. `p2020 LESS THAN (2021)` →
+  `p2020 LESS THAN (2025)`), but COMMENT / MAX_ROWS / TABLESPACE
+  /and other per-partition options that round-trip through
+  vitess's PartitionDefinition formatter are picked up here
+  too — anything that makes the formatted definitions
+  byte-different counts. The emitted REORGANIZE covers the
+  *minimal* contiguous span between the first and the last
+  differing slot (matched partitions inside that span are
+  re-stated unchanged because MySQL requires the new
+  partitions to cover the same value range as the old ones,
+  but untouched partitions on either side stay alone). MySQL
   redistributes existing rows into the new boundaries
   (row-preserving). No `--allow-drop` gating because every
   dropped name is reused on the add side.

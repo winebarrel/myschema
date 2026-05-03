@@ -1,0 +1,35 @@
+# Minimal-range REORGANIZE: catalog [p1<20, p2<30, p3<40],
+# desired [p1<25, p2<30, p3<40] — only p1's boundary moved.
+# An earlier version of the diff would have included p2 and p3
+# in the REORGANIZE because the subset walk dropped everything
+# after the first mismatch. The current logic walks first/last
+# mismatch positions and emits a tighter
+# `REORGANIZE p1, p2 INTO (p1 …, p2 …)` (p2 has to be included
+# because MySQL requires the new partitions to cover the same
+# value range as the old ones, but p3 stays untouched).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (20),
+      PARTITION p2 VALUES LESS THAN (30),
+      PARTITION p3 VALUES LESS THAN (40)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (25),
+      PARTITION p2 VALUES LESS THAN (30),
+      PARTITION p3 VALUES LESS THAN (40)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION p1 INTO (
+    partition p1 values less than (25)
+  );
