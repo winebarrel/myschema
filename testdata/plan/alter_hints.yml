@@ -23,5 +23,5 @@ alter_algorithm: INPLACE
 alter_lock: NONE
 
 plan: |
-  ALTER TABLE myschema_test.users ADD COLUMN email varchar(255), ALGORITHM=INPLACE, LOCK=NONE;
+  ALTER TABLE myschema_test.users ADD COLUMN email varchar(255) AFTER id, ALGORITHM=INPLACE, LOCK=NONE;
   CREATE INDEX idx_email ON myschema_test.users (email) ALGORITHM=INPLACE LOCK=NONE;

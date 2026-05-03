@@ -63,7 +63,11 @@ func TestDiffAddColumn(t *testing.T) {
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
 	require.NoError(t, err)
 	require.Len(t, r.Stmts, 1)
-	assert.Equal(t, "ALTER TABLE app.users ADD COLUMN name varchar(64) NOT NULL;", r.Stmts[0])
+	// ADD COLUMN now carries a positional clause (AFTER / FIRST)
+	// derived from the desired-side column order — `name` sits after
+	// `id` in desired, so MySQL gets told to put it there instead of
+	// silently appending to the row tail.
+	assert.Equal(t, "ALTER TABLE app.users ADD COLUMN name varchar(64) NOT NULL AFTER id;", r.Stmts[0])
 }
 
 func TestDiffDropColumnSuppressed(t *testing.T) {

@@ -233,13 +233,27 @@ func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) []s
 func diffColumns(fqtn string, current, desired *orderedmap.Map[string, *model.Column], dc DropChecker) (stmts, disallowed []string) {
 	colAllowed := dc.IsDropAllowed("column")
 
-	// New / changed columns
+	// New / changed columns. New columns get a positional clause
+	// (`AFTER <prev>` or `FIRST`) derived from desired SQL's column
+	// order, so MySQL inserts them where the user expected instead of
+	// silently appending to the end of the row.
+	//
+	// `anchor` is the desired-column-order predecessor of whatever
+	// column we're looking at: it's updated for *every* desired column
+	// (existing or newly-added) so a run of consecutive new columns
+	// chains AFTER each preceding new column, instead of all stacking
+	// AFTER the last existing one (which would reverse their order on
+	// apply). For the very first desired column the anchor is empty,
+	// which becomes FIRST.
+	var anchor string
 	for name, dc2 := range desired.All() {
 		cc, ok := current.GetOk(name)
 		if !ok {
-			stmts = append(stmts, addColumnSQL(fqtn, dc2))
+			stmts = append(stmts, addColumnSQL(fqtn, dc2, anchor))
+			anchor = name
 			continue
 		}
+		anchor = name
 		if !columnEqual(cc, dc2) {
 			stmts = append(stmts, modifyColumnSQL(fqtn, dc2))
 		}
@@ -377,8 +391,18 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 
 // addColumnSQL / modifyColumnSQL share model.ColumnDefSQL with CREATE TABLE
 // so that ALTER also carries CHARACTER SET / COLLATE / GENERATED clauses.
-func addColumnSQL(fqtn string, c *model.Column) string {
-	return "ALTER TABLE " + fqtn + " ADD COLUMN " + model.ColumnDefSQL(c) + ";"
+//
+// `afterCol` is the desired-side anchor column for ADD COLUMN's positional
+// clause: pass the name of the column the new one should sit immediately
+// after, or "" for `FIRST`. Empty anchor + zero existing columns is the
+// degenerate "very first column" case and also gets FIRST — harmless on
+// MySQL.
+func addColumnSQL(fqtn string, c *model.Column, afterCol string) string {
+	pos := " FIRST"
+	if afterCol != "" {
+		pos = " AFTER " + model.Ident(afterCol)
+	}
+	return "ALTER TABLE " + fqtn + " ADD COLUMN " + model.ColumnDefSQL(c) + pos + ";"
 }
 
 func modifyColumnSQL(fqtn string, c *model.Column) string {

@@ -1,0 +1,32 @@
+# Two adjacent new columns inserted between two existing ones. The
+# anchor must chain through the *desired* predecessor (including the
+# previous brand-new column), not just the last column that already
+# existed in current — otherwise both new columns would land
+# AFTER `id` and apply order would put them in reverse:
+#
+#   ADD a AFTER id  → [id, a, last]
+#   ADD b AFTER id  → [id, b, a, last]   ← wrong, [id, a, b, last] expected
+#
+# verify_no_drift: true pins that the round-trip closes after a single
+# apply.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      last VARCHAR(64),
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      last VARCHAR(64),
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN a varchar(64) AFTER id;
+  ALTER TABLE myschema_test.t ADD COLUMN b varchar(64) AFTER a;
+
+verify_no_drift: true
