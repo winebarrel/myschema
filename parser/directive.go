@@ -294,7 +294,7 @@ func ExtractStmtConvertCharset(stmtSQL string) (bool, error) {
 		case strings.HasPrefix(trim, "--"):
 			if convertCharsetDirectivePattern.MatchString(trim) {
 				if sawSQL {
-					return false, fmt.Errorf("-- myschema:convert-charset must appear before the CREATE TABLE statement, not inside or after it")
+					return false, fmt.Errorf("-- myschema:convert-charset must appear before the statement it applies to, not inside or after it")
 				}
 				if found {
 					return false, fmt.Errorf("multiple -- myschema:convert-charset directives on the same statement; only one is allowed")
