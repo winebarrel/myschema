@@ -10,7 +10,8 @@ that brings current → desired. Three subcommands: `plan` (preview the
 DDL), `apply` (run it), `dump` (serialise the live schema as SQL).
 
 The desired side is parsed with `vitess.io/vitess/go/vt/sqlparser`;
-the catalog side is read with `database/sql` + `go-sql-driver/mysql`.
+the catalog side is read with `database/sql` +
+`github.com/go-sql-driver/mysql`.
 
 ## Build & test
 
@@ -103,12 +104,19 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   `current_timestamp()` (with empty parens). The catalog stores them
   without parens, so `parser.normalizeDefaultExpr` strips them and
   upper-cases the keyword to match.
-- ENUM / SET / CHAR / temporal defaults arrive from
+- Some string defaults arrive from
   `information_schema.COLUMNS.COLUMN_DEFAULT` as bareword values
-  (`G` rather than `'G'` for an enum). vitess can't parse the
-  bareword form, so `catalog.normalizeColumnDefault` wraps non-
-  numeric, non-expression defaults of these types in single quotes
-  before handing them off.
+  (`G` rather than `'G'` for an enum, `hello` rather than `'hello'`
+  for a varchar). vitess parses such barewords as a column reference
+  (`*sqlparser.ColName`) rather than a string literal, so the
+  catalog-side round-trip later breaks. `catalog.normalizeColumnDefault`
+  is type-agnostic for non-empty defaults: it parses `SELECT <def>`,
+  and if the resulting expression is a `*ColName` it wraps the value
+  in single quotes; anything else (Literal, NullVal, BoolVal, function
+  calls, …) is already valid SQL and passes through. The empty-string
+  default is the one type-aware special case (vitess can't parse a
+  `SELECT` with no expression) — see `columnTypeAllowsEmptyStringDefault`
+  for the supported-type list.
 
 ## Coverage
 
