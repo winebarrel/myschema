@@ -2,20 +2,28 @@ package parser
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
 )
 
-// partitionPerDefinitionEngineRe strips the per-PARTITION `engine
-// <name>` option that vitess emits when MySQL's SHOW CREATE TABLE
-// includes `ENGINE = InnoDB` on each partition. User-written desired
-// SQL almost never spells the per-partition engine out, so leaving it
-// in would surface as drift on every plan. The match is bounded by
-// either a comma (more partitions follow) or `)` (end of partition
-// list) so we don't accidentally chew into the next clause.
-var partitionPerDefinitionEngineRe = regexp.MustCompile(`(?i)\s+engine\s+\w+(?P<tail>[,)])`)
+// stripPartitionEngineOptions clears the per-partition `ENGINE =
+// <name>` option from a PartitionOption AST, in place, before the
+// caller hands the AST to vitess's formatter. MySQL 8.0+ always
+// emits `ENGINE = InnoDB` on every partition in SHOW CREATE TABLE
+// output even when the table-level engine alone would suffice;
+// user-written desired SQL almost never spells the per-partition
+// engine out, so leaving it in would surface as drift on every
+// plan. We strip at the AST level so we don't have to reason about
+// quoting in the formatted SQL — an earlier regex-based approach
+// got that wrong for LIST values like `'foo engine innodb'`.
+func stripPartitionEngineOptions(po *sqlparser.PartitionOption) {
+	for _, def := range po.Definitions {
+		if def.Options != nil {
+			def.Options.Engine = nil
+		}
+	}
+}
 
 // NormalizePartitionOption renders a vitess `*sqlparser.PartitionOption`
 // into the canonical SQL form myschema stores on `model.Table.Partition`.
@@ -53,9 +61,8 @@ func NormalizePartitionOption(po *sqlparser.PartitionOption) string {
 		}
 		return true
 	}, nil)
-	s := strings.TrimLeft(sqlparser.String(po), "\n")
-	s = partitionPerDefinitionEngineRe.ReplaceAllString(s, "$tail")
-	return s
+	stripPartitionEngineOptions(po)
+	return strings.TrimLeft(sqlparser.String(po), "\n")
 }
 
 // ExtractPartitionFromShowCreate isolates the `PARTITION BY …` clause
@@ -157,11 +164,17 @@ func ParsePartitionClause(clause string) (*sqlparser.PartitionOption, error) {
 // per-partition `engine <name>` stripping NormalizePartitionOption
 // performs at whole-clause level. Used by the diff layer to build
 // `ALTER TABLE … ADD PARTITION (PARTITION p VALUES …)` statements.
+//
+// We mutate def.Options.Engine to nil before formatting (and
+// restore it after) so that string-quoting in the rendered SQL
+// never matters — earlier regex-based stripping mangled LIST
+// values like `'foo engine innodb'`.
 func FormatPartitionDefinition(def *sqlparser.PartitionDefinition) string {
-	s := sqlparser.String(def)
-	// definitions don't have a trailing `,` or `)` of their own, so
-	// add a fake `)` boundary and strip it back to reuse the same
-	// engine-strip regex.
-	s = partitionPerDefinitionEngineRe.ReplaceAllString(s+")", "$tail")
-	return strings.TrimSuffix(s, ")")
+	var savedEngine *sqlparser.PartitionEngine
+	if def.Options != nil {
+		savedEngine = def.Options.Engine
+		def.Options.Engine = nil
+		defer func() { def.Options.Engine = savedEngine }()
+	}
+	return sqlparser.String(def)
 }

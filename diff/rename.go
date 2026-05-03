@@ -167,38 +167,37 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 	}
 }
 
-// partitionColumnRenameConflicts reports the renamed-from sources
-// (old column names) that the table's `PARTITION BY …` clause
-// references. MySQL rejects `RENAME COLUMN` on any column the
-// partition expression depends on with `Error 3855: Column ...
-// has a partitioning function dependency and cannot be dropped
-// or renamed`, so myschema must not generate a plan that requires
-// such a rename — the apply would always fail. The diff layer
-// surfaces this as a parse-time error before any DDL is emitted.
+// partitionColumnConflicts reports which of `candidates` the
+// table's `PARTITION BY …` clause references. MySQL rejects both
+// `RENAME COLUMN` *and* `DROP COLUMN` on any column the partition
+// expression depends on with `Error 3855: Column ... has a
+// partitioning function dependency and cannot be dropped or
+// renamed`, so myschema must surface either operation as a
+// parse-time error before emitting an ALTER that the apply step
+// would reject.
 //
-// The rename map is keyed old → new. Identifier comparison is
-// case-insensitive (matches partitionHeaderEqual's ColList
-// normalisation): MySQL column names are case-insensitive, the
-// parser / catalog round-trips have already lower-cased what they
-// store, and the rename map keys come from desired-side
-// directives where the user's casing might differ from the
-// catalog's.
+// `candidates` is the set of column names the caller wants to
+// check (rename sources, drop targets, etc.). Identifier
+// comparison is case-insensitive (matches partitionHeaderEqual's
+// ColList normalisation): MySQL column names are case-insensitive,
+// the parser / catalog round-trips have already lower-cased what
+// they store, and the rename map keys / desired SQL come from a
+// place where the user's casing might differ from the catalog's.
 //
-// Returns the original (catalog-cased) old names for any
-// conflicts found. Empty result + nil error means rename is safe
-// to plan; non-empty result is the caller's signal to surface a
-// "remove the rename, fix the partition expression first" error.
-func partitionColumnRenameConflicts(clause string, renames map[string]string) ([]string, error) {
-	if clause == "" || len(renames) == 0 {
+// Returns the original (caller-cased) column names for any
+// conflicts found. Empty result + nil error means the operation
+// is safe to plan.
+func partitionColumnConflicts(clause string, candidates []string) ([]string, error) {
+	if clause == "" || len(candidates) == 0 {
 		return nil, nil
 	}
 	po, err := parser.ParsePartitionClause(clause)
 	if err != nil {
 		return nil, err
 	}
-	loweredToOriginal := make(map[string]string, len(renames))
-	for old := range renames {
-		loweredToOriginal[strings.ToLower(old)] = old
+	loweredToOriginal := make(map[string]string, len(candidates))
+	for _, c := range candidates {
+		loweredToOriginal[strings.ToLower(c)] = c
 	}
 	seen := make(map[string]bool)
 	var hits []string
