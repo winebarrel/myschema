@@ -53,12 +53,6 @@ Open items only. Done work is in `git log` / closed PRs.
 - [ ] `dump --quote-style` (backtick vs. ANSI double-quote) for tools
       that toggle `ANSI_QUOTES`.
 
-## Low — directives
-
-- [ ] **`-- myschema:invisible`** shortcut so an index can be added
-      invisible first (lock-friendly) and made visible in a follow-up
-      apply.
-
 ## Low — tests / docs / release
 
 - [ ] YAML harness extended to parser and diff (currently Go table tests).
