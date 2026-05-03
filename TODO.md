@@ -11,17 +11,19 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## High — correctness bugs
 
-- [ ] **BINARY / VARBINARY `DEFAULT ''` round-trip drift.** When a
+- [ ] **Fixed-width `BINARY DEFAULT ''` round-trip drift.** When a
       column is declared with `BINARY(N) NOT NULL DEFAULT ''`, MySQL
-      stores the default and surfaces it through
+      pads the default to N zero bytes and surfaces it through
       `information_schema.COLUMNS.COLUMN_DEFAULT` as a hex literal
-      (`0x` or `0x000000…`) rather than the empty string the parser
-      side produces. The string-shaped fix landed in
-      `normalizeColumnDefault` doesn't help — these types need their
-      own catalog-side normalisation that recognises the hex form
-      and re-emits `''`. Out of scope for the v1 string-types fix;
-      filed for follow-up. (Workaround: don't put `DEFAULT ''` on a
-      BINARY/VARBINARY column.)
+      (`0x` for the degenerate case, `0x000000…` for non-zero N)
+      rather than the empty string the parser side produces. The
+      string-shaped fix landed in `normalizeColumnDefault` doesn't
+      help — fixed-width BINARY needs its own catalog-side
+      normalisation that recognises the hex form and re-emits `''`.
+      VARBINARY (variable-length) is unaffected because it surfaces
+      its `DEFAULT ''` as the bare empty string. Out of scope for
+      the string-types fix; filed for follow-up. (Workaround: don't
+      put `DEFAULT ''` on a fixed-width BINARY column.)
 - [ ] **FK-implicit covering indexes look like drift.** Adding a
       foreign key on un-indexed columns (inline `CREATE TABLE` or
       `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently

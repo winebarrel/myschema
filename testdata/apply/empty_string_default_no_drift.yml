@@ -11,6 +11,7 @@ desired: |
       id BIGINT NOT NULL AUTO_INCREMENT,
       s_var VARCHAR(64) NOT NULL DEFAULT '',
       s_char CHAR(8) NOT NULL DEFAULT '',
+      s_vbin VARBINARY(8) NOT NULL DEFAULT '',
       s_enum ENUM('a','b','') NOT NULL DEFAULT '',
       s_set SET('x','y') NOT NULL DEFAULT '',
       PRIMARY KEY (id)
@@ -21,6 +22,7 @@ applied: |
       id bigint NOT NULL AUTO_INCREMENT,
       s_var varchar(64) NOT NULL DEFAULT '',
       s_char char(8) NOT NULL DEFAULT '',
+      s_vbin varbinary(8) NOT NULL DEFAULT '',
       s_enum enum('a','b','') NOT NULL DEFAULT '',
       s_set set('x','y') NOT NULL DEFAULT '',
       PRIMARY KEY (id)

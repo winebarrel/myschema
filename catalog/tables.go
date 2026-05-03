@@ -384,12 +384,14 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 // ones: the parser side stores ” (two single quotes) while the catalog
 // returns the bare empty string. For string-shaped column types where
 // MySQL stores `DEFAULT ”` as the bare empty string in
-// information_schema.COLUMNS.COLUMN_DEFAULT (CHAR / VARCHAR / ENUM /
-// SET) we normalise to ” here. TEXT / BLOB are excluded because MySQL
-// doesn't allow a literal default on those types at all; BINARY /
-// VARBINARY are excluded because their `DEFAULT ”` surfaces through
-// information_schema as a hex literal (`0x`, `0x000000…`) rather than
-// the empty string and needs its own normalisation — see TODO.md.
+// information_schema.COLUMNS.COLUMN_DEFAULT (CHAR / VARCHAR /
+// VARBINARY / ENUM / SET) we normalise to ” here. TEXT / BLOB are
+// excluded because MySQL doesn't allow a literal default on those
+// types at all. Fixed-width BINARY is excluded because its
+// `DEFAULT ”` surfaces through information_schema as a hex literal
+// (`0x` for the degenerate case, `0x000000…` for non-zero N) rather
+// than the empty string, and needs its own normalisation — see
+// TODO.md.
 func normalizeColumnDefault(typeName, def string) string {
 	if def == "" {
 		if columnTypeAllowsEmptyStringDefault(typeName) {
