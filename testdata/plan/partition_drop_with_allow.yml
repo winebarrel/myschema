@@ -1,0 +1,29 @@
+# DROP PARTITION when --allow-drop=partition is set: the trailing
+# p2022 is removed from desired and ends up on the executable plan
+# bucket as ALTER TABLE … DROP PARTITION p2022;
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+allow_drop:
+  - partition
+
+plan: |
+  ALTER TABLE myschema_test.events DROP PARTITION p2022;

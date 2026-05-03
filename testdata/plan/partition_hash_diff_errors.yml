@@ -1,0 +1,16 @@
+# HASH partition count change is its own grammar (COALESCE
+# PARTITION / ADD PARTITION PARTITIONS n) and lives in a future
+# PR. v1 errors out so the user runs the count change by hand.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 2;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+error: "HASH / KEY partition diffs are not yet generated"

@@ -123,3 +123,45 @@ func ExtractPartitionFromShowCreate(showCreate string) (string, error) {
 	}
 	return NormalizePartitionOption(ct.TableSpec.PartitionOption), nil
 }
+
+// ParsePartitionClause re-parses a normalised partition clause (the
+// kind stored on `model.Table.Partition`) back into a
+// `*sqlparser.PartitionOption` so the diff layer can inspect
+// individual partition definitions. The same trick used elsewhere:
+// glue the clause onto a `CREATE TABLE _ (id INT)` skeleton and
+// peel the AST back out.
+//
+// Returns nil when the input is empty (the model represents a
+// non-partitioned table).
+func ParsePartitionClause(clause string) (*sqlparser.PartitionOption, error) {
+	if clause == "" {
+		return nil, nil
+	}
+	p, err := newParser()
+	if err != nil {
+		return nil, fmt.Errorf("init vitess parser: %w", err)
+	}
+	stmt, err := p.Parse("CREATE TABLE _t (id INT) " + clause)
+	if err != nil {
+		return nil, fmt.Errorf("re-parse partition clause %q: %w", clause, err)
+	}
+	ct, ok := stmt.(*sqlparser.CreateTable)
+	if !ok || ct.TableSpec == nil || ct.TableSpec.PartitionOption == nil {
+		return nil, fmt.Errorf("re-parsed partition clause produced no PartitionOption: %q", clause)
+	}
+	return ct.TableSpec.PartitionOption, nil
+}
+
+// FormatPartitionDefinition renders a single
+// `*sqlparser.PartitionDefinition` back into SQL, with the same
+// per-partition `engine <name>` stripping NormalizePartitionOption
+// performs at whole-clause level. Used by the diff layer to build
+// `ALTER TABLE … ADD PARTITION (PARTITION p VALUES …)` statements.
+func FormatPartitionDefinition(def *sqlparser.PartitionDefinition) string {
+	s := sqlparser.String(def)
+	// definitions don't have a trailing `,` or `)` of their own, so
+	// add a fake `)` boundary and strip it back to reuse the same
+	// engine-strip regex.
+	s = partitionPerDefinitionEngineRe.ReplaceAllString(s+")", "$tail")
+	return strings.TrimSuffix(s, ")")
+}

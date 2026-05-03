@@ -1,8 +1,7 @@
-# v1 partition support is round-trip + drift-detect only — adding,
-# dropping, or reshaping partitions errors out instead of emitting
-# an ALTER (ADD/DROP/TRUNCATE/REORGANIZE PARTITION generation is
-# a future PR). Pin the failure mode so users get a clear "manage
-# by hand" message rather than silent drift.
+# Pure suffix add on a RANGE partition: catalog has [p2020, p2021],
+# desired has [p2020, p2021, p2022]. New v1 partition diff path
+# emits a single ALTER TABLE … ADD PARTITION statement instead of
+# erroring out as "manage by hand".
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,
@@ -26,4 +25,7 @@ desired: |
       PARTITION p2022 VALUES LESS THAN (2023)
   );
 
-error: "partition definition differs"
+plan: |
+  ALTER TABLE myschema_test.events ADD PARTITION (
+    partition p2022 values less than (2023)
+  );
