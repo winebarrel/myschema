@@ -10,8 +10,9 @@ import (
 // directives. Add new directive names here when they're implemented; the
 // validator below errors on any directive whose name isn't listed.
 var knownDirectives = map[string]bool{
-	"renamed-from": true,
-	"execute":      true,
+	"renamed-from":    true,
+	"execute":         true,
+	"convert-charset": true,
 }
 
 var (
@@ -45,6 +46,14 @@ var (
 	// At least one non-space character is required so the body
 	// can't be empty.
 	executeDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:execute\s+(\S.*?)\s*$`)
+
+	// convertCharsetDirectivePattern matches the bare
+	// `-- myschema:convert-charset` directive (no arguments — the
+	// charset / collation come from the CREATE TABLE's own
+	// `DEFAULT CHARSET` / `COLLATE` clause). Trailing whitespace is
+	// tolerated; anything else on the line fails the match and the
+	// validator turns it into a "malformed directive" error.
+	convertCharsetDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:convert-charset\s*$`)
 )
 
 // ValidateDirectives scans rawSQL for any -- myschema:<name> comment and
@@ -93,6 +102,10 @@ func ValidateDirectives(rawSQL string) error {
 		case "execute":
 			if !executeDirectivePattern.MatchString(trim) {
 				return fmt.Errorf("malformed -- myschema:execute directive: %q (expected `-- myschema:execute <check-sql>` with a non-empty check SQL on the same line)", strings.TrimSpace(trim))
+			}
+		case "convert-charset":
+			if !convertCharsetDirectivePattern.MatchString(trim) {
+				return fmt.Errorf("malformed -- myschema:convert-charset directive: %q (expected just `-- myschema:convert-charset`; charset / collation are taken from the CREATE TABLE's own DEFAULT CHARSET / COLLATE clauses)", strings.TrimSpace(trim))
 			}
 		}
 	}
@@ -246,6 +259,55 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 		}
 	}
 	return oldName, nil
+}
+
+// ExtractStmtConvertCharset returns true when the leading comment block
+// of stmtSQL contains a `-- myschema:convert-charset` directive. Same
+// scanner shape as ExtractStmtRenameFrom (blank / `--` / `#` / single-
+// and multi-line `/* … */` lines all skipped) but unlike that
+// extractor it keeps scanning past the first real SQL line so that
+// a directive misplaced *inside* or *after* the CREATE TABLE body
+// surfaces as an error instead of being silently ignored — the
+// directive only attaches to the leading comment block, and a stray
+// copy is almost always a typo. Multiple directives in the leading
+// block are likewise rejected.
+func ExtractStmtConvertCharset(stmtSQL string) (bool, error) {
+	var found, sawSQL, inBlock bool
+	for line := range strings.SplitSeq(stmtSQL, "\n") {
+		if inBlock {
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
+			}
+			inBlock = false
+			line = line[idx+2:]
+		}
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
+		if trim == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trim, "--"):
+			if convertCharsetDirectivePattern.MatchString(trim) {
+				if sawSQL {
+					return false, fmt.Errorf("-- myschema:convert-charset must appear before the statement it applies to, not inside or after it")
+				}
+				if found {
+					return false, fmt.Errorf("multiple -- myschema:convert-charset directives on the same statement; only one is allowed")
+				}
+				found = true
+			}
+		case strings.HasPrefix(trim, "#"):
+			// non-myschema line comment, skip
+		default:
+			sawSQL = true
+		}
+	}
+	return found, nil
 }
 
 // payloadHasNoSQL reports whether s is empty or contains only blank

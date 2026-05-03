@@ -837,3 +837,151 @@ END;
 `, "shop")
 	require.Error(t, err)
 }
+
+func TestExtractStmtConvertCharsetBasic(t *testing.T) {
+	got, err := parser.ExtractStmtConvertCharset(`-- myschema:convert-charset
+CREATE TABLE t (id INT);`)
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+func TestExtractStmtConvertCharsetAbsent(t *testing.T) {
+	got, err := parser.ExtractStmtConvertCharset(`CREATE TABLE t (id INT);`)
+	require.NoError(t, err)
+	assert.False(t, got)
+}
+
+func TestExtractStmtConvertCharsetSkipsBlockComments(t *testing.T) {
+	got, err := parser.ExtractStmtConvertCharset(`/*
+generated header
+*/
+-- myschema:convert-charset
+CREATE TABLE t (id INT);`)
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+func TestExtractStmtConvertCharsetMultipleErrors(t *testing.T) {
+	_, err := parser.ExtractStmtConvertCharset(`-- myschema:convert-charset
+-- myschema:convert-charset
+CREATE TABLE t (id INT);`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple")
+}
+
+func TestExtractStmtConvertCharsetMisplacedInsideBodyErrors(t *testing.T) {
+	// The directive only attaches to the leading comment block. A
+	// stray copy inside the CREATE TABLE body must not be silently
+	// ignored — almost always a typo. This is the asymmetry with
+	// ExtractStmtRenameFrom: that one stops at the first SQL line,
+	// this one keeps scanning so the misplaced case errors instead
+	// of vanishing.
+	_, err := parser.ExtractStmtConvertCharset(`CREATE TABLE t (
+    id INT,
+    -- myschema:convert-charset
+    PRIMARY KEY (id)
+) DEFAULT CHARSET=utf8mb4;`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must appear before")
+}
+
+func TestExtractStmtConvertCharsetMisplacedAfterStatementErrors(t *testing.T) {
+	// `-- myschema:convert-charset` after the CREATE TABLE closes
+	// is also misplaced (still inside the same piece passed to
+	// ExtractStmtConvertCharset) and must error rather than
+	// silently no-op.
+	_, err := parser.ExtractStmtConvertCharset(`CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;
+-- myschema:convert-charset`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must appear before")
+}
+
+func TestValidateDirectivesRejectsMalformedConvertCharset(t *testing.T) {
+	// `-- myschema:convert-charset utf8mb4` is rejected — the
+	// directive takes no arguments, charset comes from the
+	// CREATE TABLE itself.
+	err := parser.ValidateDirectives(`-- myschema:convert-charset utf8mb4
+CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed -- myschema:convert-charset")
+}
+
+func TestParseSQLAcceptsConvertCharsetDirective(t *testing.T) {
+	res, err := parser.ParseSQL(`-- myschema:convert-charset
+CREATE TABLE t (
+    name VARCHAR(64)
+) DEFAULT CHARSET=utf8mb4;`, "shop")
+	require.NoError(t, err)
+	tbl, ok := res.Tables.GetOk("shop.t")
+	require.True(t, ok)
+	assert.True(t, tbl.ConvertCharset)
+	require.NotNil(t, tbl.Charset)
+	assert.Equal(t, "utf8mb4", *tbl.Charset)
+}
+
+func TestParseSQLRejectsConvertCharsetWithoutDefaultCharset(t *testing.T) {
+	// CONVERT TO CHARACTER SET requires a target charset; the
+	// directive takes none, so the CREATE TABLE must declare
+	// DEFAULT CHARSET. Without it there's nothing to CONVERT TO.
+	_, err := parser.ParseSQL(`-- myschema:convert-charset
+CREATE TABLE t (id INT);`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-charset")
+	assert.Contains(t, err.Error(), "DEFAULT CHARSET")
+}
+
+func TestParseSQLRejectsConvertCharsetOnNonCreateTable(t *testing.T) {
+	cases := map[string]string{
+		"on CREATE VIEW": `-- myschema:convert-charset
+CREATE VIEW v AS SELECT 1 AS x;`,
+		"on ALTER TABLE": `CREATE TABLE t (id INT);
+-- myschema:convert-charset
+ALTER TABLE t ADD INDEX ix (id);`,
+	}
+	for name, sql := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseSQL(sql, "shop")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "convert-charset")
+		})
+	}
+}
+
+func TestParseSQLRejectsConvertCharsetCombinedWithExecute(t *testing.T) {
+	_, err := parser.ParseSQL(`-- myschema:convert-charset
+-- myschema:execute SELECT 1
+CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-charset")
+	assert.Contains(t, err.Error(), "execute")
+}
+
+func TestParseSQLRejectsMisplacedConvertCharsetInsideExecutePayload(t *testing.T) {
+	// A misplaced convert-charset directive inside an execute
+	// payload still surfaces ExtractStmtConvertCharset's
+	// "must appear before the statement it applies to" error,
+	// but the parser wraps it with the execute context so the
+	// reader knows which directive's payload caused it.
+	_, err := parser.ParseSQL(`-- myschema:execute SELECT 1
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW BEGIN
+    -- myschema:convert-charset
+    SET NEW.val = 0
+END
+`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myschema:execute")
+	assert.Contains(t, err.Error(), "must appear before")
+}
+
+func TestParseSQLRejectsConvertCharsetCombinedWithRenamedFrom(t *testing.T) {
+	// Both directives attach to the same CREATE TABLE but describe
+	// different operations (RENAME TABLE vs. CONVERT TO CHARACTER
+	// SET) and the diff layer doesn't combine them. Same posture
+	// as the execute / renamed-from conflict.
+	_, err := parser.ParseSQL(`-- myschema:renamed-from old_t
+-- myschema:convert-charset
+CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-charset")
+	assert.Contains(t, err.Error(), "renamed-from")
+}

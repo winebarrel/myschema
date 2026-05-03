@@ -11,18 +11,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Medium — silent diffs / fidelity gaps
 
-- [ ] **One-shot CONVERT TO CHARACTER SET path.** The basic
-      table-level / column-level charset diff lands as a regular
-      ALTER (`ALTER TABLE … DEFAULT CHARSET=…` + per-column
-      `MODIFY COLUMN`) and converges in two applies for tables with
-      pre-existing string columns — see CAVEATS.md "Changing DEFAULT
-      CHARSET". A future directive (`-- myschema:convert-charset` or
-      a `--convert-charset` flag) could opt into emitting a single
-      `ALTER TABLE … CONVERT TO CHARACTER SET …` instead, which
-      rewrites the stored bytes and converges in one apply. Trade-off:
-      heavyweight (table rebuild) and column-level explicit charsets
-      get clobbered by CONVERT TO and need their own follow-up MODIFY,
-      so the directive needs to handle that ordering.
 - [ ] **`ENUM` / `SET` element-list diff.** Today the type is compared
       as one string, so the diff fires on any element-list change. ENUM
       ordering matters in MySQL (it backs the internal numeric mapping

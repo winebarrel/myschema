@@ -1,0 +1,25 @@
+# `-- myschema:convert-charset` is a no-op for the CONVERT path
+# when the charset itself already matches and only the collation
+# differs. CONVERT TO would needlessly rebuild the table just to
+# flip the collation, so the diff falls back to the default
+# DEFAULT CHARSET / COLLATE branch. The directive requires the
+# desired CREATE TABLE to declare DEFAULT CHARSET, so the fallback
+# emits the full `DEFAULT CHARSET=<charset> COLLATE=<collation>`
+# shape (not a bare `COLLATE=` only).
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+desired: |
+  -- myschema:convert-charset
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+plan: |
+  ALTER TABLE myschema_test.t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

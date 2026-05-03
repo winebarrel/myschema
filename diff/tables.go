@@ -347,13 +347,28 @@ func ptrEq[T comparable](a, b *T) bool {
 // actually set: `ALTER TABLE … DEFAULT CHARSET=…` when only Charset
 // changes, `ALTER TABLE … COLLATE=…` when only Collation changes,
 // and `ALTER TABLE … DEFAULT CHARSET=… COLLATE=…` when both do. In
-// any shape it only changes the table default; it does NOT rewrite
-// existing column data (that would require `CONVERT TO CHARACTER
-// SET …`, which rebuilds the table — heavyweight, and rare enough
-// to leave to a future dedicated flag). Per-column drift is picked
-// up by the column diff below; the catalog-side normalisation of
-// column charset/collation against the new default keeps that
-// comparison honest.
+// any of these default shapes the statement only changes the table
+// default; it does NOT rewrite existing column data, so a per-column
+// MODIFY follows in a second apply (the two-stage convergence
+// documented in CAVEATS.md "Changing DEFAULT CHARSET").
+//
+// `-- myschema:convert-charset` opts into the data-rewriting form:
+// when set on the desired-side CREATE TABLE *and* the charset
+// actually differs, the function emits `ALTER TABLE … CONVERT TO
+// CHARACTER SET <charset> [COLLATE <collation>]` instead, which
+// rewrites stored bytes and per-column charset metadata in the same
+// statement (one-shot convergence). A collation-only diff with the
+// directive set still falls through to the default DEFAULT CHARSET
+// / COLLATE branch (no CONVERT) — and because the parser requires
+// the desired CREATE TABLE to declare `DEFAULT CHARSET` for the
+// directive to be valid, the fallback emits the full `DEFAULT
+// CHARSET=<charset> COLLATE=<collation>` shape, never a bare
+// `COLLATE=` only. CONVERT TO would needlessly rebuild the table
+// just to flip metadata.
+//
+// Per-column drift is picked up by the column diff below; the
+// catalog-side normalisation of column charset/collation against
+// the new default keeps that comparison honest.
 func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string {
 	if desired.Charset == nil && desired.Collation == nil {
 		return ""
@@ -377,6 +392,33 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
 	b.WriteString(fqtn)
+	// `-- myschema:convert-charset` opt-in: rewrite stored bytes
+	// and per-column charset metadata in one statement so a
+	// table with pre-existing string columns converges in a
+	// single apply (the default flow needs two — see CAVEATS
+	// "Changing DEFAULT CHARSET"). Only triggered when the
+	// charset itself differs — a collation-only diff falls
+	// through to the default DEFAULT CHARSET / COLLATE branch
+	// (which, because the parser requires DEFAULT CHARSET on
+	// the directive's CREATE TABLE, emits the full `DEFAULT
+	// CHARSET=<charset> COLLATE=<collation>` shape) because
+	// `CONVERT TO` would needlessly rebuild the table just to
+	// flip the collation. Note the syntax difference from the
+	// default branch: CONVERT TO uses bare `COLLATE <name>`
+	// (no `=`), DEFAULT CHARSET uses `COLLATE=<name>`.
+	// desired.Charset is guaranteed non-nil here because the
+	// parser rejects the directive when CREATE TABLE has no
+	// DEFAULT CHARSET.
+	if desired.ConvertCharset && !charsetMatches {
+		b.WriteString(" CONVERT TO CHARACTER SET ")
+		b.WriteString(*desired.Charset)
+		if desired.Collation != nil {
+			b.WriteString(" COLLATE ")
+			b.WriteString(*desired.Collation)
+		}
+		b.WriteString(";")
+		return b.String()
+	}
 	if desired.Charset != nil {
 		b.WriteString(" DEFAULT CHARSET=")
 		b.WriteString(*desired.Charset)

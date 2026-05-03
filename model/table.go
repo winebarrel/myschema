@@ -26,6 +26,18 @@ type Table struct {
 	// nil. The diff layer uses it to emit ALTER TABLE … RENAME TO instead
 	// of DROP+CREATE so row data survives.
 	RenameFrom *string
+	// ConvertCharset is set by a desired-side
+	// `-- myschema:convert-charset` directive (statement-level, above
+	// the CREATE TABLE). When true and the table's CHARACTER SET differs
+	// from the catalog, the diff layer emits a one-shot
+	// `ALTER TABLE … CONVERT TO CHARACTER SET … [COLLATE …]` that
+	// rewrites stored bytes and per-column charsets in the same
+	// statement, instead of the default two-stage `DEFAULT CHARSET=…` +
+	// per-column `MODIFY COLUMN` flow. Catalog-loaded tables always
+	// have it false; the directive doesn't survive a dump/round-trip
+	// because the catalog has no representation for "next apply should
+	// CONVERT TO".
+	ConvertCharset bool
 }
 
 // FQTN returns the database-qualified name (database.table).
