@@ -1,0 +1,34 @@
+# RANGE COLUMNS counterpart to the value-change REORGANIZE
+# end-to-end fixture. Tuple boundaries (`VALUES LESS THAN (a, b)`)
+# flow through the same `parser.FormatPartitionDefinition` path
+# scalar `LESS THAN (n)` does, but until this fixture there was
+# no apply-side pin that MySQL actually accepts the generated
+# REORGANIZE for tuple boundaries or that the rewritten boundaries
+# round-trip cleanly through SHOW CREATE TABLE (verify_no_drift).
+init: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (10, 100),
+      PARTITION p1 VALUES LESS THAN (20, 200)
+  );
+
+desired: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (15, 150),
+      PARTITION p1 VALUES LESS THAN (25, 250)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.shards REORGANIZE PARTITION p0, p1 INTO (
+    partition p0 values less than (15, 150),
+    partition p1 values less than (25, 250)
+  );
+
+verify_no_drift: true

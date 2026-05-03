@@ -162,9 +162,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   middle / tail), including the `RANGE COLUMNS` / `LIST COLUMNS`
   variants, HASH / KEY (incl. LINEAR) `PARTITIONS n` count
   changes via ADD PARTITION PARTITIONS / COALESCE PARTITION,
-  and pure RANGE / LIST partition value-change via REORGANIZE
-  PARTITION (same names, different `VALUES …` clauses) —
-  see CAVEATS.md "Partitioning" for the full scope
+  and per-partition definition rewrite of RANGE / LIST
+  partitions via REORGANIZE PARTITION when both sides have the
+  same partition names in the same order (covers `VALUES …`
+  boundary tweaks plus COMMENT / MAX_ROWS / TABLESPACE / other
+  per-partition option changes that round-trip through vitess's
+  PartitionDefinition formatter) — see CAVEATS.md
+  "Partitioning" for the full scope
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
 - `--alter-algorithm` / `--alter-lock` flags (and matching
@@ -268,17 +272,20 @@ rather than declarative schema. Manage them out of band.)
   HASH / KEY (incl. LINEAR) `PARTITIONS n` count grow /
   shrink via `ADD PARTITION PARTITIONS` /
   `COALESCE PARTITION` (the shrink path is also gated on
-  `--allow-drop=partition`); and pure value-change of
-  RANGE / LIST partitions via `REORGANIZE PARTITION` (same
-  names, only the `VALUES` clauses differ). Anything else —
-  split / merge / reorder REORGANIZE shapes, strategy /
-  expression changes (REMOVE PARTITIONING + new PARTITION BY),
-  *or* either direction of "one side has no partitioning"
-  (first-time `PARTITION BY` against an unpartitioned table,
-  *and* `REMOVE PARTITIONING` against an already-partitioned
-  one) — still errors out so the user runs the ALTER by hand.
-  See CAVEATS.md "Partitioning". `diff/partitions.go` is where
-  the supported cases live.
+  `--allow-drop=partition`); and per-partition definition
+  rewrite of RANGE / LIST partitions via `REORGANIZE PARTITION`
+  whenever both sides have the same partition names in the same
+  order (covers `VALUES …` boundary tweaks plus
+  COMMENT / MAX_ROWS / TABLESPACE / other per-partition option
+  changes that round-trip through vitess's PartitionDefinition
+  formatter). Anything else — split / merge / reorder
+  REORGANIZE shapes, strategy / expression changes (REMOVE
+  PARTITIONING + new PARTITION BY), *or* either direction of
+  "one side has no partitioning" (first-time `PARTITION BY`
+  against an unpartitioned table, *and* `REMOVE PARTITIONING`
+  against an already-partitioned one) — still errors out so the
+  user runs the ALTER by hand. See CAVEATS.md "Partitioning".
+  `diff/partitions.go` is where the supported cases live.
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after
   all CREATE TABLEs, so this works for that case; FKs that point at tables

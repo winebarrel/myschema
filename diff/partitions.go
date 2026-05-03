@@ -349,11 +349,17 @@ func stringSliceEqual(a, b []string) bool {
 
 // partitionNameListEqual reports whether the two definition slices
 // have the same partition names in the same order. Used by the
-// REORGANIZE branch to confirm "pure value-change" — every
-// partition that's about to be dropped corresponds positionally
-// to one in the add list with the same name. Comparison is
-// case-insensitive (MySQL identifier rule + the parser /
-// catalog round-trip already lower-cases what they store).
+// REORGANIZE branch to confirm "pure per-partition definition
+// change" — every partition that's about to be dropped
+// corresponds positionally to one in the add list with the same
+// name. Comparison is case-insensitive because partition names
+// are MySQL identifiers (case-insensitive at the engine level)
+// AND because `parser.NormalizePartitionOption` does NOT lower-
+// case partition names — it only lower-cases function /
+// column-reference identifiers inside the partition expression.
+// Without `EqualFold` here a `pAB → PAB` desired-side rewrite
+// would slip past this check and tip the diff into the
+// disjoint-name "split / merge / reorder" error branch.
 func partitionNameListEqual(a, b []*sqlparser.PartitionDefinition) bool {
 	if len(a) != len(b) {
 		return false
