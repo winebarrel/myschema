@@ -164,6 +164,18 @@ them off.
   those targets — DROP+ADD is the only path and the diff already
   does that.
 
+**Operational rules** (declarative-by-design constraints; see
+`CAVEATS.md` for the full list and rationale):
+
+- Foreign keys must declare a covering index in desired SQL. myschema
+  does not auto-skip the implicit covering index that MySQL creates
+  for un-indexed FK columns, so a desired-side FK without an explicit
+  matching index (PRIMARY KEY / UNIQUE / KEY) shows up as drift —
+  surfaced as a `-- skipped: DROP INDEX` line in plan by default.
+  Running apply with `--allow-drop=index` will then error 1553 because
+  the FK still needs the index. `dump` always emits the covering
+  index, so `dump → apply` is unaffected.
+
 **Not yet implemented (intentional v1 cuts; would mirror pistachio):**
 
 (Triggers, stored procedures / functions, and events are deliberately
@@ -173,22 +185,6 @@ rather than declarative schema. Manage them out of band.)
   "no WITH clause" from "WITH CASCADED CHECK OPTION", so the parser
   collapses both to `NONE`. Users who explicitly write `WITH CASCADED`
   see it dropped on round-trip. `WITH LOCAL CHECK OPTION` is preserved.
-- **FK-implicit covering indexes are not recognised as implicit.** When
-  a foreign key is added on columns with no covering index — whether
-  inline in `CREATE TABLE` or via `ALTER TABLE … ADD CONSTRAINT … FOREIGN
-  KEY` — MySQL silently creates one (named after the FK). The
-  `information_schema.STATISTICS` view doesn't flag it as implicit, so
-  the catalog reads it as
-  an ordinary index — desired SQL that declares the FK without also
-  declaring the index then shows false drift, and apply fails with
-  `Error 1553` once `--allow-drop=index` lets the DROP through (the
-  FK still needs the index). Two workarounds: (a) declare the covering
-  index explicitly in desired SQL (this is what `dump` outputs, so
-  `dump → apply` round-trips cleanly); or (b) leave the implicit index
-  in place and accept the `-- skipped: DROP INDEX` line in plan output.
-  The proper fix is a diff-side suppression rule mirroring MySQL's
-  reuse: skip a DROP INDEX whose columns form the left-most prefix of
-  a surviving FK and where no other surviving index covers that FK.
 - View `DEFINER` and `SQL SECURITY` clauses are catalogued but not
   diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text

@@ -1,20 +1,22 @@
-# Spec test: pins the documented FK-implicit-index limitation
-# (see AGENTS.md "Not yet implemented" section).
+# Spec test: pins the plan-side behaviour for the FK + covering-index
+# operational rule (see CAVEATS.md).
 #
 # When a foreign key is added on un-indexed columns — inline in
 # CREATE TABLE (as below) or via ALTER TABLE … ADD CONSTRAINT …
 # FOREIGN KEY — MySQL silently creates a covering index named after
 # the FK constraint. The catalog reads it back as an ordinary index
 # because information_schema.STATISTICS doesn't flag it as implicit.
-# With desired SQL declaring
-# the FK but not the index, plan reports false drift: a suppressed
-# DROP INDEX. (Apply with --allow-drop=index would fail — MySQL
-# guards the index with Error 1553 while the FK still needs it.)
+# With desired SQL declaring the FK but no matching index, plan reports
+# drift: a suppressed DROP INDEX (since `--allow-drop=index` is not
+# set). Running apply with `--allow-drop=index` would fail with MySQL
+# Error 1553 because the FK still needs the index — by deliberate
+# design, myschema does not auto-skip this drop; the desired SQL is
+# expected to declare a covering PRIMARY KEY / UNIQUE / KEY explicitly.
 #
-# When this fixture starts failing — specifically, when the assertion
-# below stops matching because `disallowed_drops` is no longer
-# emitted — the diff-side suppression rule has been added; delete
-# this fixture and the limitation note in AGENTS.md.
+# This fixture is permanent: it pins the operational rule documented
+# in CAVEATS.md ("Foreign keys must declare a covering index"), so it
+# should keep matching as long as that rule stands. If the rule is
+# ever revisited, update CAVEATS.md and this fixture together.
 init: |
   CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
   CREATE TABLE posts (
