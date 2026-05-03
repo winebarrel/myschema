@@ -1,0 +1,32 @@
+# Table-level CHARACTER SET / COLLATE diff: changing the table default
+# emits a single `ALTER TABLE … DEFAULT CHARSET=…`.
+#
+# CAVEAT — converges in 2 applies for tables with string columns:
+# `ALTER TABLE … DEFAULT CHARSET` only changes the table default; the
+# pre-existing string columns keep their old charset frozen on each
+# COLUMN row in information_schema. The next plan picks that up as a
+# per-column drift and emits `MODIFY COLUMN <c> varchar(N)` (no
+# explicit charset) which inherits the new default. After the second
+# apply the catalog is fully aligned with desired.
+#
+# verify_no_drift is therefore false here — the fixture pins the
+# first-apply plan output, not full convergence. See CAVEATS.md
+# ("Changing DEFAULT CHARSET on a table with string columns").
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4;
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=latin1;
+
+applied: |
+  ALTER TABLE myschema_test.t DEFAULT CHARSET=latin1;
+
+verify_no_drift: false

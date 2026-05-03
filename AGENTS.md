@@ -191,6 +191,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   Running apply with `--allow-drop=index` will then error 1553 because
   the FK still needs the index. `dump` always emits the covering
   index, so `dump → apply` is unaffected.
+- Changing `DEFAULT CHARSET` on a table that has pre-existing string
+  columns converges in **two applies**, not one. The first apply just
+  changes the table default; the second emits one `MODIFY COLUMN`
+  per string column to inherit the new default. This is the honest
+  expression of MySQL's own behaviour (`ALTER TABLE … DEFAULT
+  CHARSET=…` does not rewrite per-column charset metadata). See
+  CAVEATS.md for the full mechanics and one-shot workarounds.
 
 **Not yet implemented (intentional v1 cuts):**
 

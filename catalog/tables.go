@@ -31,12 +31,20 @@ func (c *Catalog) Tables(ctx context.Context) (*orderedmap.Map[string, *model.Ta
 	}
 
 	out := orderedmap.New[string, *model.Table]()
+	// LEFT JOIN information_schema.COLLATIONS so we get the canonical
+	// CHARACTER_SET_NAME for the table's default collation. We could
+	// derive the charset by stripping at the first underscore, but that
+	// breaks for the "utf8" → "utf8mb3" alias and similar normalised
+	// names — going through COLLATIONS is the only authoritative source.
 	q := `
-SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE, TABLE_COLLATION, TABLE_COMMENT
-FROM   information_schema.TABLES
-WHERE  TABLE_SCHEMA = ?
-  AND  TABLE_TYPE = 'BASE TABLE'
-ORDER  BY TABLE_NAME`
+SELECT t.TABLE_SCHEMA, t.TABLE_NAME, t.ENGINE,
+       t.TABLE_COLLATION, c.CHARACTER_SET_NAME, t.TABLE_COMMENT
+FROM   information_schema.TABLES t
+LEFT JOIN information_schema.COLLATIONS c
+       ON c.COLLATION_NAME = t.TABLE_COLLATION
+WHERE  t.TABLE_SCHEMA = ?
+  AND  t.TABLE_TYPE = 'BASE TABLE'
+ORDER  BY t.TABLE_NAME`
 
 	rows, err := c.conn.QueryContext(ctx, q, c.database)
 	if err != nil {
@@ -46,18 +54,19 @@ ORDER  BY TABLE_NAME`
 
 	for rows.Next() {
 		var (
-			db, name string
-			engine   *string
-			coll     *string
-			comment  string
+			db, name      string
+			engine        *string
+			coll, charset *string
+			comment       string
 		)
-		if err := rows.Scan(&db, &name, &engine, &coll, &comment); err != nil {
+		if err := rows.Scan(&db, &name, &engine, &coll, &charset, &comment); err != nil {
 			return nil, fmt.Errorf("catalog: scan tables: %w", err)
 		}
 		t := &model.Table{
 			Database:    db,
 			Name:        name,
 			Engine:      engine,
+			Charset:     charset,
 			Collation:   coll,
 			Columns:     orderedmap.New[string, *model.Column](),
 			Constraints: orderedmap.New[string, *model.Constraint](),
@@ -72,6 +81,15 @@ ORDER  BY TABLE_NAME`
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("catalog: iterate tables: %w", err)
+	}
+
+	// Symmetric to the column-level case: when MySQL stores a table
+	// whose CREATE statement only spelled out DEFAULT CHARSET, it
+	// fills in TABLE_COLLATION with the charset's default. The desired
+	// side has Collation=nil in that case, so collapse the catalog
+	// value to match before any per-table comparison.
+	for _, t := range out.CollectValues() {
+		t.Collation = model.CollapseDefaultCollation(t.Charset, t.Collation)
 	}
 
 	for _, t := range out.CollectValues() {
@@ -114,12 +132,39 @@ ORDER  BY ORDINAL_POSITION`
 		if err := rows.Scan(&name, &colType, &isNullable, &defVal, &extra, &coll, &charset, &comment, &genExpr); err != nil {
 			return fmt.Errorf("catalog: scan columns for %s: %w", t.FQTN(), err)
 		}
+		// MySQL fills in two layers of defaults on every column that
+		// doesn't override them: (1) the table's DEFAULT CHARSET /
+		// COLLATE propagates down, and (2) when the user spells out
+		// only CHARACTER SET on a column, MySQL fills in COLLATION_NAME
+		// with that charset's server-side default collation. Both
+		// layers are invisible on the parser side (the desired SQL just
+		// doesn't say anything), so leaving the catalog values intact
+		// would make every column diff as "different".
+		//
+		// Normalise: a column-level CHARACTER SET that matches the table
+		// default collapses to nil; a column-level COLLATION that
+		// matches the table default OR the effective charset's default
+		// collation collapses to nil. Explicit per-column overrides
+		// survive.
+		normCharset := nullIfMatchesTableDefault(charset, t.Charset)
+		// Column collation goes through two collapses:
+		//   1. matches the table default → inherited, drop to nil
+		//   2. matches the effective charset's default collation
+		//      (column-level CHARACTER SET if present, otherwise the
+		//      table default) → MySQL implied it, drop to nil
+		// Explicit per-column overrides survive.
+		normColl := nullIfMatchesTableDefault(coll, t.Collation)
+		effectiveCharset := charset
+		if effectiveCharset == nil {
+			effectiveCharset = t.Charset
+		}
+		normColl = model.CollapseDefaultCollation(effectiveCharset, normColl)
 		col := &model.Column{
 			Name:         name,
 			TypeName:     strings.ToLower(colType),
 			NotNull:      strings.EqualFold(isNullable, "NO"),
-			Collation:    coll,
-			CharacterSet: charset,
+			Collation:    normColl,
+			CharacterSet: normCharset,
 		}
 		if defVal != nil {
 			d := normalizeColumnDefault(strings.ToLower(colType), *defVal)
@@ -456,6 +501,21 @@ func columnTypeAllowsEmptyStringDefault(typeName string) bool {
 		return true
 	}
 	return false
+}
+
+// nullIfMatchesTableDefault returns nil when the column-level value
+// matches the table-level default; otherwise it passes the column-level
+// pointer through unchanged. Either side being nil is treated as "no
+// default to match" — only an explicit catalog value that matches the
+// table default is collapsed.
+func nullIfMatchesTableDefault(colVal, tableDefault *string) *string {
+	if colVal == nil || tableDefault == nil {
+		return colVal
+	}
+	if *colVal == *tableDefault {
+		return nil
+	}
+	return colVal
 }
 
 func normalizeRefOpt(s string) string {

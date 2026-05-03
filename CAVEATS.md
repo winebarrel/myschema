@@ -64,3 +64,59 @@ FOREIGN KEY` — without also writing the matching covering index.
 against the live database first and use that output as your starting
 point — every implicit FK covering index will be materialised in the
 output, so the first `apply` is a no-op.
+
+## Changing `DEFAULT CHARSET` on a table with string columns
+
+**Behaviour.** `ALTER TABLE … DEFAULT CHARSET=…` only updates the
+table-level default; MySQL freezes each pre-existing string column's
+charset on the column row in `information_schema.COLUMNS` (the
+column rows do *not* change automatically when the table default
+changes). myschema's diff reflects this faithfully:
+
+```sql
+-- desired
+CREATE TABLE t (name VARCHAR(64)) DEFAULT CHARSET=latin1;
+-- catalog (built earlier with DEFAULT CHARSET=utf8mb4)
+```
+
+The first `myschema apply` emits one statement:
+
+```sql
+ALTER TABLE t DEFAULT CHARSET=latin1;
+```
+
+After that, the catalog still reports `name.CHARACTER_SET_NAME =
+utf8mb4`, so the next `plan` shows a follow-up:
+
+```sql
+ALTER TABLE t MODIFY COLUMN name varchar(64);
+```
+
+(no explicit charset → the column inherits the new table default,
+i.e. `latin1`). After the second apply the catalog and desired are
+fully aligned and `plan` reports no further changes.
+
+**Why this isn't auto-collapsed into a single apply.** Folding both
+ALTERs into one plan would require myschema to predict the post-apply
+catalog state instead of comparing against the actual one — the
+project's declarative model is "compare current to desired and emit
+the DDL". Two-stage convergence is the honest expression of that:
+each `plan` describes what a *single* apply will do.
+
+**`MYSCHEMA_VERIFY_NO_DRIFT` / `verify_no_drift: true` test fixtures.**
+These fail on the first apply when a string-column table changes
+charset, which is the same documented two-stage behaviour. Either run
+apply a second time or, in fixtures, set `verify_no_drift: false` and
+note the expected follow-up plan in a comment.
+
+**Workarounds for "make it converge in one apply"**:
+
+- Spell out the per-column `CHARACTER SET …` in desired SQL alongside
+  the `DEFAULT CHARSET` change. myschema's column-level diff then
+  emits the `MODIFY COLUMN` in the same plan.
+- Run `myschema apply` twice. The second is a no-op once the column
+  charsets have inherited the new default.
+- For full data-rewrite semantics (`ALTER TABLE … CONVERT TO CHARACTER
+  SET …`, which also rewrites stored bytes), run that DDL by hand
+  outside myschema. A future directive may wire it in.
+

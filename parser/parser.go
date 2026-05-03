@@ -259,6 +259,15 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 	for _, opt := range s.TableSpec.Options {
 		applyTableOption(t, opt)
 	}
+	// Drop a redundantly-spelled COLLATE: `CHARSET=utf8mb4
+	// COLLATE=utf8mb4_0900_ai_ci` and bare `CHARSET=utf8mb4` describe
+	// the same MySQL state. Normalising to nil here keeps the parser
+	// side aligned with the catalog side, which collapses the same
+	// case after reading information_schema.
+	t.Collation = model.CollapseDefaultCollation(t.Charset, t.Collation)
+	for _, c := range t.Columns.CollectValues() {
+		c.Collation = model.CollapseDefaultCollation(c.CharacterSet, c.Collation)
+	}
 
 	return t, nil
 }
@@ -267,6 +276,10 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 	c := &model.Column{
 		Name:     cd.Name.String(),
 		TypeName: columnTypeString(cd.Type),
+	}
+	if cd.Type.Charset.Name != "" {
+		cs := cd.Type.Charset.Name
+		c.CharacterSet = &cs
 	}
 	opts := cd.Type.Options
 	if opts == nil {

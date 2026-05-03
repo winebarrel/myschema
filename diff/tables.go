@@ -170,6 +170,17 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 		return nil, err
 	}
 
+	// Table-level CHARACTER SET / COLLATE diff. Emitted before the
+	// column pass so that any per-column charset rewrite below sees the
+	// new table default (catalog-side column normalisation collapses a
+	// column-level value that matches the table default to nil, so
+	// changing the table default is functionally equivalent to changing
+	// every "inherited" column). Engine and Comment are intentionally
+	// not diffed here yet — out of scope for the charset gap.
+	if charsetStmt := tableCharsetCollationSQL(fqtn, current, desired); charsetStmt != "" {
+		res.Stmts = append(res.Stmts, charsetStmt)
+	}
+
 	colStmts, colDisallowed := diffColumns(fqtn, current.Columns, desired.Columns, dc)
 	res.Stmts = append(res.Stmts, colStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, colDisallowed...)
@@ -270,12 +281,18 @@ func columnEqual(a, b *model.Column) bool {
 	if !ptrEq(a.Comment, b.Comment) {
 		return false
 	}
-	// CharacterSet / Collation are intentionally NOT compared here: the
-	// table's default charset/collation propagates to every column at the
-	// catalog level, so a column with no explicit `CHARACTER SET` in the
-	// user's SQL would always look "different" from the catalog's
-	// table-default-inherited value. Surfacing column-level charset diffs
-	// requires resolving that inheritance — see TODO.md.
+	// Column-level CHARACTER SET / COLLATE. catalog/loadColumns
+	// normalises a column-level value that matches the table default to
+	// nil, so an "inherited" column compares equal to a parser-side
+	// column that the user didn't spell out. Explicit per-column
+	// overrides (or true mismatches) survive normalisation and surface
+	// here as MODIFY COLUMN.
+	if !ptrEq(a.CharacterSet, b.CharacterSet) {
+		return false
+	}
+	if !ptrEq(a.Collation, b.Collation) {
+		return false
+	}
 	return true
 }
 
@@ -287,6 +304,42 @@ func ptrEq[T comparable](a, b *T) bool {
 		return false
 	}
 	return *a == *b
+}
+
+// tableCharsetCollationSQL returns an ALTER TABLE that updates the
+// table's default CHARACTER SET / COLLATE when the desired side
+// differs from the current side. Returns "" when both sides agree
+// OR when desired specifies neither (catalog will be carrying a
+// server-default charset; the user is opting in to "whatever MySQL
+// gives me", so don't fight it).
+//
+// The emitted DDL (`ALTER TABLE … DEFAULT CHARSET=… COLLATE=…`) only
+// changes the table default; it does NOT rewrite existing column data
+// (that would require `CONVERT TO CHARACTER SET …`, which rebuilds
+// the table — heavyweight, and rare enough to leave to a future
+// dedicated flag). Per-column drift is picked up by the column diff
+// below; the catalog-side normalisation of column charset/collation
+// against the new default keeps that comparison honest.
+func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string {
+	if desired.Charset == nil && desired.Collation == nil {
+		return ""
+	}
+	if ptrEq(current.Charset, desired.Charset) && ptrEq(current.Collation, desired.Collation) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("ALTER TABLE ")
+	b.WriteString(fqtn)
+	if desired.Charset != nil {
+		b.WriteString(" DEFAULT CHARSET=")
+		b.WriteString(*desired.Charset)
+	}
+	if desired.Collation != nil {
+		b.WriteString(" COLLATE=")
+		b.WriteString(*desired.Collation)
+	}
+	b.WriteString(";")
+	return b.String()
 }
 
 // addColumnSQL / modifyColumnSQL share model.ColumnDefSQL with CREATE TABLE

@@ -309,12 +309,31 @@ CREATE TABLE t (id INT, PRIMARY KEY (id))
 	assert.Equal(t, "InnoDB", *tbl.Engine)
 	require.NotNil(t, tbl.Charset)
 	assert.Equal(t, "utf8mb4", *tbl.Charset)
-	require.NotNil(t, tbl.Collation)
-	assert.Equal(t, "utf8mb4_0900_ai_ci", *tbl.Collation)
+	// utf8mb4_0900_ai_ci is the MySQL 8.0 default collation for utf8mb4,
+	// so it's collapsed to nil — the parser side mirrors what the
+	// catalog side does after reading information_schema, keeping
+	// `CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci` and bare
+	// `CHARSET=utf8mb4` describing the same MySQL state.
+	assert.Nil(t, tbl.Collation)
 	require.NotNil(t, tbl.AutoIncrement)
 	assert.Equal(t, uint64(100), *tbl.AutoIncrement)
 	require.NotNil(t, tbl.Comment)
 	assert.Equal(t, "hello world", *tbl.Comment)
+}
+
+func TestParseTableOptionsExplicitNonDefaultCollation(t *testing.T) {
+	// A non-default collation (utf8mb4_unicode_ci is not utf8mb4's
+	// default) survives parser-side normalisation.
+	sql := `
+CREATE TABLE t (id INT, PRIMARY KEY (id))
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	require.NotNil(t, tbl.Collation)
+	assert.Equal(t, "utf8mb4_unicode_ci", *tbl.Collation)
 }
 
 // TestParseDuplicateRejection ensures the parser surfaces obvious mistakes
