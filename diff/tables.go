@@ -358,9 +358,13 @@ func ptrEq[T comparable](a, b *T) bool {
 // CHARACTER SET <charset> [COLLATE <collation>]` instead, which
 // rewrites stored bytes and per-column charset metadata in the same
 // statement (one-shot convergence). A collation-only diff with the
-// directive set still falls through to the default `COLLATE=…`
-// shape — CONVERT TO would needlessly rebuild the table just to
-// flip metadata.
+// directive set still falls through to the default DEFAULT CHARSET
+// / COLLATE branch (no CONVERT) — and because the parser requires
+// the desired CREATE TABLE to declare `DEFAULT CHARSET` for the
+// directive to be valid, the fallback emits the full `DEFAULT
+// CHARSET=<charset> COLLATE=<collation>` shape, never a bare
+// `COLLATE=` only. CONVERT TO would needlessly rebuild the table
+// just to flip metadata.
 //
 // Per-column drift is picked up by the column diff below; the
 // catalog-side normalisation of column charset/collation against

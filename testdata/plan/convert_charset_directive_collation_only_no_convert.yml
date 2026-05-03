@@ -2,7 +2,10 @@
 # when the charset itself already matches and only the collation
 # differs. CONVERT TO would needlessly rebuild the table just to
 # flip the collation, so the diff falls back to the default
-# `ALTER TABLE … COLLATE=…` shape.
+# DEFAULT CHARSET / COLLATE branch. The directive requires the
+# desired CREATE TABLE to declare DEFAULT CHARSET, so the fallback
+# emits the full `DEFAULT CHARSET=<charset> COLLATE=<collation>`
+# shape (not a bare `COLLATE=` only).
 init: |
   CREATE TABLE t (
       id BIGINT NOT NULL,
