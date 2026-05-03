@@ -190,7 +190,14 @@ patterns:
 - *Suffix add* (catalog is a strict prefix of desired) →
   `ALTER TABLE … ADD PARTITION (PARTITION p VALUES …)`.
   Typical use: roll the next month's / year's partition out
-  ahead of writes.
+  ahead of writes. **Caveat:** if the live table already ends
+  in a catch-all (RANGE `VALUES LESS THAN MAXVALUE` or LIST
+  `VALUES IN (DEFAULT)`), inserting a new "real" partition in
+  front of that catch-all is a mid-list change, not a suffix
+  add — the new partition would land before the existing tail
+  and the diff fails with the REORGANIZE error. Drop the
+  catch-all first (or run REORGANIZE PARTITION by hand), then
+  add the new partition.
 - *Suffix drop* (desired is a strict prefix of catalog) →
   `ALTER TABLE … DROP PARTITION p1, p2`. Gated by
   `--allow-drop=partition`; without that flag the DROP lands

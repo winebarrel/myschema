@@ -1,0 +1,28 @@
+# Coverage gap: RANGE COLUMNS (multi-column tuple) — the other
+# RANGE fixtures cover the plain RANGE expression form. Same
+# diffPartitions path but a different ColList shape.
+init: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (10, 100),
+      PARTITION p1 VALUES LESS THAN (20, 200)
+  );
+
+desired: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (10, 100),
+      PARTITION p1 VALUES LESS THAN (20, 200),
+      PARTITION p2 VALUES LESS THAN (30, 300)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.shards ADD PARTITION (
+    partition p2 values less than (30, 300)
+  );
