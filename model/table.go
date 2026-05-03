@@ -38,14 +38,19 @@ type Table struct {
 	// because the catalog has no representation for "next apply should
 	// CONVERT TO".
 	ConvertCharset bool
-	// Partition is the canonical, vitess-formatted PARTITION BY clause
+	// Partition is the canonical PARTITION BY clause
 	// (e.g. `partition by range (year(dt)) (partition p0 values less
 	// than (2021))`). Both the parser and the catalog reader normalise
-	// through `sqlparser.String(*sqlparser.PartitionOption)` so the two
-	// sides compare bytewise. nil = the table is not partitioned. v1
-	// only supports round-trip + drift detection: any partition-side
-	// drift surfaces as a hard error rather than an emitted ALTER, so
-	// users manage partition changes by hand for now.
+	// through `parser.NormalizePartitionOption`, which sits on top of
+	// vitess's `sqlparser.String(*sqlparser.PartitionOption)` and adds
+	// (a) lower-casing of function-name and column-reference
+	// identifiers, (b) trimming of the leading newline vitess emits,
+	// and (c) stripping of the per-partition `engine <name>` option
+	// MySQL 8.0+ always includes in SHOW CREATE TABLE output. The two
+	// sides therefore compare bytewise. nil = the table is not
+	// partitioned. v1 only supports round-trip + drift detection: any
+	// partition-side drift surfaces as a hard error rather than an
+	// emitted ALTER, so users manage partition changes by hand for now.
 	Partition *string
 }
 

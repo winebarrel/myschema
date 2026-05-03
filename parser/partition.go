@@ -35,8 +35,8 @@ var partitionPerDefinitionEngineRe = regexp.MustCompile(`(?i)\s+engine\s+\w+(?P<
 //     'B')` case) are untouched because they're not column
 //     references or function names in the AST.
 //   - the leading newline is trimmed so the value can be
-//     concatenated onto a CREATE TABLE in CreateSQL without
-//     producing a blank line.
+//     concatenated onto a CREATE TABLE by `(*model.Table).SQL`
+//     without producing a blank line.
 //   - per-partition `engine <name>` options are stripped so a
 //     desired-side CREATE TABLE that doesn't spell out the per-
 //     partition engine still matches a catalog SHOW CREATE TABLE
@@ -65,33 +65,41 @@ func NormalizePartitionOption(po *sqlparser.PartitionOption) string {
 // uses. Returns ("", nil) when the table is not partitioned.
 //
 // MySQL wraps the partition clause in a versioned comment like
-// `/*!50100 PARTITION BY RANGE … */`. We strip the surrounding
-// `/*!50100 ` and trailing `*/`, glue the partition clause onto a
-// trivial `CREATE TABLE _ (id INT)` skeleton, and re-parse so vitess
-// does the format normalisation. Any partition syntax vitess can
-// emit, vitess can also parse — the same paths the desired-SQL
-// extractor goes through.
+// `/*!50100 PARTITION BY RANGE … */`. SHOW CREATE TABLE may also
+// include other versioned blocks (e.g. `/*!50100 TABLESPACE …`,
+// `/*!80016 ENCRYPTION='N' */`) earlier in the output, so this
+// function searches from the *end* — the partition block, when
+// present, is always the trailing one MySQL appends. Once the
+// last block is located the surrounding `/*!50100 ` and `*/` are
+// stripped, the result is glued onto a trivial
+// `CREATE TABLE _ (id INT)` skeleton, and vitess re-parses so
+// the format normalisation matches the desired-SQL path.
 func ExtractPartitionFromShowCreate(showCreate string) (string, error) {
-	idx := strings.Index(showCreate, "/*!")
+	idx := strings.LastIndex(showCreate, "/*!")
 	if idx < 0 {
 		// No versioned-comment block at all → not partitioned.
 		return "", nil
 	}
-	end := strings.LastIndex(showCreate, "*/")
-	if end < 0 || end < idx {
-		return "", fmt.Errorf("malformed SHOW CREATE TABLE output: opening /*! without closing */")
+	// `*/` after the last `/*!` closes that block. Search from `idx`
+	// onwards (not the global LastIndex) to keep this resilient to
+	// hypothetical `*/` inside a string literal earlier in the output
+	// — the trailing partition block is the only thing we care about.
+	end := strings.Index(showCreate[idx:], "*/")
+	if end < 0 {
+		return "", fmt.Errorf("malformed SHOW CREATE TABLE output: trailing /*! without closing */")
 	}
+	end += idx
 	body := showCreate[idx+3 : end]
 	// `/*!50100 PARTITION BY …` — drop the leading version digits so
 	// only the SQL keywords remain.
 	body = strings.TrimLeft(body, "0123456789")
 	body = strings.TrimSpace(body)
 	if !strings.HasPrefix(strings.ToUpper(body), "PARTITION BY") {
-		// Versioned block is for something else (e.g. /*!40101
-		// DEFAULT CHARSET=… */ inside the table options). The
-		// caller's SHOW CREATE includes the partition block as a
-		// trailing comment; if it's absent the table isn't
-		// partitioned.
+		// Trailing versioned block is for something else (rare on
+		// stock MySQL but possible — e.g. an extension that appends
+		// its own `/*!` comment). If the trailing block isn't a
+		// partition clause the table isn't partitioned by anything
+		// myschema models.
 		return "", nil
 	}
 	p, err := newParser()

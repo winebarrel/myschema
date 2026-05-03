@@ -175,8 +175,8 @@ WHERE  TABLE_SCHEMA = ?
 			// happen on stock MySQL, but be defensive.
 			continue
 		}
-		c := clause
-		t.Partition = &c
+		clauseCopy := clause
+		t.Partition = &clauseCopy
 	}
 	return nil
 }

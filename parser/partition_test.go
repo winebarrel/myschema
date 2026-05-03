@@ -69,6 +69,21 @@ func TestParseSQLPartitionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestExtractPartitionFromShowCreateWithPriorVersionedBlock(t *testing.T) {
+	// MySQL 8.0+ can emit other versioned-comment blocks before the
+	// partition one (e.g. /*!80016 ENCRYPTION='N' */ /*!50100
+	// PARTITION BY … */). The extractor must locate the *trailing*
+	// block, not the first /*! it finds — otherwise body would start
+	// with ENCRYPTION='N' and the function would silently return
+	// ("", nil), dropping the partition metadata.
+	clause, err := parser.ExtractPartitionFromShowCreate("CREATE TABLE `t` (\n  `id` int NOT NULL,\n  `dt` date NOT NULL,\n  PRIMARY KEY (`id`,`dt`)\n) ENGINE=InnoDB /*!80016 ENCRYPTION='N' */\n/*!50100 PARTITION BY RANGE (year(`dt`))\n(PARTITION p2020 VALUES LESS THAN (2021) ENGINE = InnoDB,\n PARTITION p2021 VALUES LESS THAN (2022) ENGINE = InnoDB) */")
+	require.NoError(t, err)
+	assert.Equal(t,
+		"partition by range (year(dt))\n(partition p2020 values less than (2021),\n partition p2021 values less than (2022))",
+		clause,
+	)
+}
+
 func TestExtractPartitionFromShowCreateNotPartitioned(t *testing.T) {
 	// SHOW CREATE TABLE for a non-partitioned table has no
 	// `/*!50100 PARTITION BY …` comment block. The extractor returns
