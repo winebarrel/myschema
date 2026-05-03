@@ -1,0 +1,31 @@
+# End-to-end pin for ADD PARTITION on plain `LIST (col)` (vs the
+# COLUMNS variant the other LIST apply fixture covers). Without
+# this only the planned SQL string is asserted, never MySQL's
+# acceptance of the non-COLUMNS form.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pA VALUES IN (1, 2, 3),
+      PARTITION pB VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pA VALUES IN (1, 2, 3),
+      PARTITION pB VALUES IN (4, 5),
+      PARTITION pC VALUES IN (6, 7)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts ADD PARTITION (
+    partition pC values in (6, 7)
+  );
+
+verify_no_drift: true
