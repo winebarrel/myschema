@@ -246,9 +246,12 @@ TRIGGER` can reference brand-new tables.
 
 **Limits (v1).**
 
-- Each directive guards exactly one statement (the next non-blank
-  line in the file). Multi-statement payloads aren't supported;
-  write a separate directive per statement.
+- Each directive guards exactly one statement — the next statement
+  in the file as cut by vitess's `SplitStatementToPieces`. The
+  payload may span multiple lines; the boundary is the next `;`,
+  not the next blank line. Multi-statement payloads aren't
+  supported (see the next bullet); write a separate directive per
+  statement.
 - The guarded payload must contain **no internal `;`**. Vitess's
   `SplitStatementToPieces` (which myschema runs over the desired
   file before extracting directives) cuts pieces at every `;`, so

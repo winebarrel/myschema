@@ -113,7 +113,7 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 			// string literals and comments, which would misrepresent
 			// what's actually in the desired SQL.
 			oneLine := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(eg.ExecuteSQL)
-			disallowed = append(disallowed, "-- skipped (myschema:execute check matched): "+oneLine)
+			disallowed = append(disallowed, "-- skipped: (myschema:execute check matched) "+oneLine)
 			continue
 		}
 		stmts = append(stmts, eg.ExecuteSQL)
