@@ -262,10 +262,18 @@ SQL-output.
   that isn't a safe `[a-zA-Z_][a-zA-Z0-9_$]*` token or that collides with
   a MySQL reserved word.
 - Type names from both the parser and the catalog are lowercased
-  before comparison so casing differences (`BIGINT` vs `bigint`) don't
-  trigger spurious diffs. Integer display widths
-  (`int(11)`) don't surface from either side on MySQL 8.0+, so no
-  explicit stripping is needed.
+  before comparison so casing differences (`BIGINT` vs `bigint`)
+  don't trigger spurious diffs. **Integer display widths are an
+  asymmetry**: MySQL 8.0+ strips them from
+  `information_schema.COLUMNS.COLUMN_TYPE` (so the catalog returns
+  `int` even if the column was declared `INT(11)`), but vitess
+  preserves whatever the user wrote (`int(11)`). myschema does not
+  normalise either side, so writing `INT(11)` in desired SQL
+  surfaces as drift on every plan; use the bare type name (`INT`,
+  `BIGINT`, …). The exception is `ZEROFILL`, which MySQL itself
+  keeps in `COLUMN_TYPE` (e.g. `int(5) unsigned zerofill`); writing
+  it on the desired side is round-trip-safe as long as the implicit
+  `UNSIGNED` is also written.
 - Foreign keys live in `Table.ForeignKeys`, not in `Constraints`. The diff
   orders FK drops first, then table / column / index changes, then FK
   adds — never combine these phases.
