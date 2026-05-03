@@ -338,10 +338,12 @@ func classifyInlineLine(line string) (inlineKind, string) {
 		return inlineKindIndex, name
 	}
 	if name, ok := backtickedNameAfterPrefix(line, []string{"CONSTRAINT"}); ok {
-		// Distinguish the four named-constraint shapes by what follows the
-		// backticked name: UNIQUE → index, CHECK → CHECK constraint,
-		// FOREIGN [KEY] → FK. Anything else falls through to "unknown" so
-		// the parser flags the directive as unsupported.
+		// Distinguish the rename-eligible named-constraint shapes by what
+		// follows the backticked name: UNIQUE → index, CHECK → CHECK
+		// constraint, FOREIGN [KEY] → FK. Anything else (including
+		// `CONSTRAINT name PRIMARY KEY (...)`, whose name MySQL ignores
+		// in favour of the fixed "PRIMARY") falls through to "unknown"
+		// so the parser flags the directive as unsupported.
 		rest := strings.TrimLeft(stripUntilAfterBacktickedName(line, "CONSTRAINT"), " \t")
 		upRest := strings.ToUpper(rest)
 		switch {
@@ -403,11 +405,14 @@ func classifyInlineLine(line string) (inlineKind, string) {
 			return inlineKindUnknown, ""
 		}
 		name := stripBackticks(tokens[1])
-		// Distinguish the four named-constraint shapes by what follows
-		// the name. UNIQUE [KEY|INDEX] is a unique *index* (renameable
-		// via ALTER TABLE … RENAME INDEX, lands in t.Indexes); CHECK
-		// and FOREIGN KEY have no in-place RENAME on MySQL — they're
-		// still threaded through as a typo-guard at plan time.
+		// Distinguish the rename-eligible named-constraint shapes by
+		// what follows the name. UNIQUE [KEY|INDEX] is a unique *index*
+		// (renameable via ALTER TABLE … RENAME INDEX, lands in
+		// t.Indexes); CHECK and FOREIGN KEY have no in-place RENAME on
+		// MySQL — they're still threaded through as a typo-guard at
+		// plan time. `CONSTRAINT name PRIMARY KEY (...)` is also legal
+		// MySQL syntax but the user-supplied name is ignored in favour
+		// of the fixed "PRIMARY", so it falls through to "unknown".
 		switch strings.ToUpper(tokens[2]) {
 		case "UNIQUE":
 			return inlineKindIndex, name
