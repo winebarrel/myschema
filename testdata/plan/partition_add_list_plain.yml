@@ -1,0 +1,29 @@
+# Coverage gap: plain `LIST (col)` (vs the COLUMNS variant the
+# other LIST fixture covers). diffPartitions handles both
+# through the same code path, but without a plain-LIST fixture
+# the path could regress unnoticed.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pA VALUES IN (1, 2, 3),
+      PARTITION pB VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pA VALUES IN (1, 2, 3),
+      PARTITION pB VALUES IN (4, 5),
+      PARTITION pC VALUES IN (6, 7)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.accts ADD PARTITION (
+    partition pC values in (6, 7)
+  );

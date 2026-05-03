@@ -99,6 +99,33 @@ func TestExtractPartitionFromShowCreateWithPriorVersionedBlock(t *testing.T) {
 	)
 }
 
+func TestNormalizePartitionOptionPreservesLiteralsContainingEngineKeyword(t *testing.T) {
+	// Regression: round 11 replaced a regex-based per-partition
+	// `engine <name>` strip with an AST-level `def.Options.Engine =
+	// nil` because the regex wasn't quote-aware — a LIST value like
+	// `'foo engine innodb'` would otherwise have its substring
+	// chewed away, breaking both ADD PARTITION output and
+	// partitionDefEqual comparisons. Pin the expected
+	// round-trip so the AST approach can't slip back.
+	res, err := parser.ParseSQL(`CREATE TABLE t (
+    id INT,
+    label VARCHAR(64) NOT NULL,
+    PRIMARY KEY (id, label)
+) PARTITION BY LIST COLUMNS(label) (
+    PARTITION pA VALUES IN ('foo engine innodb', 'bar')
+);`, "shop")
+	require.NoError(t, err)
+	tbl, ok := res.Tables.GetOk("shop.t")
+	require.True(t, ok)
+	require.NotNil(t, tbl.Partition)
+	// The literal must round-trip whole — `'foo engine innodb'`
+	// stays one quoted string. Under the previous regex-based
+	// strip the substring ` engine innodb` (followed by `,`) was
+	// chewed, leaving `'foo '` and `'` adjacent to the next
+	// value; this assertion fails on that path.
+	assert.Contains(t, *tbl.Partition, "'foo engine innodb'")
+}
+
 func TestExtractPartitionFromShowCreateNotPartitioned(t *testing.T) {
 	// SHOW CREATE TABLE for a non-partitioned table has no
 	// `/*!50100 PARTITION BY …` comment block. The extractor returns

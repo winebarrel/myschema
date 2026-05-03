@@ -71,7 +71,7 @@ type AlterOption struct {
 
 // DropPolicy decides which DROP categories the diff is allowed to emit.
 type DropPolicy struct {
-	AllowDrop []string `env:"MYSCHEMA_ALLOW_DROP" enum:"all,table,view,column,constraint,foreign_key,index" help:"Comma-separated drop categories to allow."`
+	AllowDrop []string `env:"MYSCHEMA_ALLOW_DROP" enum:"all,table,view,column,constraint,foreign_key,index,partition" help:"Comma-separated drop categories to allow."`
 }
 
 // IsDropAllowed reports whether kind is in the allow list. The "all" wildcard

@@ -1,0 +1,29 @@
+# Pin the multi-partition ADD PARTITION format (comma + newline
+# between definitions). Existing partition_add_range only adds
+# one trailing partition, so the loop responsible for joining
+# multiple definitions never ran past `i == 0`.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+plan: |
+  ALTER TABLE myschema_test.events ADD PARTITION (
+    partition p2021 values less than (2022),
+    partition p2022 values less than (2023)
+  );

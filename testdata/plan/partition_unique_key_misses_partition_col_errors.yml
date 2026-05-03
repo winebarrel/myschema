@@ -1,0 +1,26 @@
+# Pin the partitioned-table unique-key cover guard. MySQL
+# requires every unique key (including PRIMARY KEY) on a
+# partitioned table to include all columns in the partitioning
+# function. Catalog has PK (id, dt) + RANGE(YEAR(dt)); desired
+# strips dt from PK while keeping the partitioning. The diff
+# would otherwise emit `ADD PRIMARY KEY (id)` that MySQL
+# rejects — the guard surfaces the gap at plan time.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+error: "PRIMARY KEY is missing partition column(s)"

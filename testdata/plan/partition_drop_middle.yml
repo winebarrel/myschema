@@ -1,0 +1,33 @@
+# Middle DROP — interior partition removed while head and tail
+# stay in place. Catalog has [p2020, p2021, p2022], desired
+# keeps [p2020, p2022]. Order-preserving subset diff matches
+# p2020 then p2022 (skipping p2021), generating
+# `DROP PARTITION p2021`. The previous prefix-only logic raised
+# the REORGANIZE error on this shape; this fixture pins that
+# the broader subset diff handles middle removals correctly.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+allow_drop:
+  - partition
+
+plan: |
+  ALTER TABLE myschema_test.events DROP PARTITION p2021;

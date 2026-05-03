@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"vitess.io/vitess/go/vt/sqlparser"
+
 	"github.com/winebarrel/myschema/model"
+	"github.com/winebarrel/myschema/parser"
 	"github.com/winebarrel/orderedmap"
 )
 
@@ -162,6 +165,46 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 			}
 		}
 	}
+}
+
+// partitionRequiredColumns returns every column the `PARTITION BY`
+// clause references (lower-cased, deduplicated). MySQL requires
+// that on a partitioned table "every unique key (including the
+// PRIMARY KEY) must include all columns in the table's
+// partitioning function" — callers use this list to verify that
+// the desired-side PRIMARY KEY / UNIQUE INDEX cover all partition
+// columns before emitting ADD PRIMARY KEY / ADD UNIQUE INDEX
+// statements MySQL would reject.
+//
+// Returns ("", nil) when clause is empty (the caller should skip
+// the check on unpartitioned tables).
+func partitionRequiredColumns(clause string) ([]string, error) {
+	if clause == "" {
+		return nil, nil
+	}
+	po, err := parser.ParsePartitionClause(clause)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var cols []string
+	record := func(name string) {
+		l := strings.ToLower(name)
+		if !seen[l] {
+			seen[l] = true
+			cols = append(cols, l)
+		}
+	}
+	sqlparser.Rewrite(po, func(c *sqlparser.Cursor) bool {
+		if n, ok := c.Node().(*sqlparser.ColName); ok {
+			record(n.Name.String())
+		}
+		return true
+	}, nil)
+	for _, col := range po.ColList {
+		record(col.String())
+	}
+	return cols, nil
 }
 
 // rewriteConstraintColumnRefs rewrites column references inside PRIMARY KEY

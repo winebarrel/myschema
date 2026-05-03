@@ -1,0 +1,32 @@
+# Pin the MAXVALUE catch-all caveat documented in CAVEATS.md
+# "Suffix add". Catalog ends in `pmax VALUES LESS THAN MAXVALUE`;
+# desired tries to slot a real partition (p2022) in *before* the
+# catch-all. order-preserving subset diff sees that pmax appears
+# after both p2020 and p2022 in desired, so p2022 is an interior
+# insert (drops + adds both non-empty) and the diff falls through
+# to REORGANIZE error. Without this fixture, a regression to
+# "always emit ADD PARTITION at the tail" would generate an ALTER
+# MySQL would then reject (a new partition can't sit before
+# MAXVALUE).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: "REORGANIZE PARTITION generation is not yet implemented"

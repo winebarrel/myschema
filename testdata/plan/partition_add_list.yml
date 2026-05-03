@@ -1,0 +1,27 @@
+# Suffix add on a LIST partition: catalog has [pAB, pCD], desired
+# adds pEF at the end.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region_code CHAR(1) NOT NULL,
+      PRIMARY KEY (id, region_code)
+  ) PARTITION BY LIST COLUMNS(region_code) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D')
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region_code CHAR(1) NOT NULL,
+      PRIMARY KEY (id, region_code)
+  ) PARTITION BY LIST COLUMNS(region_code) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D'),
+      PARTITION pEF VALUES IN ('E', 'F')
+  );
+
+plan: |
+  ALTER TABLE myschema_test.accts ADD PARTITION (
+    partition pEF values in ('E', 'F')
+  );

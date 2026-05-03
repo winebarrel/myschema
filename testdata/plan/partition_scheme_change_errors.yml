@@ -1,0 +1,20 @@
+# Partition strategy / expression mismatch (RANGE → HASH).
+# Generating REMOVE PARTITIONING + new PARTITION BY is a future
+# PR; v1 errors out so the user runs the reshape by hand.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+error: "partition strategy / expression differs"

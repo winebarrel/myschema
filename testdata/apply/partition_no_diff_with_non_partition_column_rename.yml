@@ -1,0 +1,41 @@
+# End-to-end pin for the column-rename pass on a partitioned
+# table — the renamed column is *not* referenced by the
+# partition clause, so the table-diff pipeline emits a clean
+# RENAME COLUMN. verify_no_drift then confirms convergence in
+# one apply.
+#
+# Note: MySQL itself rejects renaming a column that the
+# `PARTITION BY` expression depends on (Error 3855:
+# "Column ... has a partitioning function dependency and cannot
+# be dropped or renamed"). For any *valid* desired CREATE TABLE
+# the diff catches that upstream as
+# "partition strategy / expression differs" — see
+# `partition_key_rename_implicit_scheme_change_*` plan
+# fixtures.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      old_payload TEXT,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_payload
+      payload TEXT,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events RENAME COLUMN old_payload TO payload;
+
+verify_no_drift: true

@@ -1,0 +1,31 @@
+# End-to-end pin for the new partition ADD path. Catalog has two
+# RANGE partitions; desired adds p2022 at the end. The diff
+# emits ALTER TABLE … ADD PARTITION (...), apply runs it, the
+# second plan reports no drift.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events ADD PARTITION (
+    partition p2022 values less than (2023)
+  );
+
+verify_no_drift: true

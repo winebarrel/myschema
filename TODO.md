@@ -24,14 +24,23 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Medium — object coverage
 
-- [ ] **Partitioning diff generation** —
-      `ADD/DROP/TRUNCATE/REORGANIZE PARTITION` from a
-      desired-vs-catalog partition diff. v1 ships round-trip +
-      drift-detect only (CAVEATS.md "Partitioning is round-trip
-      only"); RANGE/LIST need explicit reorganise grammar,
-      HASH/KEY need `COALESCE PARTITION` for shrinks. SUBPARTITION
-      is intentionally out of scope (CAVEATS.md notes both the
-      desired-side parse error and the catalog-side guard).
+- [ ] **Partition diff generation beyond RANGE/LIST suffix add
+      + order-preserving subset drop.** Suffix `ADD PARTITION`
+      and order-preserving subset `DROP PARTITION` (head /
+      middle / tail OK) for RANGE / LIST (including `RANGE
+      COLUMNS` / `LIST COLUMNS`) already ship
+      (`--allow-drop=partition` gates DROP); see
+      CAVEATS.md "Partitioning". Still on the floor: mid-list
+      value changes (`REORGANIZE PARTITION old1, old2 INTO
+      (...)`), HASH / KEY count operations (`COALESCE PARTITION
+      n` for shrinks, `ADD PARTITION PARTITIONS n` for grows),
+      strategy / expression changes (`REMOVE PARTITIONING` + new
+      `PARTITION BY`), and both directions of "one side has no
+      partitioning" — first-time `PARTITION BY` against an
+      unpartitioned table *and* `REMOVE PARTITIONING` against an
+      already-partitioned one. SUBPARTITION is intentionally out
+      of scope (CAVEATS.md notes both the desired-side parse
+      error and the catalog-side guard).
 
 ## Low — CLI ergonomics
 

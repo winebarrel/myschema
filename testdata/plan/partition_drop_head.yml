@@ -1,0 +1,31 @@
+# Head DROP — the retention workflow that drops the oldest
+# partition. Catalog has [p2020, p2021, p2022], desired keeps
+# only [p2021, p2022]. The order-preserving subset diff matches
+# p2021 / p2022 against the desired list and drops p2020 from
+# the head, generating a clean `DROP PARTITION p2020`.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+allow_drop:
+  - partition
+
+plan: |
+  ALTER TABLE myschema_test.events DROP PARTITION p2020;

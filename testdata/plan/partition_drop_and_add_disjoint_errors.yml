@@ -1,0 +1,36 @@
+# Pin that ANY both-ADD-and-DROP partition diff errors out,
+# even when the dropped and added partition names are disjoint.
+# A previous version emitted DROP + ADD as two ordinary
+# statements for "[p2020,p2021] -> [p2021,p2022]", but
+# disjoint-name detection can't tell a retention roll-forward
+# apart from a merge / split / replace shape (see
+# `[p0<10,p1<20,p2<30] -> [p0<10,q1<40]`, where q1 should
+# inherit p1 + p2's rows). The conservative answer is to error
+# out and let the user run the right ALTER by hand: REORGANIZE
+# PARTITION when data needs to move, or an explicit
+# DROP PARTITION + ADD PARTITION pair when they really do want
+# to discard rows.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+allow_drop:
+  - partition
+
+error: "REORGANIZE PARTITION generation is not yet implemented"

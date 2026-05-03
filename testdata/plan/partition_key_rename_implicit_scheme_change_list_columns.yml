@@ -1,0 +1,28 @@
+# Same shape against `PARTITION BY LIST COLUMNS(...)`. Like KEY,
+# COLUMNS partitioning carries the column refs in ColList; renaming
+# the partition column flips that ColList desired-side, the diff
+# raises "scheme/expression differs" upstream — which is the right
+# answer because MySQL would block the RENAME COLUMN at apply time
+# anyway (Error 3855).
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      old_region CHAR(1) NOT NULL,
+      PRIMARY KEY (id, old_region)
+  ) PARTITION BY LIST COLUMNS(old_region) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D')
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      -- myschema:renamed-from old_region
+      region CHAR(1) NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST COLUMNS(region) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D')
+  );
+
+error: "partition strategy / expression differs"

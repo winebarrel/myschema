@@ -1,0 +1,32 @@
+# End-to-end pin for middle-DROP. Catalog [p2020, p2021, p2022]
+# → desired [p2020, p2022]: the diff plans
+# `DROP PARTITION p2021`, MySQL accepts the discontinuous DROP,
+# verify_no_drift then confirms convergence in one apply.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+allow_drop:
+  - partition
+
+applied: |
+  ALTER TABLE myschema_test.events DROP PARTITION p2021;
+
+verify_no_drift: true

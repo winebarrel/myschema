@@ -157,8 +157,11 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   and partition clauses (round-trip via `SHOW CREATE TABLE`)
 - Diff: CREATE / DROP TABLE, ADD / MODIFY / DROP COLUMN,
   ADD / DROP CONSTRAINT (PK / CHECK), ADD / DROP INDEX, ADD / DROP FK,
-  CREATE OR REPLACE / DROP VIEW
-- `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index`
+  CREATE OR REPLACE / DROP VIEW, RANGE / LIST partition suffix
+  ADD PARTITION + order-preserving subset DROP PARTITION (head /
+  middle / tail), including the `RANGE COLUMNS` / `LIST COLUMNS`
+  variants — see CAVEATS.md "Partitioning" for the full scope
+- `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
 - `--alter-algorithm` / `--alter-lock` flags (and matching
   `MYSCHEMA_ALTER_ALGORITHM` / `MYSCHEMA_ALTER_LOCK` env vars) to
@@ -254,13 +257,23 @@ rather than declarative schema. Manage them out of band.)
   changes by hand outside myschema. See CAVEATS.md.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
-- Partition diff *generation* (ADD / DROP / TRUNCATE / REORGANIZE
-  PARTITION). v1 supports round-trip + drift detect only — both
-  sides normalise the partition clause through
-  `parser.NormalizePartitionOption`, `dump → plan` is no-op for
-  partitioned tables, but any partition difference between
-  catalog and desired errors out so users can run the change by
-  hand. See CAVEATS.md "Partitioning".
+- Partition diffs beyond the *RANGE / LIST suffix add* + *order-
+  preserving subset drop* cases. v1 generates
+  `ALTER TABLE … ADD PARTITION` / `DROP PARTITION` (gated by
+  `--allow-drop=partition`) when the desired side is a strict
+  suffix-extension *or* an order-preserving subset (head / middle /
+  tail drops all OK) of the catalog's RANGE / LIST partitions,
+  including the `RANGE COLUMNS` / `LIST COLUMNS` variants.
+  Anything else —
+  HASH/KEY count operations (COALESCE / ADD PARTITIONS),
+  mid-list value changes (REORGANIZE PARTITION), strategy /
+  expression changes (REMOVE PARTITIONING + new PARTITION BY),
+  *or* either direction of "one side has no partitioning"
+  (first-time `PARTITION BY` against an unpartitioned table,
+  *and* `REMOVE PARTITIONING` against an already-partitioned
+  one) — still errors out so the user runs the ALTER by hand.
+  See CAVEATS.md "Partitioning". `diff/partitions.go` is where
+  the supported cases live.
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after
   all CREATE TABLEs, so this works for that case; FKs that point at tables

@@ -1,0 +1,33 @@
+# Pin the global appendAlterHints rewrite as it applies to a
+# partition ADD PARTITION statement. The hint helper inserts
+# `, ALGORITHM=…, LOCK=…` just before the trailing `;` at the
+# string level, after all per-table buckets are merged. Without
+# this fixture, a future format tweak to the ADD PARTITION builder
+# (or to appendAlterHints) could quietly break the splice point
+# and ship invalid SQL to MySQL.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+alter_algorithm: INPLACE
+alter_lock: NONE
+
+plan: |
+  ALTER TABLE myschema_test.events ADD PARTITION (
+    partition p2021 values less than (2022)
+  ), ALGORITHM=INPLACE, LOCK=NONE;

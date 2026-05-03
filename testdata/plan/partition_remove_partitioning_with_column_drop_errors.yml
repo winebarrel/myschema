@@ -1,0 +1,29 @@
+# Pin the precedence between the partition-column-conflict guard
+# and the REMOVE PARTITIONING error. Catalog has a partitioned
+# table whose partition key is `dt`; desired both drops `dt`
+# AND removes partitioning entirely. Without the
+# `current.Partition != nil && desired.Partition != nil` guard
+# on the conflict check, the user would see "column drop
+# conflicts with the partition expression" and chase a
+# REMOVE PARTITIONING workaround that's actually what they
+# already wrote — but myschema doesn't generate that ALTER
+# yet. The right error here is the REMOVE PARTITIONING one.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+allow_drop:
+  - column
+
+error: "REMOVE PARTITIONING is not yet generated"
