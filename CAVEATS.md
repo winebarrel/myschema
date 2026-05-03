@@ -208,27 +208,27 @@ patterns:
   `--allow-drop=partition`; without that flag the DROP lands
   in the disallowed bucket as a `-- skipped:` line so the user
   sees what would have been removed.
-- *Retention roll-forward* — drops the oldest partition AND
-  appends a new one in the same plan, e.g. `[p2020, p2021]
-  → [p2021, p2022]`. The diff emits both `ALTER TABLE … ADD
-  PARTITION (PARTITION p2022 …)` and `ALTER TABLE … DROP
-  PARTITION p2020`; MySQL runs them in order. Allowed because
-  the dropped and added partition names are disjoint, so no
-  partition is being mutated in place — overlapping names
-  fall through to the REORGANIZE error below.
-
 **Diffs that still error (manage by hand).**
 
-- *Same partition appears in both ADD and DROP* — typically a
-  value change on an existing partition (or an interior insert
-  in front of a catch-all). The order-preserving subset diff
-  produces both an add list and a drop list whose name sets
-  intersect, which is the case `ALTER TABLE … REORGANIZE
-  PARTITION old INTO (...)` exists for. Generation isn't
-  implemented yet (the right grammar depends on data layout
-  and split points), and a plain DROP+ADD would lose the
-  partition's data. Fails with `REORGANIZE PARTITION
-  generation is not yet implemented`.
+- *Both ADD and DROP needed* — any diff where the
+  order-preserving subset walk produces both a non-empty
+  drops list and a non-empty adds list. Covers the obvious
+  REORGANIZE shapes (a value change on an existing partition,
+  an interior insert in front of a catch-all, a reorder), but
+  also "merge / split / replace" shapes that *look* harmless
+  because the dropped and added partition names are disjoint
+  — e.g. `[p0<10,p1<20,p2<30] → [p0<10,q1<40]`, where `q1`
+  semantically inherits the rows from `p1` and `p2` and a
+  plain DROP+ADD pair would silently lose them. Even
+  retention roll-forward (`[p2020,p2021] → [p2021,p2022]`)
+  falls here for the same reason: the diff layer can't tell
+  "discard the old data" from "merge it into the new
+  partition" by inspecting names alone. Fails with
+  `REORGANIZE PARTITION generation is not yet implemented`.
+  Workaround: run the right ALTER by hand — `REORGANIZE
+  PARTITION` when data needs to move, or an explicit
+  `DROP PARTITION` + `ADD PARTITION` pair when you really do
+  want to discard rows — then re-run plan.
 - *HASH / KEY count change* — different grammar (`COALESCE
   PARTITION n` for shrinks, `ADD PARTITION PARTITIONS n` for
   grows). Future PR. Fails with `HASH / KEY partition diffs

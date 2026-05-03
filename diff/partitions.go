@@ -99,37 +99,29 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// Order-preserving subset diff. Each current partition is either
 	// kept (matched by the next-unconsumed desired partition) or
 	// dropped; anything left in desired after the walk is a suffix
-	// add. The four observable outcomes:
+	// add. The three observable outcomes:
 	//   - both empty → no-op (catches the equality cases the raw-
 	//     string fast path missed because of formatting drift).
 	//   - pure ADD (drops empty, adds non-empty) → suffix grow.
 	//   - pure DROP (adds empty, drops non-empty) → any subset
 	//     dropped while preserving the remaining order; head /
 	//     tail / interior drops all generated as
-	//     `DROP PARTITION p1, p2, …`. Retention workflows that
-	//     trim the oldest partition fall here.
-	//   - drops AND adds both non-empty:
-	//     - if the drop and add name sets are disjoint
-	//       (no partition appears in both), it's a "drop the
-	//       oldest, append the newest" retention-roll-forward
-	//       sequence — emit DROP and ADD as two ordinary
-	//       statements, MySQL handles them in order.
-	//     - if the sets overlap (a partition name appears on
-	//       both sides → the value or shape changed), the user
-	//       needs `REORGANIZE PARTITION` to preserve data;
-	//       we error out so plan doesn't ship a destructive
-	//       DROP+ADD pair.
+	//     `DROP PARTITION p1, p2, …`.
+	//   - drops AND adds both non-empty → REORGANIZE territory.
+	//     A previous attempt to emit DROP + ADD whenever the name
+	//     sets were disjoint was unsafe: a "merge" shape like
+	//     `[p0<10,p1<20,p2<30] -> [p0<10,q1<40]` has disjoint
+	//     names yet semantically expects q1 to inherit the rows
+	//     from p1 and p2. Plain DROP + ADD would silently lose
+	//     that data. Disjoint-name detection isn't enough on its
+	//     own to tell merge / split / replace shapes apart from a
+	//     pure retention roll-forward, so we conservatively error
+	//     and let the user run REORGANIZE PARTITION (or the
+	//     individual DROP / ADD pair, when they really do want to
+	//     discard the partitioned data) by hand.
 	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
 	if len(drops) > 0 && len(adds) > 0 {
-		dropNames := make(map[string]bool, len(drops))
-		for _, d := range drops {
-			dropNames[strings.ToLower(d.Name.String())] = true
-		}
-		for _, a := range adds {
-			if dropNames[strings.ToLower(a.Name.String())] {
-				return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs both ADD and DROP on the same partition name (a value change, a reorder, or an interior insert into a catch-all); REORGANIZE PARTITION generation is not yet implemented, and a plain DROP + ADD would lose the partition's data. Run the ALTER by hand and let the next plan reconverge", fqtn)
-			}
-		}
+		return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs both ADD and DROP (a value change, an interior insert, a reorder, or a merge / split using new partition names); REORGANIZE PARTITION generation is not yet implemented, and a plain DROP + ADD pair would silently lose any rows that should have moved into the new partition. Run the ALTER by hand and let the next plan reconverge", fqtn)
 	}
 
 	var stmts, disallowed []string
