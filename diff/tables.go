@@ -238,19 +238,22 @@ func diffColumns(fqtn string, current, desired *orderedmap.Map[string, *model.Co
 	// order, so MySQL inserts them where the user expected instead of
 	// silently appending to the end of the row.
 	//
-	// `lastSeenInCurrent` is the previous column in desired-order that
-	// already exists in current — i.e. the anchor MySQL can position
-	// against. While scanning desired columns we update it whenever we
-	// hit a column that's already in current; for a brand-new column we
-	// snapshot it as the AFTER target. Empty anchor → FIRST.
-	var lastSeenInCurrent string
+	// `anchor` is the desired-column-order predecessor of whatever
+	// column we're looking at: it's updated for *every* desired column
+	// (existing or newly-added) so a run of consecutive new columns
+	// chains AFTER each preceding new column, instead of all stacking
+	// AFTER the last existing one (which would reverse their order on
+	// apply). For the very first desired column the anchor is empty,
+	// which becomes FIRST.
+	var anchor string
 	for name, dc2 := range desired.All() {
 		cc, ok := current.GetOk(name)
 		if !ok {
-			stmts = append(stmts, addColumnSQL(fqtn, dc2, lastSeenInCurrent))
+			stmts = append(stmts, addColumnSQL(fqtn, dc2, anchor))
+			anchor = name
 			continue
 		}
-		lastSeenInCurrent = name
+		anchor = name
 		if !columnEqual(cc, dc2) {
 			stmts = append(stmts, modifyColumnSQL(fqtn, dc2))
 		}
