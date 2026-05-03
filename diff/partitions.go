@@ -203,6 +203,20 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			// drift the formatter can resolve.
 			return nil, nil, nil
 		}
+		// RANGE-style boundary edits cascade. Each partition's
+		// `VALUES LESS THAN <x>` is also the implicit lower
+		// bound of the next partition, so changing slot i's
+		// upper bound silently changes slot i+1's lower bound.
+		// MySQL rejects a REORGANIZE whose new partitions don't
+		// cover exactly the same value range as the old ones,
+		// so we have to include the next partition too whenever
+		// the last changed slot isn't the very last in the
+		// list. LIST partitions don't have this cascade
+		// (`VALUES IN (…)` is a closed set per slot), so the
+		// extension only fires for RANGE / RANGE COLUMNS.
+		if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 {
+			last++
+		}
 		var b strings.Builder
 		b.WriteString("ALTER TABLE ")
 		b.WriteString(fqtn)
@@ -390,5 +404,14 @@ func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
 	if !strings.EqualFold(a.Name.String(), b.Name.String()) {
 		return false
 	}
+	// FormatPartitionDefinition includes the partition name in
+	// its output, so even after the EqualFold name check above
+	// `pAB` and `PAB` would format to different strings and
+	// trip a spurious REORGANIZE. Temporarily make b's name
+	// match a's so the formatter compares only the bodies; the
+	// AST is restored before this function returns.
+	savedName := b.Name
+	b.Name = a.Name
+	defer func() { b.Name = savedName }()
 	return parser.FormatPartitionDefinition(a) == parser.FormatPartitionDefinition(b)
 }

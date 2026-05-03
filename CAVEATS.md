@@ -248,7 +248,7 @@ patterns:
   …)`. The most common shape is a `VALUES LESS THAN` /
   `VALUES IN` boundary tweak (e.g. `p2020 LESS THAN (2021)` →
   `p2020 LESS THAN (2025)`), but COMMENT / MAX_ROWS / TABLESPACE
-  /and other per-partition options that round-trip through
+  and other per-partition options that round-trip through
   vitess's PartitionDefinition formatter are picked up here
   too — anything that makes the formatted definitions
   byte-different counts. The emitted REORGANIZE covers the
