@@ -268,10 +268,24 @@ patterns:
   MySQL requires every unique key on a partitioned table to
   include all columns in the partitioning function. If
   desired's PRIMARY KEY or UNIQUE INDEX omits a column the
-  catalog's `PARTITION BY` clause references, the diff fails
-  at plan time with `… is missing partition column(s) [...]`
-  instead of emitting an `ADD PRIMARY KEY` / `ADD UNIQUE
-  INDEX` MySQL would reject. Workaround: include the
+  desired-side `PARTITION BY` clause references, the diff
+  fails at plan time with `… is missing partition column(s)
+  [...]` instead of emitting an `ADD PRIMARY KEY` / `ADD
+  UNIQUE INDEX` MySQL would reject. The check runs on both
+  the diff path (already-existing tables) and the create-
+  table path (brand-new partitioned tables) — apply doesn't
+  get a chance to half-create.
+
+  **`--allow-drop` does not bypass this.** Even if you omit
+  `--allow-drop=column` while removing a partition column
+  from desired (so the DROP COLUMN itself lands in the
+  disallowed bucket), the resulting desired-side PRIMARY KEY
+  no longer covers the partition expression and the diff
+  fails here before any of the surrounding ALTERs are
+  emitted. That's intentional: a partial apply (PK shrunk,
+  partition column still present in MySQL but uncovered)
+  would leave the table in a state MySQL itself wouldn't
+  accept on the next ALTER. Workaround: include the
   partition columns in the unique key, or drop partitioning
   first (REMOVE PARTITIONING by hand) and let the next plan
   reconverge.
