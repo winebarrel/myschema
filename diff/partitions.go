@@ -91,29 +91,33 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	curDefs := curPO.Definitions
 	desDefs := desPO.Definitions
 
-	// Find the longest common prefix by name+value identity. Anything
-	// past that prefix is either a suffix add (desired only) or a
-	// suffix drop (current only); a mid-list mismatch errors.
-	prefix := commonPartitionPrefix(curDefs, desDefs)
-	curTail := curDefs[prefix:]
-	desTail := desDefs[prefix:]
-
-	// The two tails must be on opposite sides for a clean ADD or
-	// DROP. If both have content the change isn't a pure suffix
-	// operation — would need REORGANIZE PARTITION (or DROP+ADD
-	// across the boundary, which would also drop data).
-	if len(curTail) > 0 && len(desTail) > 0 {
-		return nil, nil, fmt.Errorf("table %s: partition definitions differ in the middle of the list (not a pure suffix add/drop); REORGANIZE PARTITION generation is not yet implemented. Run the ALTER by hand and let the next plan reconverge", fqtn)
+	// Order-preserving subset diff. Each current partition is either
+	// kept (matched by the next-unconsumed desired partition) or
+	// dropped; anything left in desired after the walk is a suffix
+	// add. This covers the three usable shapes:
+	//   - pure ADD (drops empty, adds non-empty) → suffix grow.
+	//   - pure DROP (adds empty, drops non-empty) → any subset
+	//     dropped while preserving the remaining order, so head /
+	//     tail / interior drops are all generated as
+	//     `DROP PARTITION p1, p2, …`. Retention workflows that
+	//     trim the oldest partition fall here.
+	//   - both empty → no-op (catches the equality cases the raw-
+	//     string fast path missed because of formatting drift).
+	// Anything else (drops AND adds non-empty) is a mid-list
+	// reshape — REORGANIZE territory, errors out.
+	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
+	if len(drops) > 0 && len(adds) > 0 {
+		return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs both ADD and DROP (a value change, a reorder, or an interior insert); REORGANIZE PARTITION generation is not yet implemented. Run the ALTER by hand and let the next plan reconverge", fqtn)
 	}
 
 	var stmts, disallowed []string
 
-	if len(desTail) > 0 {
+	if len(adds) > 0 {
 		var b strings.Builder
 		b.WriteString("ALTER TABLE ")
 		b.WriteString(fqtn)
 		b.WriteString(" ADD PARTITION (")
-		for i, d := range desTail {
+		for i, d := range adds {
 			if i > 0 {
 				b.WriteString(",\n  ")
 			} else {
@@ -125,9 +129,9 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 		stmts = append(stmts, b.String())
 	}
 
-	if len(curTail) > 0 {
-		names := make([]string, 0, len(curTail))
-		for _, d := range curTail {
+	if len(drops) > 0 {
+		names := make([]string, 0, len(drops))
+		for _, d := range drops {
 			// Quote through model.Ident so a partition named with a
 			// MySQL reserved word or non-safe identifier round-trips
 			// correctly. ADD PARTITION already inherits quoting via
@@ -202,22 +206,30 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
-// commonPartitionPrefix returns how many leading partition definitions
-// are byte-identical (name + serialised body) between the two slices.
-// Both sides have already been through NormalizePartitionOption /
-// ParsePartitionClause, so per-partition `engine` options have been
-// stripped and identifier casing matches.
-func commonPartitionPrefix(a, b []*sqlparser.PartitionDefinition) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
-		if !partitionDefEqual(a[i], b[i]) {
-			return i
+// partitionByNameOrderPreserving walks `cur` once, matching each
+// definition against the next-unconsumed entry of `des`. Matched
+// pairs are kept; unmatched current entries are added to `drops`;
+// any leftover desired entries become `adds`. Order is preserved
+// on both sides — the caller treats a "drops + adds both
+// non-empty" outcome as an interior reshape (REORGANIZE).
+//
+// `partitionDefEqual` already accounts for the
+// NormalizePartitionOption / ParsePartitionClause round-trip
+// (engine strip, identifier lower-casing, etc.) so name+value
+// equality here is bytewise on the canonical form.
+func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (drops, adds []*sqlparser.PartitionDefinition) {
+	di := 0
+	for _, c := range cur {
+		if di < len(des) && partitionDefEqual(c, des[di]) {
+			di++
+			continue
 		}
+		drops = append(drops, c)
 	}
-	return n
+	if di < len(des) {
+		adds = append(adds, des[di:]...)
+	}
+	return drops, adds
 }
 
 func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {

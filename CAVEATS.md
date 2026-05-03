@@ -173,7 +173,7 @@ note the expected follow-up plan in a comment.
 - Run `myschema apply` twice. The second is a no-op once the column
   charsets have inherited the new default.
 
-## Partitioning: scoped to RANGE / LIST (incl. COLUMNS) suffix add / drop in v1
+## Partitioning: scoped to RANGE / LIST (incl. COLUMNS) suffix add + subset drop in v1
 
 **Behaviour.** myschema reads partitioned tables (RANGE / LIST /
 HASH / KEY / RANGE COLUMNS / LIST COLUMNS) round-trip — `dump`
@@ -198,19 +198,25 @@ patterns:
   and the diff fails with the REORGANIZE error. Drop the
   catch-all first (or run REORGANIZE PARTITION by hand), then
   add the new partition.
-- *Suffix drop* (desired is a strict prefix of catalog) →
-  `ALTER TABLE … DROP PARTITION p1, p2`. Gated by
+- *Subset drop* — desired's partition list is `current`'s
+  partition list with one or more entries removed (same order,
+  same values for the entries that remain). Generates
+  `ALTER TABLE … DROP PARTITION p1, p2`. Head, middle, and
+  tail drops are all supported as long as the surviving order
+  is preserved — the typical retention workflow ("trim the
+  oldest partition") falls here. Gated by
   `--allow-drop=partition`; without that flag the DROP lands
   in the disallowed bucket as a `-- skipped:` line so the user
   sees what would have been removed.
 
 **Diffs that still error (manage by hand).**
 
-- *Mid-list mismatch* — a partition value or name changes
-  before the end of the list. MySQL has no in-place "edit
-  partition values"; the safe fix is `ALTER TABLE …
-  REORGANIZE PARTITION old1, old2 INTO (...)` whose
-  generation isn't implemented yet (the right grammar
+- *Both ADD and DROP needed* — a partition value changes, an
+  interior partition is inserted, or the order of partitions
+  changes. The order-preserving subset diff produces both an
+  add list and a drop list, which is the case `ALTER TABLE …
+  REORGANIZE PARTITION old1, old2 INTO (...)` exists for.
+  Generation isn't implemented yet (the right grammar
   depends on data layout and split points). Fails with
   `REORGANIZE PARTITION generation is not yet implemented`.
 - *HASH / KEY count change* — different grammar (`COALESCE

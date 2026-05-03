@@ -167,53 +167,57 @@ func rewriteIndexColumnRefs(indexes *orderedmap.Map[string, *model.Index], renam
 	}
 }
 
-// rewritePartitionColumnRefs rewrites column references inside the table's
-// `PARTITION BY …` clause after a column rename, so a desired-side
-// `-- myschema:renamed-from` on a partition key column doesn't
-// surface as a spurious "partition strategy / expression differs"
-// error from diffPartitions.
-//
-// We re-parse current.Partition into its `*sqlparser.PartitionOption`,
-// walk the AST replacing ColName.Name and ColList entries that match
-// the rename map's old → new mapping, then re-format through the same
-// NormalizePartitionOption path the parser / catalog use so the
-// stored canonical string stays in lockstep. If re-parse fails we
-// leave Partition untouched — the upstream diff will then surface
-// whatever it finds.
+// partitionColumnRenameConflicts reports the renamed-from sources
+// (old column names) that the table's `PARTITION BY …` clause
+// references. MySQL rejects `RENAME COLUMN` on any column the
+// partition expression depends on with `Error 3855: Column ...
+// has a partitioning function dependency and cannot be dropped
+// or renamed`, so myschema must not generate a plan that requires
+// such a rename — the apply would always fail. The diff layer
+// surfaces this as a parse-time error before any DDL is emitted.
 //
 // The rename map is keyed old → new. Identifier comparison is
-// case-insensitive (matches `partitionHeaderEqual`'s ColList
+// case-insensitive (matches partitionHeaderEqual's ColList
 // normalisation): MySQL column names are case-insensitive, the
 // parser / catalog round-trips have already lower-cased what they
-// store, and the rename map keys come from desired-side directives
-// where the user's casing might differ from the catalog's.
-func rewritePartitionColumnRefs(p **string, renames map[string]string) {
-	if p == nil || *p == nil || **p == "" || len(renames) == 0 {
-		return
+// store, and the rename map keys come from desired-side
+// directives where the user's casing might differ from the
+// catalog's.
+//
+// Returns the original (catalog-cased) old names for any
+// conflicts found. Empty result + nil error means rename is safe
+// to plan; non-empty result is the caller's signal to surface a
+// "remove the rename, fix the partition expression first" error.
+func partitionColumnRenameConflicts(clause string, renames map[string]string) ([]string, error) {
+	if clause == "" || len(renames) == 0 {
+		return nil, nil
 	}
-	po, err := parser.ParsePartitionClause(**p)
+	po, err := parser.ParsePartitionClause(clause)
 	if err != nil {
-		return
+		return nil, err
 	}
-	lowered := make(map[string]string, len(renames))
-	for old, newName := range renames {
-		lowered[strings.ToLower(old)] = newName
+	loweredToOriginal := make(map[string]string, len(renames))
+	for old := range renames {
+		loweredToOriginal[strings.ToLower(old)] = old
+	}
+	seen := make(map[string]bool)
+	var hits []string
+	record := func(name string) {
+		if orig, ok := loweredToOriginal[strings.ToLower(name)]; ok && !seen[orig] {
+			seen[orig] = true
+			hits = append(hits, orig)
+		}
 	}
 	sqlparser.Rewrite(po, func(c *sqlparser.Cursor) bool {
 		if n, ok := c.Node().(*sqlparser.ColName); ok {
-			if newName, hit := lowered[strings.ToLower(n.Name.String())]; hit {
-				n.Name = sqlparser.NewIdentifierCI(newName)
-			}
+			record(n.Name.String())
 		}
 		return true
 	}, nil)
-	for i, col := range po.ColList {
-		if newName, hit := lowered[strings.ToLower(col.String())]; hit {
-			po.ColList[i] = sqlparser.NewIdentifierCI(newName)
-		}
+	for _, col := range po.ColList {
+		record(col.String())
 	}
-	rewritten := parser.NormalizePartitionOption(po)
-	*p = &rewritten
+	return hits, nil
 }
 
 // rewriteConstraintColumnRefs rewrites column references inside PRIMARY KEY

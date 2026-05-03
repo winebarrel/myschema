@@ -24,10 +24,12 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Medium — object coverage
 
-- [ ] **Partition diff generation beyond RANGE/LIST suffix
-      add/drop.** Suffix `ADD PARTITION` / `DROP PARTITION` for
-      RANGE / LIST (including `RANGE COLUMNS` / `LIST COLUMNS`)
-      already ship (`--allow-drop=partition` gates DROP); see
+- [ ] **Partition diff generation beyond RANGE/LIST suffix add
+      + order-preserving subset drop.** Suffix `ADD PARTITION`
+      and order-preserving subset `DROP PARTITION` (head /
+      middle / tail OK) for RANGE / LIST (including `RANGE
+      COLUMNS` / `LIST COLUMNS`) already ship
+      (`--allow-drop=partition` gates DROP); see
       CAVEATS.md "Partitioning". Still on the floor: mid-list
       value changes (`REORGANIZE PARTITION old1, old2 INTO
       (...)`), HASH / KEY count operations (`COALESCE PARTITION

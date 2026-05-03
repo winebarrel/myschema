@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/winebarrel/myschema/model"
@@ -151,7 +152,15 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	rewriteIndexColumnRefs(current.Indexes, renames)
 	rewriteFKColumnRefs(current.ForeignKeys, current.Database, current.Name, renames)
 	rewriteConstraintColumnRefs(current.Constraints, current.Indexes, renames)
-	rewritePartitionColumnRefs(&current.Partition, renames)
+	if current.Partition != nil {
+		conflicts, err := partitionColumnRenameConflicts(*current.Partition, renames)
+		if err != nil {
+			return nil, fmt.Errorf("table %s: re-parse partition clause: %w", fqtn, err)
+		}
+		if len(conflicts) > 0 {
+			return nil, fmt.Errorf("table %s: column rename(s) %v conflict with the partition expression — MySQL rejects RENAME COLUMN on a column referenced by PARTITION BY (Error 3855: \"Column ... has a partitioning function dependency and cannot be dropped or renamed\"). Drop the partition function dependency first (REMOVE PARTITIONING + new PARTITION BY against the renamed column, by hand) and let the next plan reconverge", fqtn, conflicts)
+		}
+	}
 
 	idxRenameStmts, err := applyIndexRenames(fqtn, current.Indexes, desired.Indexes)
 	if err != nil {

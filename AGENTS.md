@@ -158,9 +158,9 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
 - Diff: CREATE / DROP TABLE, ADD / MODIFY / DROP COLUMN,
   ADD / DROP CONSTRAINT (PK / CHECK), ADD / DROP INDEX, ADD / DROP FK,
   CREATE OR REPLACE / DROP VIEW, RANGE / LIST partition suffix
-  ADD / DROP PARTITION (including the `RANGE COLUMNS` /
-  `LIST COLUMNS` variants — see CAVEATS.md "Partitioning" for
-  the full scope)
+  ADD PARTITION + order-preserving subset DROP PARTITION (head /
+  middle / tail), including the `RANGE COLUMNS` / `LIST COLUMNS`
+  variants — see CAVEATS.md "Partitioning" for the full scope
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
 - `--alter-algorithm` / `--alter-lock` flags (and matching
@@ -257,12 +257,14 @@ rather than declarative schema. Manage them out of band.)
   changes by hand outside myschema. See CAVEATS.md.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
-- Partition diffs beyond the *RANGE / LIST suffix add/drop*
-  cases. v1 generates `ALTER TABLE … ADD PARTITION` /
-  `DROP PARTITION` (gated by `--allow-drop=partition`) when the
-  desired side is a strict suffix-extension or suffix-trim of
-  the catalog's RANGE / LIST partitions, including the
-  `RANGE COLUMNS` / `LIST COLUMNS` variants. Anything else —
+- Partition diffs beyond the *RANGE / LIST suffix add* + *order-
+  preserving subset drop* cases. v1 generates
+  `ALTER TABLE … ADD PARTITION` / `DROP PARTITION` (gated by
+  `--allow-drop=partition`) when the desired side is a strict
+  suffix-extension *or* an order-preserving subset (head / middle /
+  tail drops all OK) of the catalog's RANGE / LIST partitions,
+  including the `RANGE COLUMNS` / `LIST COLUMNS` variants.
+  Anything else —
   HASH/KEY count operations (COALESCE / ADD PARTITIONS),
   mid-list value changes (REORGANIZE PARTITION), strategy /
   expression changes (REMOVE PARTITIONING + new PARTITION BY),
