@@ -89,8 +89,9 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 	// directive can refer to brand-new tables. For each block:
 	//   - run the check SQL against the live database
 	//   - 1+ rows → consider already-applied, push the SQL into
-	//     disallowed as a `-- skipped (execute check matched)`
-	//     comment so users still see what was suppressed
+	//     disallowed as a `-- skipped: (myschema:execute check
+	//     matched) <sql>` comment so users still see what was
+	//     suppressed
 	//   - 0 rows → push the execute SQL into stmts so plan prints it
 	//     and apply runs it
 	// The check itself is a SELECT so plan / apply both poll it; this

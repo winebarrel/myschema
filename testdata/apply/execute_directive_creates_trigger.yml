@@ -3,10 +3,14 @@
 # check-sql is run against the live database; zero rows back means
 # "not applied yet, run the guarded SQL", non-zero means skip.
 #
-# Idempotent on second apply: this fixture's verify_no_drift: true
-# is only honoured because the check SQL hits the now-existing
-# trigger and the diff layer slots the execute group into the
-# `disallowed` (skipped) bucket on subsequent plans.
+# Idempotent on second apply: verify_no_drift checks that the
+# next plan's *executable* SQL (`PlanResult.SQL`) is empty — it
+# doesn't look at `DisallowedDrops`. After the first apply the
+# trigger exists, the check SELECT returns a row, and the diff
+# layer routes the guarded statement into the `disallowed`
+# (skipped) bucket as a `-- skipped: (myschema:execute check
+# matched) …` line. Executable SQL stays empty, so the drift
+# assertion passes.
 init: |
   CREATE TABLE t (
       id BIGINT NOT NULL,

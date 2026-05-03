@@ -125,7 +125,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			// `--` / `#` / `/* … */`. Without the comment-aware
 			// check the latter slips through as a non-empty payload
 			// and MySQL returns "Query was empty" at apply time.
-			if executeSQL == "" || PayloadHasNoSQL(executeSQL) {
+			if executeSQL == "" || payloadHasNoSQL(executeSQL) {
 				return nil, fmt.Errorf("-- myschema:execute %q: missing the SQL statement that the directive guards (write the SQL on the line(s) after the directive)", checkSQL)
 			}
 			// SplitStatementToPieces strips the trailing `;`. Re-add

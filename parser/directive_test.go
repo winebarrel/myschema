@@ -778,7 +778,7 @@ func TestParseSQLRejectsExecuteDirectiveWithCommentOnlyBody(t *testing.T) {
 	// `executeSQL == ""` after TrimSpace doesn't catch a payload
 	// whose only content is `--` / `#` / `/* … */` comments — those
 	// are non-empty strings but contain no SQL. MySQL would surface
-	// "Query was empty" at apply time; PayloadHasNoSQL catches it
+	// "Query was empty" at apply time; payloadHasNoSQL catches it
 	// at parse time instead.
 	cases := map[string]string{
 		"line comment only":     "-- myschema:execute SELECT 1\n-- just a comment\n",
