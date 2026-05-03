@@ -248,6 +248,40 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 	return oldName, nil
 }
 
+// PayloadHasNoSQL reports whether s is empty or contains only blank
+// lines, `--` line comments, `#` line comments, and `/* … */` block
+// comments (single- and multi-line). Used by ParseSQL to catch the
+// case where a `-- myschema:execute <check>` directive is followed
+// only by comments or blank lines — without this guard, the
+// resulting ExecuteGroup would carry a comment-only payload and
+// MySQL would return "Query was empty" at apply time.
+func PayloadHasNoSQL(s string) bool {
+	var inBlock bool
+	for line := range strings.SplitSeq(s, "\n") {
+		if inBlock {
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
+			}
+			inBlock = false
+			line = line[idx+2:]
+		}
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
+		if trim == "" {
+			continue
+		}
+		if strings.HasPrefix(trim, "--") || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // reduceLeadingBlocks repeatedly strips a leading `/* … */` block from
 // trim and returns the remainder. opened is true when a block opens but
 // doesn't close on the same line — the caller should set its multi-line

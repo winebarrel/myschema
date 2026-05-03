@@ -774,6 +774,29 @@ func TestParseSQLAcceptsExecuteWithUnionAndWithCheck(t *testing.T) {
 	}
 }
 
+func TestParseSQLRejectsExecuteDirectiveWithCommentOnlyBody(t *testing.T) {
+	// `executeSQL == ""` after TrimSpace doesn't catch a payload
+	// whose only content is `--` / `#` / `/* … */` comments — those
+	// are non-empty strings but contain no SQL. MySQL would surface
+	// "Query was empty" at apply time; PayloadHasNoSQL catches it
+	// at parse time instead.
+	cases := map[string]string{
+		"line comment only":     "-- myschema:execute SELECT 1\n-- just a comment\n",
+		"hash comment only":     "-- myschema:execute SELECT 1\n# also just a comment\n",
+		"block comment only":    "-- myschema:execute SELECT 1\n/* opaque header */\n",
+		"multi-line block only": "-- myschema:execute SELECT 1\n/*\n  spans\n  lines\n*/\n",
+		"only blanks and tabs":  "-- myschema:execute SELECT 1\n   \n\t\n",
+	}
+	for name, sql := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseSQL(sql, "shop")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "myschema:execute")
+			assert.Contains(t, err.Error(), "missing the SQL")
+		})
+	}
+}
+
 func TestParseSQLExecutePayloadWithInternalSemicolonsFails(t *testing.T) {
 	// CAVEATS pin: vitess's SplitStatementToPieces cuts on every `;`,
 	// so a `CREATE TRIGGER … BEGIN …; …; END;` body splits into

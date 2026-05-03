@@ -273,7 +273,12 @@ TRIGGER` can reference brand-new tables.
   verbatim to `db.Query` and myschema only inspects whether the
   result set has at least one row: write a SELECT that returns a
   row when the guarded statement is "already applied" and zero
-  rows otherwise.
+  rows otherwise. Prefer shapes that bound the result set to one
+  row (`LIMIT 1`, `SELECT EXISTS(…)`, `SELECT 1 FROM … WHERE …
+  LIMIT 1`) — myschema only calls `rows.Next()` once, but
+  `rows.Close()` still drains any remaining rows so the connection
+  can be reused, which makes a check that scans a large table
+  unexpectedly expensive on every plan / apply.
 - The guarded statement is held as raw SQL — myschema doesn't
   parse it (vitess can't parse `CREATE TRIGGER` and friends), so
   a syntax error surfaces only at apply time when MySQL rejects

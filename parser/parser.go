@@ -120,7 +120,12 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				return nil, fmt.Errorf("-- myschema:execute %q: %w", checkSQL, cErr)
 			}
 			executeSQL = strings.TrimSpace(executeSQL)
-			if executeSQL == "" {
+			// "Empty" here covers two shapes: a literally empty
+			// remainder, and a remainder whose lines are all blank /
+			// `--` / `#` / `/* … */`. Without the comment-aware
+			// check the latter slips through as a non-empty payload
+			// and MySQL returns "Query was empty" at apply time.
+			if executeSQL == "" || PayloadHasNoSQL(executeSQL) {
 				return nil, fmt.Errorf("-- myschema:execute %q: missing the SQL statement that the directive guards (write the SQL on the line(s) after the directive)", checkSQL)
 			}
 			// SplitStatementToPieces strips the trailing `;`. Re-add
