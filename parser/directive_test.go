@@ -928,3 +928,16 @@ CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
 	assert.Contains(t, err.Error(), "convert-charset")
 	assert.Contains(t, err.Error(), "execute")
 }
+
+func TestParseSQLRejectsConvertCharsetCombinedWithRenamedFrom(t *testing.T) {
+	// Both directives attach to the same CREATE TABLE but describe
+	// different operations (RENAME TABLE vs. CONVERT TO CHARACTER
+	// SET) and the diff layer doesn't combine them. Same posture
+	// as the execute / renamed-from conflict.
+	_, err := parser.ParseSQL(`-- myschema:renamed-from old_t
+-- myschema:convert-charset
+CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-charset")
+	assert.Contains(t, err.Error(), "renamed-from")
+}

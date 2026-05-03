@@ -177,6 +177,16 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				t.RenameFrom = &rn
 			}
 			if stmtConvertCharset {
+				// `-- myschema:renamed-from` and `-- myschema:convert-charset`
+				// both attach to the same CREATE TABLE but describe
+				// fundamentally different operations (RENAME vs.
+				// CONVERT TO), and the diff layer doesn't combine
+				// them into one statement. Reject upfront — same
+				// posture as the execute / renamed-from conflict
+				// upstream.
+				if stmtRename != "" {
+					return nil, fmt.Errorf("table %s: -- myschema:convert-charset and -- myschema:renamed-from %q in the same statement: directives cannot be combined", t.FQTN(), stmtRename)
+				}
 				if t.Charset == nil {
 					return nil, fmt.Errorf("table %s: -- myschema:convert-charset requires the CREATE TABLE to declare a DEFAULT CHARSET (no charset on the table → nothing to CONVERT TO)", t.FQTN())
 				}

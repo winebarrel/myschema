@@ -377,17 +377,21 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
 	b.WriteString(fqtn)
-	if desired.ConvertCharset {
-		// `-- myschema:convert-charset` opt-in: rewrite stored bytes
-		// and per-column charset metadata in one statement so a
-		// table with pre-existing string columns converges in a
-		// single apply (the default flow needs two — see CAVEATS
-		// "Changing DEFAULT CHARSET"). Note the syntax difference
-		// from the default branch: CONVERT TO uses bare `COLLATE
-		// <name>` (no `=`), DEFAULT CHARSET uses `COLLATE=<name>`.
-		// desired.Charset is guaranteed non-nil here because the
-		// parser rejects the directive when CREATE TABLE has no
-		// DEFAULT CHARSET.
+	// `-- myschema:convert-charset` opt-in: rewrite stored bytes
+	// and per-column charset metadata in one statement so a
+	// table with pre-existing string columns converges in a
+	// single apply (the default flow needs two — see CAVEATS
+	// "Changing DEFAULT CHARSET"). Only triggered when the
+	// charset itself differs — a collation-only diff falls
+	// through to the default `ALTER TABLE … COLLATE=…` shape
+	// because `CONVERT TO` would needlessly rebuild the table
+	// (and rewrite all string column data) just to flip the
+	// collation. Note the syntax difference from the default
+	// branch: CONVERT TO uses bare `COLLATE <name>` (no `=`),
+	// DEFAULT CHARSET uses `COLLATE=<name>`. desired.Charset is
+	// guaranteed non-nil here because the parser rejects the
+	// directive when CREATE TABLE has no DEFAULT CHARSET.
+	if desired.ConvertCharset && !charsetMatches {
 		b.WriteString(" CONVERT TO CHARACTER SET ")
 		b.WriteString(*desired.Charset)
 		if desired.Collation != nil {
