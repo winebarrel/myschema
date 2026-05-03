@@ -179,14 +179,33 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// boundaries, COMMENT, MAX_ROWS, etc. all flow through
 	// `parser.FormatPartitionDefinition`'s identity check. Emit
 	// a single REORGANIZE PARTITION over the *minimal* contiguous
-	// span from the first to the last differing slot:
-	// MySQL requires the new partitions to cover exactly the
-	// same value range as the old ones, so we have to include
-	// every partition between the first and the last mismatch
-	// (matched ones in between get re-stated unchanged), but
-	// untouched partitions on either side can be left alone.
-	// That keeps a small edit small instead of REORGANIZing the
-	// whole tail just because the first slot's value moved.
+	// span from the first to the last differing slot.
+	//
+	// MySQL requires the partitions named in REORGANIZE
+	// PARTITION to be consecutive in the partition ordering
+	// (Error 1519 "When reorganizing a set of partitions they
+	// must be in consecutive order" — fires for both RANGE and
+	// LIST), so even when only `p0` and `p3` differ in a
+	// 4-partition LIST table, the REORGANIZE still has to
+	// enumerate p0, p1, p2, p3 with the in-between matched
+	// partitions re-stated unchanged. The minimal span keeps
+	// the rewrite proportional to the diff (one tail-only edit
+	// stays one-slot) instead of REORGANIZing the whole table.
+	//
+	// RANGE-style boundary edits additionally cascade: each
+	// partition's `VALUES LESS THAN <x>` is also the implicit
+	// lower bound of the next partition, so when slot `last`'s
+	// upper bound moved AND `last` isn't the final partition,
+	// pulling `last+1` into the REORGANIZE re-establishes the
+	// boundary alignment with the unchanged tail (otherwise
+	// MySQL rejects with "VALUES less than value must be
+	// strictly increasing"). Per-partition option-only diffs
+	// (COMMENT / MAX_ROWS / TABLESPACE / …) leave the value
+	// range untouched, so the cascade doesn't fire — keeps a
+	// metadata-only edit a one-slot REORGANIZE. LIST partitions
+	// don't have this cascade at all (`VALUES IN (…)` is a
+	// closed set per slot), so the extension only fires for
+	// RANGE / RANGE COLUMNS.
 	if partitionNameListEqual(curDefs, desDefs) {
 		first, last := -1, -1
 		for i := range curDefs {
@@ -203,22 +222,6 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			// drift the formatter can resolve.
 			return nil, nil, nil
 		}
-		// RANGE-style boundary edits cascade. Each partition's
-		// `VALUES LESS THAN <x>` is also the implicit lower
-		// bound of the next partition, so changing slot i's
-		// upper bound silently changes slot i+1's lower bound.
-		// MySQL rejects a REORGANIZE whose new partitions don't
-		// cover exactly the same value range as the old ones,
-		// so we have to include the next partition too whenever
-		// the last changed slot's *boundary* actually moved.
-		// Per-partition option-only diffs (COMMENT / MAX_ROWS /
-		// TABLESPACE / …) leave the value range untouched, so
-		// pulling p_{last+1} in just to restate it unchanged
-		// would turn a metadata-only edit into a second
-		// partition rewrite — keep the span minimal in that
-		// case. LIST partitions don't have this cascade at all
-		// (`VALUES IN (…)` is a closed set per slot), so the
-		// extension only fires for RANGE / RANGE COLUMNS.
 		if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 &&
 			!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
 			last++

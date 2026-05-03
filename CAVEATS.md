@@ -253,13 +253,27 @@ patterns:
   too — anything that makes the formatted definitions
   byte-different counts. The emitted REORGANIZE covers the
   *minimal* contiguous span between the first and the last
-  differing slot (matched partitions inside that span are
-  re-stated unchanged because MySQL requires the new
-  partitions to cover the same value range as the old ones,
-  but untouched partitions on either side stay alone). MySQL
-  redistributes existing rows into the new boundaries
-  (row-preserving). No `--allow-drop` gating because every
-  dropped name is reused on the add side.
+  differing slot. Matched partitions inside that span get
+  re-stated unchanged because MySQL requires the partitions
+  named in REORGANIZE PARTITION to be consecutive in the
+  partition ordering (Error 1519 "When reorganizing a set of
+  partitions they must be in consecutive order" — fires for
+  both RANGE and LIST), so a "p0 + p3 changed" 4-partition
+  table can't be reshaped with `REORGANIZE PARTITION p0, p3
+  INTO (…)` even though their `VALUES IN` sets are independent.
+  Untouched partitions on either side of the span stay alone.
+  RANGE-style boundary edits additionally extend the span by
+  one slot when the last changed slot's `VALUES LESS THAN`
+  actually moved AND that slot isn't the final partition —
+  pulling `p_{last+1}` in re-establishes the boundary
+  alignment with the unchanged tail (otherwise MySQL rejects
+  with "VALUES less than value must be strictly increasing").
+  Per-partition option-only diffs leave the value range
+  untouched, so the cascade doesn't fire — a metadata-only
+  edit stays a one-slot REORGANIZE. MySQL redistributes
+  existing rows into the new boundaries (row-preserving). No
+  `--allow-drop` gating because every dropped name is reused
+  on the add side.
 
 **Diffs that still error (manage by hand).**
 

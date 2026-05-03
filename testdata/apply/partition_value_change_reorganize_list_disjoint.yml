@@ -1,0 +1,45 @@
+# Pin MySQL's "consecutive partitions" rule for LIST REORGANIZE.
+# A natural intuition is that LIST slots are independent
+# (`VALUES IN (…)` is a closed set per slot, no shared boundary)
+# so a "p0 + p3 changed" diff could emit
+# `REORGANIZE PARTITION p0, p3 INTO (...)` and skip the matched
+# p1 / p2 in between. MySQL rejects that with Error 1519 "When
+# reorganizing a set of partitions they must be in consecutive
+# order" — the consecutive-ordering rule applies to LIST too,
+# not just RANGE. So the diff has to restate the matched
+# partitions inside the span unchanged. This fixture pins both
+# halves: the diff produces the contiguous span, and MySQL
+# accepts the resulting REORGANIZE end-to-end (verify_no_drift).
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 2),
+      PARTITION p1 VALUES IN (3, 4),
+      PARTITION p2 VALUES IN (5, 6),
+      PARTITION p3 VALUES IN (7, 8)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 2, 9),
+      PARTITION p1 VALUES IN (3, 4),
+      PARTITION p2 VALUES IN (5, 6),
+      PARTITION p3 VALUES IN (7, 8, 10)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p0, p1, p2, p3 INTO (
+    partition p0 values in (1, 2, 9),
+    partition p1 values in (3, 4),
+    partition p2 values in (5, 6),
+    partition p3 values in (7, 8, 10)
+  );
+
+verify_no_drift: true
