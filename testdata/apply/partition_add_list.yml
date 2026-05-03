@@ -1,0 +1,31 @@
+# End-to-end pin for the LIST partition ADD path. Mirrors the
+# RANGE apply fixture but exercises `VALUES IN (...)` syntax —
+# without this only the planned SQL string is asserted, never
+# the actual MySQL execution.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region_code CHAR(1) NOT NULL,
+      PRIMARY KEY (id, region_code)
+  ) PARTITION BY LIST COLUMNS(region_code) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D')
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region_code CHAR(1) NOT NULL,
+      PRIMARY KEY (id, region_code)
+  ) PARTITION BY LIST COLUMNS(region_code) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D'),
+      PARTITION pEF VALUES IN ('E', 'F')
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts ADD PARTITION (
+    partition pEF values in ('E', 'F')
+  );
+
+verify_no_drift: true

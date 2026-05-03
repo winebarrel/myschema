@@ -173,7 +173,7 @@ note the expected follow-up plan in a comment.
 - Run `myschema apply` twice. The second is a no-op once the column
   charsets have inherited the new default.
 
-## Partitioning: scoped to RANGE / LIST suffix add / drop in v1
+## Partitioning: scoped to RANGE / LIST (incl. COLUMNS) suffix add / drop in v1
 
 **Behaviour.** myschema reads partitioned tables (RANGE / LIST /
 HASH / KEY / RANGE COLUMNS / LIST COLUMNS) round-trip — `dump`
@@ -182,8 +182,10 @@ against an unchanged catalog, and `apply` doesn't touch the
 partition layout. Both sides normalise through the same vitess
 pipeline so the comparison is bytewise.
 
-**Diffs that *are* generated.** RANGE and LIST partitions support
-the two most common operational patterns:
+**Diffs that *are* generated.** RANGE and LIST partitions —
+including the column-list variants `RANGE COLUMNS(…)` and
+`LIST COLUMNS(…)` — support the two most common operational
+patterns:
 
 - *Suffix add* (catalog is a strict prefix of desired) →
   `ALTER TABLE … ADD PARTITION (PARTITION p VALUES …)`.
@@ -212,11 +214,13 @@ the two most common operational patterns:
   different `PARTITION BY` expression) — needs `REMOVE
   PARTITIONING` followed by a new `PARTITION BY`. Future PR.
   Fails with `partition strategy / expression differs`.
-- *Adding / removing partitioning entirely* — `REMOVE
-  PARTITIONING` or first-time `PARTITION BY` against an
-  unpartitioned table is also future work. Fails with
-  `partition definition differs (one side has no partitioning,
-  the other does)`.
+- *Adding or removing partitioning entirely* — both directions
+  are future work: first-time `PARTITION BY` against an
+  unpartitioned catalog table, *and* `REMOVE PARTITIONING`
+  against an already-partitioned catalog table when desired
+  drops the `PARTITION BY` clause. Fails with `partition
+  definition differs (one side has no partitioning, the other
+  does)`.
 - `SUBPARTITION BY …` is out of scope for v1. A desired-side
   `CREATE TABLE` that declares SUBPARTITION fails at parse
   time; a catalog-side table with SUBPARTITION is rejected

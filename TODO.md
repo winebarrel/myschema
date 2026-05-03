@@ -26,17 +26,19 @@ Open items only. Done work is in `git log` / closed PRs.
 
 - [ ] **Partition diff generation beyond RANGE/LIST suffix
       add/drop.** Suffix `ADD PARTITION` / `DROP PARTITION` for
-      RANGE/LIST already ship (`--allow-drop=partition` gates
-      DROP); see CAVEATS.md "Partitioning". Still on the floor:
-      mid-list value changes (`REORGANIZE PARTITION old1, old2
-      INTO (...)`), HASH/KEY count operations (`COALESCE
-      PARTITION n` for shrinks, `ADD PARTITION PARTITIONS n`
-      for grows), strategy/expression changes (`REMOVE
-      PARTITIONING` + new `PARTITION BY`), and first-time
-      partitioning of a previously unpartitioned table.
-      SUBPARTITION is intentionally out of scope (CAVEATS.md
-      notes both the desired-side parse error and the
-      catalog-side guard).
+      RANGE / LIST (including `RANGE COLUMNS` / `LIST COLUMNS`)
+      already ship (`--allow-drop=partition` gates DROP); see
+      CAVEATS.md "Partitioning". Still on the floor: mid-list
+      value changes (`REORGANIZE PARTITION old1, old2 INTO
+      (...)`), HASH / KEY count operations (`COALESCE PARTITION
+      n` for shrinks, `ADD PARTITION PARTITIONS n` for grows),
+      strategy / expression changes (`REMOVE PARTITIONING` + new
+      `PARTITION BY`), and both directions of "one side has no
+      partitioning" — first-time `PARTITION BY` against an
+      unpartitioned table *and* `REMOVE PARTITIONING` against an
+      already-partitioned one. SUBPARTITION is intentionally out
+      of scope (CAVEATS.md notes both the desired-side parse
+      error and the catalog-side guard).
 
 ## Low — CLI ergonomics
 

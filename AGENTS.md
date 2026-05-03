@@ -157,9 +157,10 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   and partition clauses (round-trip via `SHOW CREATE TABLE`)
 - Diff: CREATE / DROP TABLE, ADD / MODIFY / DROP COLUMN,
   ADD / DROP CONSTRAINT (PK / CHECK), ADD / DROP INDEX, ADD / DROP FK,
-  CREATE OR REPLACE / DROP VIEW, RANGE/LIST partition suffix
-  ADD / DROP PARTITION (see CAVEATS.md "Partitioning" for the
-  scope)
+  CREATE OR REPLACE / DROP VIEW, RANGE / LIST partition suffix
+  ADD / DROP PARTITION (including the `RANGE COLUMNS` /
+  `LIST COLUMNS` variants — see CAVEATS.md "Partitioning" for
+  the full scope)
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
 - `--alter-algorithm` / `--alter-lock` flags (and matching
@@ -260,14 +261,17 @@ rather than declarative schema. Manage them out of band.)
   cases. v1 generates `ALTER TABLE … ADD PARTITION` /
   `DROP PARTITION` (gated by `--allow-drop=partition`) when the
   desired side is a strict suffix-extension or suffix-trim of
-  the catalog's RANGE/LIST partitions. Anything else — HASH/KEY
-  count operations (COALESCE / ADD PARTITIONS), mid-list value
-  changes (REORGANIZE PARTITION), strategy / expression changes
-  (REMOVE PARTITIONING + new PARTITION BY), or first-time
-  partitioning a previously unpartitioned table — still errors
-  out so the user runs the ALTER by hand. See CAVEATS.md
-  "Partitioning". `diff/partitions.go` is where the supported
-  cases live.
+  the catalog's RANGE / LIST partitions, including the
+  `RANGE COLUMNS` / `LIST COLUMNS` variants. Anything else —
+  HASH/KEY count operations (COALESCE / ADD PARTITIONS),
+  mid-list value changes (REORGANIZE PARTITION), strategy /
+  expression changes (REMOVE PARTITIONING + new PARTITION BY),
+  *or* either direction of "one side has no partitioning"
+  (first-time `PARTITION BY` against an unpartitioned table,
+  *and* `REMOVE PARTITIONING` against an already-partitioned
+  one) — still errors out so the user runs the ALTER by hand.
+  See CAVEATS.md "Partitioning". `diff/partitions.go` is where
+  the supported cases live.
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after
   all CREATE TABLEs, so this works for that case; FKs that point at tables
