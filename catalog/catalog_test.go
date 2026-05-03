@@ -2,7 +2,6 @@ package catalog_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -286,25 +285,23 @@ CREATE TABLE empty_defs (
 	}
 }
 
-// TestColumnDefaultBinaryEmptyStringIsHex pins the documented
-// limitation: a fixed-width BINARY column with an empty default does
-// NOT round-trip cleanly because MySQL surfaces the value as a hex
-// literal (`0x` for the degenerate case, `0x000000…` for non-zero
-// N), and `columnTypeAllowsEmptyStringDefault` intentionally excludes
-// it from the empty-string normalisation. The test exists to
-// (a) document the current behaviour and (b) catch a future
-// refactor that accidentally normalises the hex literal to the
-// quoted empty literal before the proper BINARY-side fix lands.
-// See TODO.md. (VARBINARY does round-trip cleanly — its empty
-// default surfaces as the bare empty string, and is asserted in
-// TestColumnDefaultEmptyStringNormalisation.)
-func TestColumnDefaultBinaryEmptyStringIsHex(t *testing.T) {
+// TestColumnDefaultBinaryEmptyStringNormalisation pins the catalog-side
+// normalisation of fixed-width BINARY(N) with an empty default. MySQL
+// surfaces it through information_schema.COLUMNS.COLUMN_DEFAULT as the
+// literal two-character string "0x" — independent of N, so all of
+// BINARY(1) / BINARY(4) / BINARY(16) come back the same. The parser
+// side stores the quoted empty literal, so without normalisation every
+// post-apply plan re-emits MODIFY COLUMN. The catalog rewrites the
+// "0x" sentinel for BINARY-prefix types to match the parser side.
+func TestColumnDefaultBinaryEmptyStringNormalisation(t *testing.T) {
 	db := testutil.ConnectDB(t)
 	ctx := context.Background()
 	testutil.SetupDB(t, ctx, db, `
 CREATE TABLE bin_defs (
     id BIGINT NOT NULL AUTO_INCREMENT,
-    s_bin BINARY(8) NOT NULL DEFAULT '',
+    s_bin1 BINARY(1) NOT NULL DEFAULT '',
+    s_bin4 BINARY(4) NOT NULL DEFAULT '',
+    s_bin16 BINARY(16) NOT NULL DEFAULT '',
     PRIMARY KEY (id)
 );
 `)
@@ -314,13 +311,13 @@ CREATE TABLE bin_defs (
 	defs, ok := tables.GetOk("myschema_test.bin_defs")
 	require.True(t, ok)
 
-	col, ok := defs.Columns.GetOk("s_bin")
-	require.True(t, ok)
-	require.NotNil(t, col.Default)
-	assert.True(t, strings.HasPrefix(*col.Default, "0x"),
-		"BINARY empty default should remain a hex literal, got %q", *col.Default)
-	assert.NotEqual(t, "''", *col.Default,
-		"BINARY must NOT be normalised to '' (round-trip needs separate handling)")
+	for _, c := range []string{"s_bin1", "s_bin4", "s_bin16"} {
+		col, ok := defs.Columns.GetOk(c)
+		require.True(t, ok, "%s should be loaded", c)
+		require.NotNil(t, col.Default, "%s should have a default", c)
+		assert.Equal(t, "''", *col.Default,
+			"%s empty BINARY default should be normalised to ''", c)
+	}
 }
 
 // TestViewsRoundTrip is the catalog-side companion to the view fixtures:
