@@ -1,0 +1,33 @@
+# Without `--allow-drop=column` the desired-side absence of the
+# partition-key column doesn't actually generate a DROP COLUMN
+# (it lands on the disallowed bucket as `-- skipped: ...`), so
+# MySQL Error 3855 can never fire and the plan must NOT abort
+# with the partition-conflict error. The skipped DROP COLUMN
+# line is the right outcome — same handling every other
+# disallowed drop gets.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+# PK changes are emitted regardless of `--allow-drop`; the
+# point this fixture pins is that DROP COLUMN dt lands on
+# `disallowed_drops` rather than aborting the plan.
+plan: |
+  ALTER TABLE myschema_test.events DROP PRIMARY KEY;
+  ALTER TABLE myschema_test.events ADD PRIMARY KEY (id);
+
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.events DROP COLUMN dt;

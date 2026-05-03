@@ -1,0 +1,25 @@
+# Pin the precedence between the partition-column conflict
+# guard and the more-actionable scheme/expression error. Catalog
+# is RANGE(YEAR(old_dt)); desired both renames the partition key
+# (old_dt → dt) AND switches to HASH(id) — two unsupported
+# operations stacked. The user wants to see the scheme/expression
+# error (the actual unsupported operation), not the
+# rename-conflict message (a downstream consequence).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      old_dt DATE NOT NULL,
+      PRIMARY KEY (id, old_dt)
+  ) PARTITION BY RANGE (YEAR(old_dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_dt
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY HASH (id) PARTITIONS 4;
+
+error: "partition strategy / expression differs"

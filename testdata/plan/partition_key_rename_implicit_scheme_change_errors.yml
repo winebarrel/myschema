@@ -1,0 +1,32 @@
+# A `-- myschema:renamed-from` on a partition-key column always
+# implies the desired-side PARTITION BY clause references the
+# new name (here `RANGE (YEAR(dt))`) while the catalog clause
+# still references the old name (`RANGE (YEAR(old_dt))`). The
+# diff therefore sees two different partition expressions and
+# raises the more-actionable "scheme/expression differs" error
+# upstream — the user can't actually run RENAME COLUMN against
+# a partition-key column anyway (MySQL Error 3855), so the
+# REMOVE PARTITIONING + new PARTITION BY workaround the error
+# message points at is the right answer.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      old_dt DATE NOT NULL,
+      PRIMARY KEY (id, old_dt)
+  ) PARTITION BY RANGE (YEAR(old_dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_dt
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+error: "partition strategy / expression differs"
