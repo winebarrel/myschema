@@ -1,0 +1,30 @@
+# Edge case: a `-- myschema:renamed-from` on a partition-key
+# column where the desired-side `PARTITION BY` clause keeps the
+# old column name AND adds a new partition at the suffix.
+# diffPartitions returns a clean ADD PARTITION (the partition
+# scheme is unchanged), so the rename guard mustn't be gated on
+# byte-equality of the partition clause — `partitionHeaderEqual`
+# is what determines reachability. Without this guard a
+# `RENAME COLUMN` would be planned and MySQL would reject it
+# with Error 3855.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      old_dt DATE NOT NULL,
+      PRIMARY KEY (id, old_dt)
+  ) PARTITION BY RANGE (YEAR(old_dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_dt
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, old_dt)
+  ) PARTITION BY RANGE (YEAR(old_dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+error: "conflict with the partition expression"

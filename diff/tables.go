@@ -58,6 +58,22 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		if _, ok := current.GetOk(k); ok {
 			continue
 		}
+		// Same MySQL rule the diffTable path enforces: every
+		// unique key on a partitioned table must include all
+		// columns in the partition expression. Without this
+		// check on the create-table path, MySQL would reject
+		// the CREATE TABLE itself at apply time (or worse,
+		// accept the CREATE and reject a follow-up
+		// CREATE UNIQUE INDEX). Surface the gap at plan time.
+		if dt.Partition != nil {
+			required, err := partitionRequiredColumns(*dt.Partition)
+			if err != nil {
+				return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", k, err)
+			}
+			if missing := uniqueKeyPartitionCoverGap(dt, required); missing != "" {
+				return nil, fmt.Errorf("table %s: %s — MySQL requires every unique key (including the PRIMARY KEY) on a partitioned table to include all columns in the partition expression. Either add the missing columns to the unique key, or remove `PARTITION BY …` from the desired CREATE TABLE", k, missing)
+			}
+		}
 		res.Stmts = append(res.Stmts, dt.SQL())
 		for _, idx := range dt.Indexes.CollectValues() {
 			if idx.Primary {
@@ -190,46 +206,48 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// ("scheme/expression differs", "REMOVE PARTITIONING is not
 	// yet generated", "HASH/KEY diffs", "REORGANIZE") take
 	// precedence — those are the real unsupported operation,
-	// this guard is just one downstream consequence.
+	// this guard is just one downstream consequence. Only check
+	// when both sides are partitioned AND the partition scheme
+	// (Type / Expr / ColList) is unchanged: a scheme change
+	// would have raised "scheme/expression differs" upstream,
+	// and a definition-only diff (suffix ADD / DROP /
+	// retention roll-forward) still keeps the same column
+	// dependency, so RENAME / DROP COLUMN against the
+	// partition column is invalid in the same way.
 	if current.Partition != nil && desired.Partition != nil {
-		// Rename guard: only matters when the desired partition
-		// clause is byte-equal to the catalog's. If the user
-		// updated the desired-side `PARTITION BY` to match the
-		// new column name, partitionHeaderEqual would have
-		// reported "scheme/expression differs" upstream and we
-		// wouldn't be here. The reachable case is "renamed-from
-		// on a partition-key column AND desired SQL forgot to
-		// update the PARTITION BY clause": diffPartitions is a
-		// no-op (clauses byte-equal), but the RENAME COLUMN
-		// emitted by the column-rename pass would hit Error 3855
-		// at apply time. Catch it here.
-		if *current.Partition == *desired.Partition && len(renames) > 0 {
-			renameSources := make([]string, 0, len(renames))
-			for old := range renames {
-				renameSources = append(renameSources, old)
-			}
-			renameConflicts, err := partitionColumnConflicts(*current.Partition, renameSources)
-			if err != nil {
-				return nil, fmt.Errorf("table %s: re-parse partition clause: %w", fqtn, err)
-			}
-			if len(renameConflicts) > 0 {
-				return nil, fmt.Errorf("table %s: column rename(s) %v conflict with the partition expression — MySQL rejects RENAME COLUMN on a column referenced by PARTITION BY (Error 3855: \"Column ... has a partitioning function dependency and cannot be dropped or renamed\"). Either update the desired-side PARTITION BY clause to use the new column name (the diff will then surface as a scheme change), or drop the partition function dependency first (REMOVE PARTITIONING + new PARTITION BY against the renamed column, by hand)", fqtn, renameConflicts)
-			}
+		sameScheme, err := partitionExpressionsEqual(*current.Partition, *desired.Partition)
+		if err != nil {
+			return nil, fmt.Errorf("table %s: re-parse partition clause: %w", fqtn, err)
 		}
-		// DROP guard: the column would actually go away on apply
-		// only when `--allow-drop=column` is set. Without it the
-		// DROP COLUMN lands on the disallowed bucket and never
-		// reaches MySQL, so Error 3855 can't fire — let
-		// diffColumns report the skipped DROP COLUMN like every
-		// other suppressed drop.
-		if dc.IsDropAllowed("column") {
-			dropCandidates := droppedColumns(current.Columns, desired.Columns)
-			dropConflicts, err := partitionColumnConflicts(*current.Partition, dropCandidates)
-			if err != nil {
-				return nil, fmt.Errorf("table %s: re-parse partition clause: %w", fqtn, err)
+		if sameScheme {
+			if len(renames) > 0 {
+				renameSources := make([]string, 0, len(renames))
+				for old := range renames {
+					renameSources = append(renameSources, old)
+				}
+				renameConflicts, err := partitionColumnConflicts(*current.Partition, renameSources)
+				if err != nil {
+					return nil, fmt.Errorf("table %s: re-parse partition clause: %w", fqtn, err)
+				}
+				if len(renameConflicts) > 0 {
+					return nil, fmt.Errorf("table %s: column rename(s) %v conflict with the partition expression — MySQL rejects RENAME COLUMN on a column referenced by PARTITION BY (Error 3855: \"Column ... has a partitioning function dependency and cannot be dropped or renamed\"). Either update the desired-side PARTITION BY clause to use the new column name (the diff will then surface as a scheme change), or drop the partition function dependency first (REMOVE PARTITIONING + new PARTITION BY against the renamed column, by hand)", fqtn, renameConflicts)
+				}
 			}
-			if len(dropConflicts) > 0 {
-				return nil, fmt.Errorf("table %s: column drop(s) %v conflict with the partition expression — MySQL rejects DROP COLUMN on a column referenced by PARTITION BY (Error 3855: \"Column ... has a partitioning function dependency and cannot be dropped or renamed\"). Drop the partition function dependency first (REMOVE PARTITIONING + new PARTITION BY without the dropped column, by hand) and let the next plan reconverge", fqtn, dropConflicts)
+			// DROP guard: the column would actually go away on
+			// apply only when `--allow-drop=column` is set.
+			// Without it the DROP COLUMN lands on the disallowed
+			// bucket and never reaches MySQL, so Error 3855 can't
+			// fire — let diffColumns report the skipped DROP
+			// COLUMN like every other suppressed drop.
+			if dc.IsDropAllowed("column") {
+				dropCandidates := droppedColumns(current.Columns, desired.Columns)
+				dropConflicts, err := partitionColumnConflicts(*current.Partition, dropCandidates)
+				if err != nil {
+					return nil, fmt.Errorf("table %s: re-parse partition clause: %w", fqtn, err)
+				}
+				if len(dropConflicts) > 0 {
+					return nil, fmt.Errorf("table %s: column drop(s) %v conflict with the partition expression — MySQL rejects DROP COLUMN on a column referenced by PARTITION BY (Error 3855: \"Column ... has a partitioning function dependency and cannot be dropped or renamed\"). Drop the partition function dependency first (REMOVE PARTITIONING + new PARTITION BY without the dropped column, by hand) and let the next plan reconverge", fqtn, dropConflicts)
+				}
 			}
 		}
 	}

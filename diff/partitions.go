@@ -173,6 +173,30 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	return stmts, disallowed, nil
 }
 
+// partitionExpressionsEqual reports whether two stored partition
+// clauses share the same partition strategy / expression / column
+// list — i.e. the partition diff is at most a definition-list
+// change (ADD / DROP), not a scheme switch. The caller (diffTable)
+// uses this to decide whether the rename / drop conflict guards
+// should run: when scheme differs the diff layer raises a more
+// actionable "scheme/expression differs" error, so running the
+// conflict check would only add noise.
+//
+// Both clauses are expected to have already gone through
+// NormalizePartitionOption (which ParsePartitionClause re-parses
+// here from the canonical stored form).
+func partitionExpressionsEqual(current, desired string) (bool, error) {
+	cur, err := parser.ParsePartitionClause(current)
+	if err != nil || cur == nil {
+		return false, err
+	}
+	des, err := parser.ParsePartitionClause(desired)
+	if err != nil || des == nil {
+		return false, err
+	}
+	return partitionHeaderEqual(cur, des), nil
+}
+
 // partitionHeaderEqual checks that two PartitionOptions describe the
 // same strategy: same Type (RANGE / LIST / HASH / KEY), same column
 // list (KEY / RANGE COLUMNS / LIST COLUMNS), same expression (RANGE

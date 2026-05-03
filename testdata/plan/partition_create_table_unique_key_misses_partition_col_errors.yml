@@ -1,0 +1,18 @@
+# Counterpart to partition_unique_key_misses_partition_col_errors
+# but for the CREATE TABLE path. Catalog has no `events` table;
+# desired tries to create a partitioned one whose PRIMARY KEY
+# omits the partition column. The cover guard must run on the
+# new-tables loop too — without it, myschema would emit a
+# CREATE TABLE that MySQL rejects at apply time.
+init: |
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+error: "PRIMARY KEY is missing partition column(s)"
