@@ -156,11 +156,14 @@ body itself.
 myschema doesn't model:
 
 - *Top-level statements* other than `CREATE TABLE`, `CREATE VIEW`,
-  and `ALTER TABLE`. So `CREATE TRIGGER`, `CREATE PROCEDURE`,
-  `CREATE FUNCTION`, `CREATE EVENT`, `CREATE DATABASE`, `SET …`,
-  `INSERT`, `UPDATE`, `DELETE`, `SELECT`, `DROP TABLE`,
-  `RENAME TABLE`, `TRUNCATE`, `ALTER VIEW`, comments — all parse
-  successfully and produce nothing in the diff.
+  and `ALTER TABLE` (the latter is also the AST shape vitess uses
+  for user-written `CREATE INDEX`, so `CREATE INDEX` IS supported
+  even though it's not listed here). So `CREATE TRIGGER`,
+  `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE EVENT`,
+  `CREATE DATABASE`, `SET …`, `INSERT`, `UPDATE`, `DELETE`,
+  `SELECT`, `DROP TABLE`, `RENAME TABLE`, `TRUNCATE`, `ALTER VIEW`,
+  comments — all parse successfully and produce nothing in the
+  diff.
 - *ALTER TABLE clauses* other than `ADD CONSTRAINT` (FK / CHECK)
   and `ADD INDEX` (which vitess also exposes as the `CREATE INDEX`
   shape). So `ALTER TABLE t ADD COLUMN c INT`, `MODIFY COLUMN`,
@@ -175,11 +178,16 @@ break that workflow.
 
 **Impact.** A user who writes `ALTER TABLE t ADD COLUMN c INT` in
 their desired SQL expecting it to land will get nothing — the
-column won't appear, and they'll only notice when the next plan
-re-emits the underlying `CREATE TABLE` without the column. The
-desired state is meant to live in `CREATE TABLE` (and `CREATE
-VIEW`), and the pipeline that turns desired into actual ALTERs
-lives in `diff/`, not in user-written DDL.
+column never enters the desired-side model. The skip is silent, so
+the symptom is "no observable plan output for that column": the
+next `plan` reports either `-- No changes` or only the diff for
+the *other* changes in the file, and `dump` over the live database
+shows the table without the column. The user has to read back the
+desired SQL or notice the missing column in `dump` output to
+realise the ALTER did nothing. The desired state is meant to live
+in `CREATE TABLE` (and `CREATE VIEW`), and the pipeline that turns
+desired into actual ALTERs lives in `diff/`, not in user-written
+DDL.
 
 **Workaround.** Express schema state via `CREATE TABLE` — the
 target shape is what gets compared against the catalog, and
