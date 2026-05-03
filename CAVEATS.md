@@ -162,8 +162,10 @@ myschema doesn't model:
   `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE EVENT`,
   `CREATE DATABASE`, `SET …`, `INSERT`, `UPDATE`, `DELETE`,
   `SELECT`, `DROP TABLE`, `RENAME TABLE`, `TRUNCATE`, `ALTER VIEW`,
-  comments — all parse successfully and produce nothing in the
-  diff.
+  non-directive comments — all parse successfully and produce
+  nothing in the diff. (Comments that look like `-- myschema:<name>`
+  are the exception: they go through `ValidateDirectives` first
+  and unknown / malformed shapes error out at parse time.)
 - *ALTER TABLE clauses* other than `ADD CONSTRAINT` (FK / CHECK)
   and `ADD INDEX` (which vitess also exposes as the `CREATE INDEX`
   shape). So `ALTER TABLE t ADD COLUMN c INT`, `MODIFY COLUMN`,
