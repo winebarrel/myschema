@@ -1,9 +1,12 @@
 # HASH count shrink: catalog PARTITIONS 8, desired PARTITIONS 4
 # + `--allow-drop=partition` → ALTER TABLE … COALESCE PARTITION 4.
 # COALESCE merges the trailing partitions into the survivors
-# and redistributes their rows (no row loss), but the slot
+# (rows are redistributed, no row loss), but the slot
 # structure itself goes away irreversibly — same
 # `allow_drop=partition` gating as RANGE/LIST DROP PARTITION.
+# How much data actually moves depends on the sub-strategy:
+# regular HASH rewrites most of the table (modulus changes),
+# LINEAR HASH only touches partitions adjacent to the change.
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,

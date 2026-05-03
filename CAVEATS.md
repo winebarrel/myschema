@@ -213,21 +213,31 @@ patterns:
   KeyAlgorithm / ColList / Expr), only `PARTITIONS n` differs.
   Generates the count-based grammar:
   - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n`.
-    Changing the partition count changes the hash modulus, so
-    MySQL redistributes existing rows across the new partition
-    set during the ALTER. No row loss, but this is a
-    data-moving operation; expect proportional I/O on a large
-    table.
   - shrinking → `ALTER TABLE … COALESCE PARTITION n`. Merges
-    the trailing partitions into the survivors, redistributing
-    their rows in the process — also no row loss, also
-    data-moving. Gated on `--allow-drop=partition` even though
-    the data is preserved: the slot structure itself changes
-    irreversibly (you can't un-COALESCE without another
-    full ALTER, and either direction rewrites table data),
-    so it lines up with the same "destructive / heavy" treatment
-    RANGE/LIST DROP gets. Without the flag the COALESCE lands
-    on the disallowed bucket.
+    the trailing partitions into the survivors. Gated on
+    `--allow-drop=partition` not because rows are lost (they
+    aren't — they're redistributed) but because the slot
+    structure itself changes irreversibly: you can't
+    un-COALESCE without another ALTER that rewrites data
+    again, so it lines up with the same "destructive / heavy"
+    treatment RANGE/LIST DROP gets. Without the flag the
+    COALESCE lands on the disallowed bucket.
+
+  Both directions are **row-preserving but data-moving**:
+  changing the partition count moves rows between partitions
+  on disk. The cost depends on which sub-strategy the table
+  uses. Regular `HASH` / `KEY` use the partition-function
+  modulus, so almost every row's target partition shifts and
+  MySQL effectively rewrites the table — expect I/O
+  proportional to table size on a large table. `LINEAR HASH`
+  / `LINEAR KEY` use the linear-powers-of-two algorithm
+  documented in the MySQL manual as making "adding, dropping,
+  merging, and splitting of partitions … much faster" because
+  only the partitions adjacent to the change need to be
+  touched. If your table is large enough that the rewrite
+  cost is the question driving the schema design, the
+  regular vs. linear choice matters more than how
+  myschema phrases the diff.
 
 **Diffs that still error (manage by hand).**
 

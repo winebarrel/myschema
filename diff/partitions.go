@@ -30,17 +30,20 @@ import (
 //     is a future PR).
 //   - HASH/KEY (incl. LINEAR) — partition count change goes
 //     through dedicated grammar: `ADD PARTITION PARTITIONS n`
-//     to grow, `COALESCE PARTITION n` to shrink. Both rewrite
-//     table data (the hash modulus changes, so MySQL has to
-//     redistribute existing rows across the new partition set);
-//     no rows are lost in either direction. The shrink path is
-//     gated on `--allow-drop=partition` not because data is
-//     discarded but because the slot structure changes
-//     irreversibly — same "destructive / heavy" treatment as
-//     RANGE/LIST DROP. Equal count = no-op. Header
-//     (Type / IsLinear / KeyAlgorithm / ColList / Expr) mismatch
-//     falls through to "scheme/expression differs" upstream of
-//     this branch.
+//     to grow, `COALESCE PARTITION n` to shrink. Both
+//     directions are row-preserving but data-moving (rows are
+//     redistributed across partitions); how much data moves
+//     depends on whether the table uses regular HASH / KEY
+//     (the modulus changes, so most rows shift) or LINEAR
+//     HASH / LINEAR KEY (the linear-powers-of-two algorithm
+//     touches only partitions adjacent to the change — much
+//     faster, per the MySQL manual). The shrink path is gated
+//     on `--allow-drop=partition` not because rows are lost
+//     but because the slot structure changes irreversibly —
+//     same "destructive / heavy" treatment as RANGE/LIST DROP.
+//     Equal count = no-op. Header (Type / IsLinear /
+//     KeyAlgorithm / ColList / Expr) mismatch falls through to
+//     "scheme/expression differs" upstream of this branch.
 //   - RANGE/LIST: definitions go through an order-preserving
 //     subset diff. Pure suffix add (current's list is a prefix
 //     of desired's) → ADD PARTITION. Order-preserving subset
@@ -90,22 +93,28 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// HASH / KEY (incl. LINEAR) — `partitionHeaderEqual` already
 	// confirmed Type, IsLinear, KeyAlgorithm, ColList and Expr
 	// match, so the only remaining axis is the `PARTITIONS n`
-	// count. MySQL has dedicated grammar for this; both directions
-	// move row data because the hash modulus changes:
+	// count. MySQL has dedicated grammar for this; both
+	// directions are row-preserving but data-moving:
 	//   - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n`
-	//     (n = desired - current). MySQL redistributes existing
-	//     rows across the wider partition set during the ALTER —
-	//     no row loss, but expect proportional I/O on a large
-	//     table.
+	//     (n = desired - current).
 	//   - shrinking → `ALTER TABLE … COALESCE PARTITION n`
-	//     (n = current - desired). Merges the trailing partitions
-	//     into the survivors and redistributes their rows. Also
-	//     row-preserving, but the slot structure itself goes away
-	//     irreversibly (un-COALESCE means another full ALTER
-	//     either way), so it's gated on `--allow-drop=partition`
-	//     like RANGE/LIST DROP — same "destructive / heavy"
-	//     treatment, just at the slot level rather than the row
-	//     level.
+	//     (n = current - desired). Merges the trailing
+	//     partitions into the survivors. The slot structure
+	//     itself goes away irreversibly (un-COALESCE means
+	//     another ALTER that rewrites data again), so it's
+	//     gated on `--allow-drop=partition` like RANGE/LIST
+	//     DROP — same "destructive / heavy" treatment, just at
+	//     the slot level rather than the row level.
+	// Cost note: regular HASH / KEY uses the partition-function
+	// modulus, so changing the count effectively rewrites the
+	// table (most rows shift partition). LINEAR HASH / LINEAR
+	// KEY uses a linear-powers-of-two algorithm and only
+	// touches partitions adjacent to the change, which the
+	// MySQL manual calls out as "much faster" for adding,
+	// dropping, merging, and splitting. The diff layer doesn't
+	// have to care which one the user picked — the grammar is
+	// the same — but the operational cost differs by orders of
+	// magnitude on large tables.
 	// Equal counts (or both unset) → no-op. The raw-string fast
 	// path at the top usually catches that, but `partitionHeaderEqual`
 	// lower-cases ColList / Expr identifiers, so an
