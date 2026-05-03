@@ -1,0 +1,34 @@
+# Foreign-key rename via inline -- myschema:renamed-from. MySQL has no
+# in-place RENAME FOREIGN KEY, so the diff still emits DROP FOREIGN KEY
+# + ADD CONSTRAINT — the directive only acts as a typo guard at plan
+# time (the source name must exist on the current side; otherwise the
+# plan errors out instead of silently mis-targeting).
+init: |
+  CREATE TABLE parents (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE children (
+      id BIGINT NOT NULL,
+      parent_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_p (parent_id),
+      CONSTRAINT fk_child_parent_old FOREIGN KEY (parent_id) REFERENCES parents(id)
+  );
+
+desired: |
+  CREATE TABLE parents (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE children (
+      id BIGINT NOT NULL,
+      parent_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_p (parent_id),
+      -- myschema:renamed-from fk_child_parent_old
+      CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parents(id)
+  );
+
+allow_drop:
+  - foreign_key
+
+applied: |
+  ALTER TABLE myschema_test.children DROP FOREIGN KEY fk_child_parent_old;
+  ALTER TABLE myschema_test.children ADD CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES myschema_test.parents(id);
+
+verify_no_drift: true

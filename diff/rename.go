@@ -361,6 +361,106 @@ func duplicateColumnRenameSource(desired *orderedmap.Map[string, *model.Column])
 	return false, ""
 }
 
+// validateConstraintRenames mirrors the typo-guard semantics of
+// applyColumnRenames / applyIndexRenames for CHECK constraints. MySQL
+// has no in-place RENAME CONSTRAINT, so the diff still emits DROP+ADD;
+// this pass exists only to reject directives whose source name doesn't
+// exist on the current side — turning a typo into a loud plan-time
+// error instead of a silent DROP+ADD with the wrong target. Same
+// shape errors as the rename ALTER passes (duplicate source,
+// source-also-declared, destination-already-exists) are rejected too.
+// Returns no statements on success — the natural diff path produces
+// the `DROP CHECK <name>` + `ADD CONSTRAINT <name> CHECK (...)` pair.
+func validateConstraintRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Constraint]) error {
+	if dup, name := duplicateConstraintRenameSource(desired); dup {
+		return fmt.Errorf("renamed-from: source constraint %s.%s is referenced by multiple constraints", fqtn, name)
+	}
+	for newName, dc := range desired.All() {
+		if dc.RenameFrom == nil || *dc.RenameFrom == "" {
+			continue
+		}
+		oldName := *dc.RenameFrom
+		if oldName == newName {
+			continue // self-rename, see applyTableRenames for rationale
+		}
+		if _, ok := desired.GetOk(oldName); ok {
+			return fmt.Errorf("renamed-from: source constraint %s.%s is also declared in desired schema; remove the source constraint or change the directive", fqtn, oldName)
+		}
+		if _, ok := current.GetOk(oldName); !ok {
+			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
+				continue
+			}
+			return fmt.Errorf("renamed-from: source constraint %s.%s not found in current schema", fqtn, oldName)
+		}
+		if _, dup := current.GetOk(newName); dup && oldName != newName {
+			return fmt.Errorf("renamed-from: cannot rename constraint %s.%s to %s — destination already exists", fqtn, oldName, newName)
+		}
+	}
+	return nil
+}
+
+// validateForeignKeyRenames is the FK counterpart of
+// validateConstraintRenames. MySQL has no in-place RENAME FOREIGN KEY
+// either, so the same typo-guard-only treatment applies.
+func validateForeignKeyRenames(fqtn string, current, desired *orderedmap.Map[string, *model.ForeignKey]) error {
+	if dup, name := duplicateFKRenameSource(desired); dup {
+		return fmt.Errorf("renamed-from: source foreign key %s.%s is referenced by multiple foreign keys", fqtn, name)
+	}
+	for newName, df := range desired.All() {
+		if df.RenameFrom == nil || *df.RenameFrom == "" {
+			continue
+		}
+		oldName := *df.RenameFrom
+		if oldName == newName {
+			continue
+		}
+		if _, ok := desired.GetOk(oldName); ok {
+			return fmt.Errorf("renamed-from: source foreign key %s.%s is also declared in desired schema; remove the source foreign key or change the directive", fqtn, oldName)
+		}
+		if _, ok := current.GetOk(oldName); !ok {
+			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
+				continue
+			}
+			return fmt.Errorf("renamed-from: source foreign key %s.%s not found in current schema", fqtn, oldName)
+		}
+		if _, dup := current.GetOk(newName); dup && oldName != newName {
+			return fmt.Errorf("renamed-from: cannot rename foreign key %s.%s to %s — destination already exists", fqtn, oldName, newName)
+		}
+	}
+	return nil
+}
+
+// duplicateConstraintRenameSource scans desired CHECK constraints and
+// reports if two distinct entries declare the same RenameFrom value.
+func duplicateConstraintRenameSource(desired *orderedmap.Map[string, *model.Constraint]) (bool, string) {
+	seen := map[string]bool{}
+	for _, dc := range desired.CollectValues() {
+		if dc.RenameFrom == nil || *dc.RenameFrom == "" {
+			continue
+		}
+		if seen[*dc.RenameFrom] {
+			return true, *dc.RenameFrom
+		}
+		seen[*dc.RenameFrom] = true
+	}
+	return false, ""
+}
+
+// duplicateFKRenameSource is the FK counterpart.
+func duplicateFKRenameSource(desired *orderedmap.Map[string, *model.ForeignKey]) (bool, string) {
+	seen := map[string]bool{}
+	for _, df := range desired.CollectValues() {
+		if df.RenameFrom == nil || *df.RenameFrom == "" {
+			continue
+		}
+		if seen[*df.RenameFrom] {
+			return true, *df.RenameFrom
+		}
+		seen[*df.RenameFrom] = true
+	}
+	return false, ""
+}
+
 // duplicateIndexRenameSource is the index counterpart.
 func duplicateIndexRenameSource(desired *orderedmap.Map[string, *model.Index]) (bool, string) {
 	seen := map[string]bool{}

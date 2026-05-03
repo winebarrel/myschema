@@ -158,6 +158,18 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	}
 	res.Stmts = append(res.Stmts, idxRenameStmts...)
 
+	// CHECK constraint and FK rename directives are typo-guards only —
+	// MySQL has no in-place RENAME CONSTRAINT / RENAME FOREIGN KEY, so
+	// the diff still emits DROP+ADD via diffConstraints / diffForeignKeys
+	// below. Validating up front means a typo'd source name aborts the
+	// plan instead of silently dropping + adding the wrong target.
+	if err := validateConstraintRenames(fqtn, current.Constraints, desired.Constraints); err != nil {
+		return nil, err
+	}
+	if err := validateForeignKeyRenames(fqtn, current.ForeignKeys, desired.ForeignKeys); err != nil {
+		return nil, err
+	}
+
 	colStmts, colDisallowed := diffColumns(fqtn, current.Columns, desired.Columns, dc)
 	res.Stmts = append(res.Stmts, colStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, colDisallowed...)

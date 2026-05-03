@@ -24,4 +24,10 @@ type Constraint struct {
 	Definition string   // post-parenthesis body, e.g. `(a, b)` or `CHECK (x > 0)`
 	Columns    []string // empty for CHECK
 	Enforced   bool     // CHECK only
+	// RenameFrom: previous constraint name from a `-- myschema:renamed-from`
+	// directive on the desired side. CHECK constraints only — PRIMARY KEY
+	// has the fixed name "PRIMARY" and is never renamed via directive.
+	// MySQL has no in-place RENAME CONSTRAINT, so this is consumed only
+	// as a typo guard at plan time; the diff still emits DROP+ADD.
+	RenameFrom *string
 }

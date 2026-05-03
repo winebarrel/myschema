@@ -1,0 +1,31 @@
+# CHECK-constraint rename via inline -- myschema:renamed-from. MySQL has
+# no in-place RENAME CONSTRAINT, so the diff still emits DROP CHECK +
+# ADD CONSTRAINT — the directive only acts as a typo guard at plan
+# time (the source name must exist on the current side; otherwise the
+# plan errors out instead of silently mis-targeting). verify_no_drift
+# below proves the round-trip closes after apply.
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      age INT,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_age_old CHECK (age >= 0)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      age INT,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from chk_age_old
+      CONSTRAINT chk_age_nonneg CHECK (age >= 0)
+  );
+
+allow_drop:
+  - constraint
+
+applied: |
+  ALTER TABLE myschema_test.users DROP CHECK chk_age_old;
+  ALTER TABLE myschema_test.users ADD CONSTRAINT chk_age_nonneg CHECK (age >= 0);
+
+verify_no_drift: true

@@ -121,6 +121,22 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				o := old
 				idx.RenameFrom = &o
 			}
+			for name, old := range inlineRenames.Constraints {
+				con, ok := t.Constraints.GetOk(name)
+				if !ok {
+					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target constraint %q not found in CREATE TABLE", t.FQTN(), old, name)
+				}
+				o := old
+				con.RenameFrom = &o
+			}
+			for name, old := range inlineRenames.ForeignKeys {
+				fk, ok := t.ForeignKeys.GetOk(name)
+				if !ok {
+					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target foreign key %q not found in CREATE TABLE", t.FQTN(), old, name)
+				}
+				o := old
+				fk.RenameFrom = &o
+			}
 			if len(inlineRenames.Unsupported) > 0 {
 				u := inlineRenames.Unsupported[0]
 				return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: %s", t.FQTN(), u.OldName, u.Reason)
@@ -173,7 +189,11 @@ func rejectMisplacedRenameDirectives(stmtRename string, inline *InlineRenames, s
 	switch {
 	case stmtRename != "":
 		return fmt.Errorf("-- myschema:renamed-from %s: directive is only supported on CREATE TABLE, not %s", stmtRename, stmtKind)
-	case len(inline.Columns) > 0, len(inline.Indexes) > 0, len(inline.Unsupported) > 0:
+	case len(inline.Columns) > 0,
+		len(inline.Indexes) > 0,
+		len(inline.Constraints) > 0,
+		len(inline.ForeignKeys) > 0,
+		len(inline.Unsupported) > 0:
 		return fmt.Errorf("-- myschema:renamed-from: directive is only supported inside CREATE TABLE, not %s", stmtKind)
 	}
 	return nil
