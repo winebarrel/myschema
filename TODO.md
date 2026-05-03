@@ -33,7 +33,6 @@ Open items only. Done work is in `git log` / closed PRs.
       reads / orders the tables it manages, so an FK whose target lives
       in another database is treated as a black box. Apply will fail
       if the referenced table doesn't already exist; plan can't help.
-- [ ] **Column position (`AFTER`, `FIRST`)** when adding new columns.
 
 ## Medium — object coverage
 

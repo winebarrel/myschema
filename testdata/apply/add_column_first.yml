@@ -1,0 +1,20 @@
+# A new column at the head of desired SQL — no previous column exists
+# in current to anchor against — gets `FIRST` so MySQL puts it at the
+# very start of the row, not at the end.
+init: |
+  CREATE TABLE users (
+      name VARCHAR(64) NOT NULL,
+      PRIMARY KEY (name)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      name VARCHAR(64) NOT NULL,
+      PRIMARY KEY (name)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.users ADD COLUMN id bigint NOT NULL FIRST;
+
+verify_no_drift: true

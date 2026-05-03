@@ -1,0 +1,25 @@
+# ADD COLUMN now carries a positional clause derived from the
+# desired-side column order: a new column inserted in the middle of
+# desired SQL gets `AFTER <prev existing>`, not silently appended to
+# the end of the row. Without the AFTER clause the catalog would
+# place `name` at the end (after `created_at`), drifting against the
+# desired order forever.
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      name VARCHAR(64) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.users ADD COLUMN name varchar(64) NOT NULL AFTER id;
+
+verify_no_drift: true
