@@ -947,3 +947,179 @@ func TestDiffRenameForeignKeyMissingSourceErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "renamed-from")
 	assert.Contains(t, err.Error(), "ghost_fk")
 }
+
+func TestDiffRenameConstraintDuplicateSourceErrors(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("age", col("age", "int"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.Constraints.Set("chk_old", &model.Constraint{
+		Name: "chk_old", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+	})
+	current.Set("shop.users", cur)
+
+	from := "chk_old"
+	want := tbl("shop", "users")
+	want.Columns.Set("id", col("id", "bigint"))
+	want.Columns.Set("age", col("age", "int"))
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	a := &model.Constraint{
+		Name: "chk_age_a", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+		RenameFrom: &from,
+	}
+	want.Constraints.Set("chk_age_a", a)
+	b := &model.Constraint{
+		Name: "chk_age_b", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+		RenameFrom: &from,
+	}
+	want.Constraints.Set("chk_age_b", b)
+	desired.Set("shop.users", want)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "multiple")
+	assert.Contains(t, err.Error(), "chk_old")
+}
+
+func TestDiffRenameForeignKeyDuplicateSourceErrors(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	users := tbl("shop", "users")
+	users.Columns.Set("id", col("id", "bigint"))
+	users.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", users)
+
+	posts := tbl("shop", "posts")
+	posts.Columns.Set("id", col("id", "bigint"))
+	posts.Columns.Set("user_id", col("user_id", "bigint"))
+	posts.Constraints.Set("PRIMARY", pkConstraint())
+	posts.ForeignKeys.Set("fk_old", &model.ForeignKey{
+		Name: "fk_old", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"}, RefDB: "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.posts", posts)
+
+	dUsers := tbl("shop", "users")
+	dUsers.Columns.Set("id", col("id", "bigint"))
+	dUsers.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.users", dUsers)
+
+	from := "fk_old"
+	dPosts := tbl("shop", "posts")
+	dPosts.Columns.Set("id", col("id", "bigint"))
+	dPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	dPosts.Constraints.Set("PRIMARY", pkConstraint())
+	dPosts.ForeignKeys.Set("fk_a", &model.ForeignKey{
+		Name: "fk_a", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"}, RefDB: "shop", RefTable: "users", RefCols: []string{"id"},
+		RenameFrom: &from,
+	})
+	dPosts.ForeignKeys.Set("fk_b", &model.ForeignKey{
+		Name: "fk_b", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"}, RefDB: "shop", RefTable: "users", RefCols: []string{"id"},
+		RenameFrom: &from,
+	})
+	desired.Set("shop.posts", dPosts)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "multiple")
+	assert.Contains(t, err.Error(), "fk_old")
+}
+
+func TestDiffRenameConstraintSourceAlsoDeclaredErrors(t *testing.T) {
+	// Desired declares both the source CHECK (chk_old) and the
+	// destination CHECK (chk_new with renamed-from chk_old). Without the
+	// guard the diff would DROP+ADD chk_new and then ADD chk_old, almost
+	// certainly not what the user meant.
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("age", col("age", "int"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	cur.Constraints.Set("chk_old", &model.Constraint{
+		Name: "chk_old", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+	})
+	current.Set("shop.users", cur)
+
+	from := "chk_old"
+	want := tbl("shop", "users")
+	want.Columns.Set("id", col("id", "bigint"))
+	want.Columns.Set("age", col("age", "int"))
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	want.Constraints.Set("chk_old", &model.Constraint{
+		Name: "chk_old", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+	}) // source still declared in desired
+	want.Constraints.Set("chk_new", &model.Constraint{
+		Name: "chk_new", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+		RenameFrom: &from,
+	})
+	desired.Set("shop.users", want)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "also declared")
+	assert.Contains(t, err.Error(), "chk_old")
+}
+
+func TestDiffRenameForeignKeySourceAlsoDeclaredErrors(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	users := tbl("shop", "users")
+	users.Columns.Set("id", col("id", "bigint"))
+	users.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", users)
+
+	posts := tbl("shop", "posts")
+	posts.Columns.Set("id", col("id", "bigint"))
+	posts.Columns.Set("user_id", col("user_id", "bigint"))
+	posts.Constraints.Set("PRIMARY", pkConstraint())
+	posts.ForeignKeys.Set("fk_old", &model.ForeignKey{
+		Name: "fk_old", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"}, RefDB: "shop", RefTable: "users", RefCols: []string{"id"},
+	})
+	current.Set("shop.posts", posts)
+
+	dUsers := tbl("shop", "users")
+	dUsers.Columns.Set("id", col("id", "bigint"))
+	dUsers.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.users", dUsers)
+
+	from := "fk_old"
+	dPosts := tbl("shop", "posts")
+	dPosts.Columns.Set("id", col("id", "bigint"))
+	dPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	dPosts.Constraints.Set("PRIMARY", pkConstraint())
+	dPosts.ForeignKeys.Set("fk_old", &model.ForeignKey{
+		Name: "fk_old", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"}, RefDB: "shop", RefTable: "users", RefCols: []string{"id"},
+	}) // source still declared
+	dPosts.ForeignKeys.Set("fk_new", &model.ForeignKey{
+		Name: "fk_new", Database: "shop", Table: "posts",
+		Columns: []string{"user_id"}, RefDB: "shop", RefTable: "users", RefCols: []string{"id"},
+		RenameFrom: &from,
+	})
+	desired.Set("shop.posts", dPosts)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "also declared")
+	assert.Contains(t, err.Error(), "fk_old")
+}
