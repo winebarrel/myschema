@@ -657,7 +657,8 @@ func TestExtractExecuteDirective(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cs, rest, ok := parser.ExtractExecuteDirective(tc.piece)
+			cs, rest, ok, err := parser.ExtractExecuteDirective(tc.piece)
+			require.NoError(t, err)
 			assert.Equal(t, tc.wantOK, ok)
 			if tc.wantOK {
 				assert.Equal(t, tc.wantCS, cs)
@@ -702,6 +703,75 @@ func TestValidateDirectivesRejectsMalformedExecute(t *testing.T) {
 	err := parser.ValidateDirectives("-- myschema:execute\nCREATE TRIGGER tr ...")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "malformed -- myschema:execute")
+}
+
+func TestExtractExecuteDirectiveRejectsMultipleDirectives(t *testing.T) {
+	// Two `-- myschema:execute` directives stacked in the leading
+	// comment block is ambiguous (which guards the next statement?).
+	// Mirror ExtractStmtRenameFrom's "multiple" guard and error.
+	_, _, _, err := parser.ExtractExecuteDirective(
+		"-- myschema:execute SELECT 1\n" +
+			"-- myschema:execute SELECT 2\n" +
+			"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple")
+	assert.Contains(t, err.Error(), "execute")
+}
+
+func TestParseSQLRejectsExecuteCombinedWithRenameDirective(t *testing.T) {
+	// Stacking `myschema:execute` with `myschema:renamed-from` in the
+	// same piece is ambiguous — both describe how to act on the next
+	// statement, but execute short-circuits the vitess parse so the
+	// rename would be silently dropped. Reject upfront.
+	_, err := parser.ParseSQL(
+		"-- myschema:renamed-from old_trg\n"+
+			"-- myschema:execute SELECT 1\n"+
+			"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;",
+		"shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myschema:execute")
+	assert.Contains(t, err.Error(), "renamed-from")
+}
+
+func TestParseSQLRejectsExecuteWithNonSelectCheck(t *testing.T) {
+	// The check SQL is run on every plan / apply, so accidentally
+	// putting DDL/DML there would silently mutate the database.
+	// Vitess Parse + type-switch keeps the check read-only.
+	cases := []string{
+		"DELETE FROM t WHERE id = 1",
+		"INSERT INTO t (id) VALUES (1)",
+		"DROP TABLE t",
+		"SELECT 1; DELETE FROM t",
+	}
+	for _, ck := range cases {
+		t.Run(ck, func(t *testing.T) {
+			_, err := parser.ParseSQL(
+				"-- myschema:execute "+ck+"\n"+
+					"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;",
+				"shop")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "myschema:execute")
+		})
+	}
+}
+
+func TestParseSQLAcceptsExecuteWithUnionAndWithCheck(t *testing.T) {
+	// UNION and WITH … SELECT are read-only check shapes — both
+	// must pass the validator. (vitess folds WITH into the Select
+	// shape, so the type switch sees *sqlparser.Select for it.)
+	for _, ck := range []string{
+		"SELECT 1 UNION SELECT 2",
+		"WITH c AS (SELECT 1 AS x) SELECT x FROM c",
+	} {
+		t.Run(ck, func(t *testing.T) {
+			_, err := parser.ParseSQL(
+				"-- myschema:execute "+ck+"\n"+
+					"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;",
+				"shop")
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestParseSQLExecutePayloadWithInternalSemicolonsFails(t *testing.T) {

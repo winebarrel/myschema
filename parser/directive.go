@@ -115,16 +115,22 @@ func ValidateDirectives(rawSQL string) error {
 // typical execute payload (CREATE TRIGGER, CREATE PROCEDURE, …) so
 // the parser pipeline carries it as raw text.
 //
+// Multiple `-- myschema:execute` directives in the same leading
+// comment block return an error — ambiguous and almost always a typo,
+// matching ExtractStmtRenameFrom's "multiple directives" guard.
+//
 // `ok` is false when the piece doesn't start with an execute
 // directive; the caller falls through to the regular vitess parse
 // path in that case.
-func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool) {
+func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool, err error) {
 	// Walk the leading lines to find either the execute directive or
 	// the first real SQL line. Only an execute directive that sits
 	// before any SQL line counts — same shape as ExtractStmtRenameFrom,
 	// where the directive must precede the statement it guards.
 	lines := strings.Split(piece, "\n")
 	var inBlock bool
+	var firstCheck string
+	firstIdx := -1
 	for i, line := range lines {
 		// Multi-line block-comment continuation — skip until we hit
 		// the closing `*/`, then re-process anything after it.
@@ -154,17 +160,30 @@ func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool)
 			if m == nil {
 				continue // some other `--` comment, skip
 			}
-			// Strip the directive line and any leading blanks from
-			// what's left; the remainder is the SQL the directive
-			// guards.
-			rest := strings.TrimLeft(strings.Join(lines[i+1:], "\n"), " \t\n")
-			return m[1], rest, true
+			if firstIdx >= 0 {
+				return "", "", false, fmt.Errorf("multiple -- myschema:execute directives in the same leading comment block (%q then %q); only one is allowed", firstCheck, m[1])
+			}
+			firstCheck = m[1]
+			firstIdx = i
+			continue
 		}
-		// Real SQL line reached without seeing the directive — not
-		// an execute group.
-		return "", "", false
+		// Real SQL line reached. If we saw an execute directive in
+		// the leading block, return it now; otherwise this is just a
+		// regular non-execute piece.
+		if firstIdx >= 0 {
+			rest := strings.TrimLeft(strings.Join(lines[firstIdx+1:], "\n"), " \t\n")
+			return firstCheck, rest, true, nil
+		}
+		return "", "", false, nil
 	}
-	return "", "", false
+	if firstIdx >= 0 {
+		// No SQL line in the piece at all — the guarded statement is
+		// missing. Caller turns the empty remainder into the
+		// "missing the SQL statement" error.
+		rest := strings.TrimLeft(strings.Join(lines[firstIdx+1:], "\n"), " \t\n")
+		return firstCheck, rest, true, nil
+	}
+	return "", "", false, nil
 }
 
 // ExtractStmtRenameFrom returns the old name from a leading

@@ -92,7 +92,33 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		// plan / apply talk to MySQL directly. Done before the rename
 		// extractors so an `execute` block doesn't waste cycles
 		// looking for renames inside an opaque payload.
-		if checkSQL, executeSQL, ok := ExtractExecuteDirective(piece); ok {
+		checkSQL, executeSQL, ok, err := ExtractExecuteDirective(piece)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			// `-- myschema:execute` and `-- myschema:renamed-from` both
+			// describe how to act on the *next* statement, so stacking
+			// them is ambiguous. Reject upfront instead of silently
+			// dropping one — the rename branch wouldn't run anyway
+			// because we short-circuit the vitess parse below.
+			if stmtRename, rErr := ExtractStmtRenameFrom(piece); rErr != nil {
+				return nil, rErr
+			} else if stmtRename != "" {
+				return nil, fmt.Errorf("-- myschema:execute %q and -- myschema:renamed-from %q in the same statement: directives cannot be combined", checkSQL, stmtRename)
+			}
+			if inline := ExtractInlineRenames(piece); len(inline.Columns)+len(inline.Indexes)+len(inline.Constraints)+len(inline.ForeignKeys)+len(inline.Unsupported) > 0 {
+				return nil, fmt.Errorf("-- myschema:execute %q: -- myschema:renamed-from cannot appear inside an execute payload (the payload is held as raw SQL and never parsed)", checkSQL)
+			}
+			// Validate the check SQL is read-only: it runs on every
+			// plan / apply, so accidentally writing DDL/DML here would
+			// surprise the user. SELECT / WITH / UNION are the safe
+			// shapes; anything else (INSERT, UPDATE, DDL, multi-stmt)
+			// must error here so the mistake surfaces at parse time
+			// rather than at first plan run.
+			if cErr := validateExecuteCheckSQL(p, checkSQL); cErr != nil {
+				return nil, fmt.Errorf("-- myschema:execute %q: %w", checkSQL, cErr)
+			}
 			executeSQL = strings.TrimSpace(executeSQL)
 			if executeSQL == "" {
 				return nil, fmt.Errorf("-- myschema:execute %q: missing the SQL statement that the directive guards (write the SQL on the line(s) after the directive)", checkSQL)
@@ -209,6 +235,44 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 	}
 
 	return &ParseResult{Tables: tables, Views: views, Executes: executes}, nil
+}
+
+// validateExecuteCheckSQL parses checkSQL through vitess and ensures it
+// is a single read-only statement (Select / Union — vitess folds WITH
+// into the Select shape). Anything else (INSERT / UPDATE / DDL /
+// multi-statement) errors so a check that would mutate the database
+// during plan / apply is caught at parse time rather than discovered
+// when it runs.
+func validateExecuteCheckSQL(p *sqlparser.Parser, checkSQL string) error {
+	pieces, err := p.SplitStatementToPieces(checkSQL)
+	if err != nil {
+		return fmt.Errorf("check SQL does not parse: %w", err)
+	}
+	// More than one piece means an internal `;` separating statements,
+	// which would let a SELECT smuggle a follow-up DDL/DML past the
+	// type check below.
+	nonEmpty := 0
+	var only string
+	for _, piece := range pieces {
+		if strings.TrimSpace(piece) == "" {
+			continue
+		}
+		nonEmpty++
+		only = piece
+	}
+	if nonEmpty != 1 {
+		return fmt.Errorf("check SQL must be exactly one statement (got %d)", nonEmpty)
+	}
+	stmt, err := p.Parse(only)
+	if err != nil {
+		return fmt.Errorf("check SQL does not parse: %w", err)
+	}
+	switch stmt.(type) {
+	case *sqlparser.Select, *sqlparser.Union:
+		return nil
+	default:
+		return fmt.Errorf("check SQL must be a SELECT (or UNION / WITH … SELECT); got %T", stmt)
+	}
 }
 
 // rejectMisplacedRenameDirectives errors if any rename directives were

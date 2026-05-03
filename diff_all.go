@@ -107,10 +107,11 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 			// which the CLI prints one statement per line. A multi-
 			// line ExecuteSQL (CREATE TRIGGER … BEGIN … END is the
 			// motivating case) would otherwise leak its body lines
-			// past the leading `--`, so the body becomes raw SQL in
-			// the output. Collapse internal whitespace runs to a
-			// single space so the whole statement fits on one line.
-			oneLine := strings.Join(strings.Fields(eg.ExecuteSQL), " ")
+			// past the leading `--`. Replace newlines and tabs with
+			// single spaces — strings.Fields would also collapse
+			// whitespace inside string literals and comments, which
+			// would misrepresent what's actually in the desired SQL.
+			oneLine := strings.NewReplacer("\n", " ", "\t", " ").Replace(eg.ExecuteSQL)
 			disallowed = append(disallowed, "-- skipped (myschema:execute check matched): "+oneLine)
 			continue
 		}
