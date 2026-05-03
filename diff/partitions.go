@@ -30,11 +30,17 @@ import (
 //     is a future PR).
 //   - HASH/KEY (incl. LINEAR) — partition count change goes
 //     through dedicated grammar: `ADD PARTITION PARTITIONS n`
-//     to grow, `COALESCE PARTITION n` to shrink (gated on
-//     `--allow-drop=partition` because it discards data).
-//     Equal count = no-op. Header (Type / IsLinear /
-//     KeyAlgorithm / ColList / Expr) mismatch falls through to
-//     "scheme/expression differs" upstream of this branch.
+//     to grow, `COALESCE PARTITION n` to shrink. Both rewrite
+//     table data (the hash modulus changes, so MySQL has to
+//     redistribute existing rows across the new partition set);
+//     no rows are lost in either direction. The shrink path is
+//     gated on `--allow-drop=partition` not because data is
+//     discarded but because the slot structure changes
+//     irreversibly — same "destructive / heavy" treatment as
+//     RANGE/LIST DROP. Equal count = no-op. Header
+//     (Type / IsLinear / KeyAlgorithm / ColList / Expr) mismatch
+//     falls through to "scheme/expression differs" upstream of
+//     this branch.
 //   - RANGE/LIST: definitions go through an order-preserving
 //     subset diff. Pure suffix add (current's list is a prefix
 //     of desired's) → ADD PARTITION. Order-preserving subset
@@ -84,15 +90,22 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// HASH / KEY (incl. LINEAR) — `partitionHeaderEqual` already
 	// confirmed Type, IsLinear, KeyAlgorithm, ColList and Expr
 	// match, so the only remaining axis is the `PARTITIONS n`
-	// count. MySQL has dedicated grammar for this:
+	// count. MySQL has dedicated grammar for this; both directions
+	// move row data because the hash modulus changes:
 	//   - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n`
-	//     (n = desired - current). No data loss; new
-	//     partitions are empty until the next rebalance.
+	//     (n = desired - current). MySQL redistributes existing
+	//     rows across the wider partition set during the ALTER —
+	//     no row loss, but expect proportional I/O on a large
+	//     table.
 	//   - shrinking → `ALTER TABLE … COALESCE PARTITION n`
-	//     (n = current - desired). Discards the trailing
-	//     partitions and rebalances rows into the survivors,
-	//     so it's gated on `--allow-drop=partition` like
-	//     RANGE/LIST DROP.
+	//     (n = current - desired). Merges the trailing partitions
+	//     into the survivors and redistributes their rows. Also
+	//     row-preserving, but the slot structure itself goes away
+	//     irreversibly (un-COALESCE means another full ALTER
+	//     either way), so it's gated on `--allow-drop=partition`
+	//     like RANGE/LIST DROP — same "destructive / heavy"
+	//     treatment, just at the slot level rather than the row
+	//     level.
 	// Equal counts (or both unset) → no-op. The raw-string fast
 	// path at the top usually catches that, but `partitionHeaderEqual`
 	// lower-cases ColList / Expr identifiers, so an

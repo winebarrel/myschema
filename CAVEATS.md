@@ -212,13 +212,22 @@ patterns:
   share the same partition strategy (Type / IsLinear /
   KeyAlgorithm / ColList / Expr), only `PARTITIONS n` differs.
   Generates the count-based grammar:
-  - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n` (no
-    data loss, new slots are empty until the next rebalance).
-  - shrinking → `ALTER TABLE … COALESCE PARTITION n`. MySQL
-    rebalances rows from the dropped slots into the survivors,
-    but the slots themselves go away — so it's gated on
-    `--allow-drop=partition` like RANGE/LIST DROP. Without
-    the flag the COALESCE lands on the disallowed bucket.
+  - growing → `ALTER TABLE … ADD PARTITION PARTITIONS n`.
+    Changing the partition count changes the hash modulus, so
+    MySQL redistributes existing rows across the new partition
+    set during the ALTER. No row loss, but this is a
+    data-moving operation; expect proportional I/O on a large
+    table.
+  - shrinking → `ALTER TABLE … COALESCE PARTITION n`. Merges
+    the trailing partitions into the survivors, redistributing
+    their rows in the process — also no row loss, also
+    data-moving. Gated on `--allow-drop=partition` even though
+    the data is preserved: the slot structure itself changes
+    irreversibly (you can't un-COALESCE without another
+    full ALTER, and either direction rewrites table data),
+    so it lines up with the same "destructive / heavy" treatment
+    RANGE/LIST DROP gets. Without the flag the COALESCE lands
+    on the disallowed bucket.
 
 **Diffs that still error (manage by hand).**
 

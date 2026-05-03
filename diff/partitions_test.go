@@ -111,10 +111,12 @@ func TestDiffPartitionsKEYCountGrow(t *testing.T) {
 }
 
 func TestDiffPartitionsKEYCountShrinkRequiresAllowDrop(t *testing.T) {
-	// COALESCE PARTITION discards rows from the trailing
-	// partitions, so it's gated on `--allow-drop=partition` like
-	// RANGE/LIST DROP. Without that flag the COALESCE lands on
-	// the disallowed bucket; with it, it's emitted.
+	// COALESCE PARTITION merges the trailing partitions into the
+	// survivors and redistributes their rows (no row loss), but
+	// the slot structure itself goes away irreversibly, so it's
+	// gated on `--allow-drop=partition` like RANGE/LIST DROP.
+	// Without that flag the COALESCE lands on the disallowed
+	// bucket; with it, it's emitted.
 	cur := stringPtr("partition by key (user_id) partitions 4")
 	des := stringPtr("partition by key (user_id) partitions 2")
 
