@@ -328,16 +328,32 @@ patterns:
   bringing the table under myschema's management.
 
 **Workaround for the "two systems of record" problem.** When
-the diff errors out (mid-list / HASH-count / scheme /
-SUBPARTITION), run the appropriate ALTER by hand —
-`ALTER TABLE … REORGANIZE PARTITION old1, old2 INTO (…)` for
-mid-list value changes, `ALTER TABLE … COALESCE PARTITION n`
-or `ALTER TABLE … ADD PARTITION PARTITIONS n` for HASH/KEY
-count changes, `ALTER TABLE … REMOVE PARTITIONING` followed by
-`ALTER TABLE … PARTITION BY …` for scheme / expression changes
-— then update the desired SQL's `PARTITION BY` clause to match.
-The next `plan` will report no diff. Keep the desired SQL and
-the live database in lockstep yourself for those cases.
+the diff errors out — split / merge / reorder REORGANIZE
+shapes, scheme / expression changes, adding or removing
+partitioning entirely, SUBPARTITION — run the appropriate
+ALTER by hand:
+
+- *split / merge / reorder* — `ALTER TABLE … REORGANIZE
+  PARTITION old1, old2 INTO (PARTITION newA VALUES …,
+  PARTITION newB VALUES …)` with the boundaries you want
+  (myschema can't infer split points safely from a name-only
+  diff). For pure retention-discard the explicit
+  `DROP PARTITION` + `ADD PARTITION` pair is the right call.
+- *scheme / expression change* — `ALTER TABLE … REMOVE
+  PARTITIONING` followed by a fresh `ALTER TABLE …
+  PARTITION BY …`.
+- *first-time partitioning* — `ALTER TABLE … PARTITION BY …`
+  by hand once.
+- *removing partitioning* — `ALTER TABLE … REMOVE
+  PARTITIONING` by hand once.
+
+After running the manual ALTER, update the desired SQL's
+`PARTITION BY` clause (or remove it) to match. The next
+`plan` will report no diff. The supported shapes —
+RANGE/LIST suffix add, order-preserving subset DROP,
+HASH/KEY (incl. LINEAR) count grow / shrink, and pure
+value-change REORGANIZE — don't need a workaround; myschema
+generates them automatically.
 
 ## View `DEFINER` and `SQL SECURITY` are out of scope
 

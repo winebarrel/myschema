@@ -1,0 +1,31 @@
+# Reorder regression: catalog [p0, p1, p2], desired [p0, p2, p1]
+# (LIST so the values can legally appear out of order). The
+# subset walk produces drops=[p1], adds=[p1] — name lists
+# match positionally, so an earlier version of the diff would
+# have generated a REORGANIZE PARTITION p1 INTO (p1 …) that
+# can't actually move p1 past p2 on disk. The full-list
+# comparison catches the reorder and surfaces the
+# split / merge / reorder error instead.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 2),
+      PARTITION p1 VALUES IN (3, 4),
+      PARTITION p2 VALUES IN (5, 6)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 2),
+      PARTITION p2 VALUES IN (5, 6),
+      PARTITION p1 VALUES IN (3, 4)
+  );
+
+error: "split / merge / reorder"

@@ -51,10 +51,14 @@ import (
 //     current) → DROP PARTITION — head, middle, and tail
 //     removals are all generated, since `ALTER TABLE … DROP
 //     PARTITION p1, p2` accepts a discontinuous name list.
-//     Anything else (a value change, an interior insert, or a
-//     reorder — i.e. the diff yields both an ADD list AND a
-//     DROP list) → error so the user falls back to manual
-//     REORGANIZE.
+//     Pure value-change of existing partitions (drops + adds
+//     both non-empty AND the full catalog / desired name lists
+//     line up position-by-position with identical names) →
+//     `REORGANIZE PARTITION p1, p2, … INTO (…)`. Anything else
+//     (split / merge / reorder / interior insert — i.e. the
+//     name lists don't line up) → error so the user falls back
+//     to a hand-written REORGANIZE with explicit boundaries
+//     (or a DROP+ADD pair if discarding data is intended).
 //
 // CAVEATS.md "Partitioning" documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {
@@ -169,8 +173,16 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//       data is intended) by hand.
 	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
 	if len(drops) > 0 && len(adds) > 0 {
-		if !partitionNameListEqual(drops, adds) {
-			return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs split / merge / reorder (the dropped and added partition name lists don't line up position-by-position); only a pure value-change of the same partitions is generated automatically. Run REORGANIZE PARTITION (with the boundaries you want), or a DROP + ADD pair if you really do want to discard data, by hand", fqtn)
+		// "Pure value-change" requires more than just drops and adds
+		// having matching names — the *whole* partition list has to
+		// be in the same order on both sides. Otherwise a reorder
+		// like `[p0,p1,p2] → [p0,p2,p1]` would slip through (the
+		// subset walk drops `p1`, matches `p2`, leaves `adds=[p1]`,
+		// drops/adds names line up) and we'd emit a REORGANIZE that
+		// can't actually reorder partitions on disk. Compare the
+		// full name lists instead.
+		if !partitionNameListEqual(curDefs, desDefs) {
+			return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs split / merge / reorder (the catalog and desired partition name lists don't line up position-by-position); only a pure value-change of the same partitions in the same order is generated automatically. Run REORGANIZE PARTITION (with the boundaries you want), or a DROP + ADD pair if you really do want to discard data, by hand", fqtn)
 		}
 		var b strings.Builder
 		b.WriteString("ALTER TABLE ")
