@@ -9,15 +9,6 @@ Open items only. Done work is in `git log` / closed PRs.
 - *Sequences.* MySQL has no sequence object; TiDB does, but myschema
   is MySQL-targeted. A TiDB profile could lift this later.
 
-## High — correctness bugs
-
-- [ ] **`DROP TABLE` ordering when one being-dropped table is
-      FK-referenced by another being-dropped table.** Currently the
-      drop order is alphabetical by `TABLE_NAME`; if the parent comes
-      first the apply errors. The `FKDropStmts → DropStmts` bucket
-      separation handles the simple case but not all variants. Needs
-      a topo-sort pass, mirror of the view-side fix.
-
 ## High — production gates
 
 - [ ] **Extend `-- myschema:renamed-from` to constraints and FKs.**
