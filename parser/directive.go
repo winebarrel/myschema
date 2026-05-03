@@ -166,14 +166,21 @@ func reduceLeadingBlocks(trim string) (rest string, opened bool) {
 // InlineRenames separates inline rename directives by the kind of object
 // they attach to. Each supported map is keyed by the new (desired) name.
 type InlineRenames struct {
-	Columns map[string]string // new column name → old column name
-	Indexes map[string]string // new index  name → old index  name
+	Columns     map[string]string // new column name → old column name
+	Indexes     map[string]string // new index  name → old index  name
+	Constraints map[string]string // new CHECK constraint name → old name
+	ForeignKeys map[string]string // new FK name → old name
 	// Unsupported records directives whose target line resolved to an
-	// object kind we don't yet rename in place (constraints, FKs,
-	// PRIMARY KEY, anonymous FOREIGN KEY) or whose target line shape
-	// we couldn't parse. The parser turns these into errors so a typo
-	// or mis-positioned directive doesn't silently degrade into a
-	// destructive DROP+CREATE.
+	// object kind we don't rename via directive (PRIMARY KEY, anonymous
+	// FOREIGN KEY) or whose target line shape we couldn't parse. The
+	// parser turns these into errors so a typo or mis-positioned
+	// directive doesn't silently degrade into a destructive DROP+CREATE.
+	//
+	// Note: CHECK constraints and FKs *are* supported via Constraints /
+	// ForeignKeys above. They go through a typo-guard validation at
+	// plan time (the source name must exist on the current side) but
+	// the diff still emits DROP+ADD because MySQL has no in-place
+	// RENAME CONSTRAINT / RENAME FOREIGN KEY.
 	Unsupported []UnsupportedRename
 }
 
@@ -200,8 +207,10 @@ type UnsupportedRename struct {
 // still attaches to the next real target line.
 func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 	out := &InlineRenames{
-		Columns: map[string]string{},
-		Indexes: map[string]string{},
+		Columns:     map[string]string{},
+		Indexes:     map[string]string{},
+		Constraints: map[string]string{},
+		ForeignKeys: map[string]string{},
 	}
 	var pending string
 	var sawSQL bool
@@ -265,11 +274,10 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 			out.Columns[name] = pending
 		case inlineKindIndex:
 			out.Indexes[name] = pending
-		case inlineKindConstraint:
-			out.Unsupported = append(out.Unsupported, UnsupportedRename{
-				OldName: pending,
-				Reason:  "constraint / FK rename not yet supported (MySQL has no in-place RENAME CONSTRAINT)",
-			})
+		case inlineKindCheck:
+			out.Constraints[name] = pending
+		case inlineKindFK:
+			out.ForeignKeys[name] = pending
 		default:
 			out.Unsupported = append(out.Unsupported, UnsupportedRename{
 				OldName: pending,
@@ -296,7 +304,8 @@ const (
 	inlineKindUnknown inlineKind = iota
 	inlineKindColumn
 	inlineKindIndex
-	inlineKindConstraint
+	inlineKindCheck // CONSTRAINT name CHECK (...)
+	inlineKindFK    // CONSTRAINT name FOREIGN KEY (...)
 )
 
 // classifyInlineLine inspects a non-comment line inside a CREATE TABLE
@@ -329,14 +338,21 @@ func classifyInlineLine(line string) (inlineKind, string) {
 		return inlineKindIndex, name
 	}
 	if name, ok := backtickedNameAfterPrefix(line, []string{"CONSTRAINT"}); ok {
-		// `CONSTRAINT \`name\` UNIQUE …` is a unique index, not a
-		// regular constraint. Detect the UNIQUE keyword after the
-		// backticked name to route to inlineKindIndex.
+		// Distinguish the four named-constraint shapes by what follows the
+		// backticked name: UNIQUE → index, CHECK → CHECK constraint,
+		// FOREIGN [KEY] → FK. Anything else falls through to "unknown" so
+		// the parser flags the directive as unsupported.
 		rest := strings.TrimLeft(stripUntilAfterBacktickedName(line, "CONSTRAINT"), " \t")
-		if strings.HasPrefix(strings.ToUpper(rest), "UNIQUE") {
+		upRest := strings.ToUpper(rest)
+		switch {
+		case strings.HasPrefix(upRest, "UNIQUE"):
 			return inlineKindIndex, name
+		case strings.HasPrefix(upRest, "CHECK"):
+			return inlineKindCheck, name
+		case strings.HasPrefix(upRest, "FOREIGN"):
+			return inlineKindFK, name
 		}
-		return inlineKindConstraint, name
+		return inlineKindUnknown, ""
 	}
 	tokens := tokenize(line)
 	if len(tokens) == 0 {
@@ -383,18 +399,24 @@ func classifyInlineLine(line string) (inlineKind, string) {
 		}
 		return inlineKindIndex, stripBackticks(tokens[1])
 	case "CONSTRAINT":
-		if len(tokens) < 2 {
+		if len(tokens) < 3 {
 			return inlineKindUnknown, ""
 		}
-		// CONSTRAINT <name> UNIQUE [KEY|INDEX] (...) defines a unique
-		// *index* (renameable via ALTER TABLE … RENAME INDEX), not a
-		// regular constraint. myschema models UNIQUE this way too —
-		// the result lands in t.Indexes, so we route the directive to
-		// inlineKindIndex with the constraint/index name.
-		if len(tokens) >= 3 && strings.EqualFold(tokens[2], "UNIQUE") {
-			return inlineKindIndex, stripBackticks(tokens[1])
+		name := stripBackticks(tokens[1])
+		// Distinguish the four named-constraint shapes by what follows
+		// the name. UNIQUE [KEY|INDEX] is a unique *index* (renameable
+		// via ALTER TABLE … RENAME INDEX, lands in t.Indexes); CHECK
+		// and FOREIGN KEY have no in-place RENAME on MySQL — they're
+		// still threaded through as a typo-guard at plan time.
+		switch strings.ToUpper(tokens[2]) {
+		case "UNIQUE":
+			return inlineKindIndex, name
+		case "CHECK":
+			return inlineKindCheck, name
+		case "FOREIGN":
+			return inlineKindFK, name
 		}
-		return inlineKindConstraint, stripBackticks(tokens[1])
+		return inlineKindUnknown, ""
 	case "CHECK":
 		// anonymous CHECK (…) — no name to rename. Fall through to
 		// "unknown" so the parser flags the directive as unsupported.

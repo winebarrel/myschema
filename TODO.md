@@ -20,12 +20,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## High — production gates
 
-- [ ] **Extend `-- myschema:renamed-from` to constraints and FKs.**
-      v1 covers tables, columns, and secondary indexes (real ALTER
-      … RENAME). MySQL has no in-place RENAME for CHECK constraints
-      or foreign keys, so the diff already drops + adds — but
-      threading the directive through would let a typo'd old name
-      fail loudly instead of silently DROP+ADD with a wrong target.
 - [ ] **`--alter-extra` flag** to append free-form text to every
       generated `ALTER TABLE …` statement and every standalone
       `CREATE INDEX …` (e.g. `ALGORITHM=INPLACE, LOCK=NONE`). The diff

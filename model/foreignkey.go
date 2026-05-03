@@ -12,6 +12,11 @@ type ForeignKey struct {
 	OnDelete  string // empty when not specified; uppercased: RESTRICT, CASCADE, SET NULL, NO ACTION, SET DEFAULT
 	OnUpdate  string
 	MatchType string // empty, FULL, PARTIAL, SIMPLE
+	// RenameFrom: previous FK name from a `-- myschema:renamed-from`
+	// directive on the desired side. MySQL has no in-place RENAME
+	// FOREIGN KEY, so this is consumed only as a typo guard at plan
+	// time; the diff still emits DROP+ADD.
+	RenameFrom *string
 }
 
 // SQL builds the standalone ALTER TABLE ... ADD CONSTRAINT statement.

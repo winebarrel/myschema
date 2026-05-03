@@ -159,10 +159,13 @@ them off.
   on that one index. Errors fail the plan when the source object
   isn't present (typo'd old name shouldn't silently become a
   destructive DROP+CREATE); idempotent if the rename has already
-  been applied. Constraint and FK *names* (`fk_x` → `fk_y`) aren't
-  renameable in place by MySQL, so the directive isn't supported on
-  those targets — DROP+ADD is the only path and the diff already
-  does that.
+  been applied. CHECK constraints and foreign keys also accept the
+  directive as a typo guard: MySQL has no in-place RENAME CONSTRAINT
+  / RENAME FOREIGN KEY, so the diff still emits DROP+ADD, but the
+  directive is consumed at plan time so a source name that doesn't
+  exist on the current side aborts the plan with `renamed-from:
+  source … not found in current schema` instead of silently DROP+ADD'ing
+  the wrong target.
 
 **Operational rules** (declarative-by-design constraints; see
 `CAVEATS.md` for the full list and rationale):
@@ -189,11 +192,6 @@ rather than declarative schema. Manage them out of band.)
   diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
-- Constraint and foreign-key renames via `-- myschema:renamed-from`.
-  MySQL has no in-place `RENAME CONSTRAINT` / `RENAME FOREIGN KEY`,
-  so DROP+ADD is the only path and the diff already takes it; the
-  directive could later be wired through to validate that the source
-  name exists, mirroring the table/column/index path.
 - `-- myschema:execute` arbitrary-SQL escape hatch (the directive
   registry in `parser/directive.go` is already shaped for it; needs
   a parser pass, model bucket, and apply-time runner).

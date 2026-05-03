@@ -1,0 +1,24 @@
+# Typo-guard: a -- myschema:renamed-from on a CHECK constraint whose
+# old name doesn't exist on the current side must abort plan with a
+# clear error, instead of silently DROP+ADD'ing the wrong target.
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      age INT,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_age_old CHECK (age >= 0)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      age INT,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from chk_age_typo
+      CONSTRAINT chk_age_nonneg CHECK (age >= 0)
+  );
+
+allow_drop:
+  - constraint
+
+error: "renamed-from: source constraint myschema_test.users.chk_age_typo not found in current schema"

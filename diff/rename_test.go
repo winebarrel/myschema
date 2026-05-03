@@ -869,3 +869,81 @@ func TestDiffRenameTableSeparatesFromFKDropOnSameTable(t *testing.T) {
 	// table that exists at the moment the DROP runs.
 	assert.Contains(t, res.FKDropStmts[0], "ALTER TABLE shop.comments DROP FOREIGN KEY fk_user")
 }
+
+// constraint and FK rename directives -------------------------------------
+//
+// These exist as typo guards only — MySQL has no in-place RENAME
+// CONSTRAINT or RENAME FOREIGN KEY, so the diff still emits DROP+ADD.
+// The validation passes reject typo'd source names so the user gets a
+// loud plan-time error instead of the wrong target being silently
+// dropped + re-added.
+
+func TestDiffRenameConstraintMissingSourceErrors(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	cur := tbl("shop", "users")
+	cur.Columns.Set("id", col("id", "bigint"))
+	cur.Columns.Set("age", col("age", "int"))
+	cur.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", cur)
+
+	from := "ghost_chk"
+	want := tbl("shop", "users")
+	want.Columns.Set("id", col("id", "bigint"))
+	want.Columns.Set("age", col("age", "int"))
+	want.Constraints.Set("PRIMARY", pkConstraint())
+	chk := &model.Constraint{
+		Name: "chk_age", Type: model.CheckConstraint,
+		Definition: "CHECK (age >= 0)",
+		RenameFrom: &from,
+	}
+	want.Constraints.Set("chk_age", chk)
+	desired.Set("shop.users", want)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "ghost_chk")
+}
+
+func TestDiffRenameForeignKeyMissingSourceErrors(t *testing.T) {
+	current := orderedmap.New[string, *model.Table]()
+	desired := orderedmap.New[string, *model.Table]()
+
+	users := tbl("shop", "users")
+	users.Columns.Set("id", col("id", "bigint"))
+	users.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.users", users)
+
+	posts := tbl("shop", "posts")
+	posts.Columns.Set("id", col("id", "bigint"))
+	posts.Columns.Set("user_id", col("user_id", "bigint"))
+	posts.Constraints.Set("PRIMARY", pkConstraint())
+	current.Set("shop.posts", posts)
+
+	dUsers := tbl("shop", "users")
+	dUsers.Columns.Set("id", col("id", "bigint"))
+	dUsers.Constraints.Set("PRIMARY", pkConstraint())
+	desired.Set("shop.users", dUsers)
+
+	from := "ghost_fk"
+	dPosts := tbl("shop", "posts")
+	dPosts.Columns.Set("id", col("id", "bigint"))
+	dPosts.Columns.Set("user_id", col("user_id", "bigint"))
+	dPosts.Constraints.Set("PRIMARY", pkConstraint())
+	dPosts.ForeignKeys.Set("fk_user", &model.ForeignKey{
+		Name: "fk_user", Database: "shop", Table: "posts",
+		Columns:    []string{"user_id"},
+		RefDB:      "shop",
+		RefTable:   "users",
+		RefCols:    []string{"id"},
+		RenameFrom: &from,
+	})
+	desired.Set("shop.posts", dPosts)
+
+	_, err := diff.DiffTables(current, desired, allowAll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "renamed-from")
+	assert.Contains(t, err.Error(), "ghost_fk")
+}

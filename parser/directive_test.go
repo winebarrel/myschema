@@ -238,8 +238,8 @@ func TestExtractInlineRenamesBacktickedIndexNameWithSpace(t *testing.T) {
 		");")
 	assert.Equal(t, "old_idx", got.Indexes["weird name"])
 	assert.Equal(t, "old_uq", got.Indexes["also weird"])
-	require.Len(t, got.Unsupported, 1, "constraint with backticked name still surfaces as Unsupported (CHECK rename not in scope)")
-	assert.Equal(t, "old_chk", got.Unsupported[0].OldName)
+	assert.Equal(t, "old_chk", got.Constraints["chk one"], "backticked CHECK constraint with whitespace name routes to Constraints")
+	assert.Empty(t, got.Unsupported)
 }
 
 func TestExtractStmtRenameFromSkipsLeadingHashAndBlockComments(t *testing.T) {
@@ -328,12 +328,10 @@ func TestExtractInlineRenamesWhitespaceTolerant(t *testing.T) {
 	assert.Empty(t, got.Unsupported)
 }
 
-func TestExtractInlineRenamesConstraintIsUnsupported(t *testing.T) {
-	// A directive on a CONSTRAINT line is currently surfaced as
-	// Unsupported (not silently dropped, not silently mis-attached) so
-	// the parser caller can error out — MySQL has no in-place RENAME
-	// CONSTRAINT, so falling through to DROP+ADD with the wrong target
-	// would be a real regression.
+func TestExtractInlineRenamesCheckConstraint(t *testing.T) {
+	// A directive on a CONSTRAINT … CHECK line routes to Constraints.
+	// MySQL has no in-place RENAME CONSTRAINT, so the diff still emits
+	// DROP+ADD; the directive serves as a typo-guard at plan time.
 	got := parser.ExtractInlineRenames(`CREATE TABLE t (
     id INT NOT NULL,
     -- myschema:renamed-from old_chk
@@ -342,9 +340,25 @@ func TestExtractInlineRenamesConstraintIsUnsupported(t *testing.T) {
 );`)
 	assert.Empty(t, got.Columns)
 	assert.Empty(t, got.Indexes)
-	require.Len(t, got.Unsupported, 1)
-	assert.Equal(t, "old_chk", got.Unsupported[0].OldName)
-	assert.Contains(t, got.Unsupported[0].Reason, "constraint")
+	assert.Empty(t, got.ForeignKeys)
+	assert.Equal(t, "old_chk", got.Constraints["chk_id"])
+	assert.Empty(t, got.Unsupported)
+}
+
+func TestExtractInlineRenamesForeignKey(t *testing.T) {
+	// A directive on a CONSTRAINT … FOREIGN KEY line routes to ForeignKeys.
+	got := parser.ExtractInlineRenames(`CREATE TABLE posts (
+    id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    -- myschema:renamed-from old_fk
+    CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id),
+    PRIMARY KEY (id),
+    KEY idx_user (user_id)
+);`)
+	assert.Empty(t, got.Columns)
+	assert.Empty(t, got.Constraints)
+	assert.Equal(t, "old_fk", got.ForeignKeys["fk_user"])
+	assert.Empty(t, got.Unsupported)
 }
 
 func TestExtractInlineRenamesPrimaryKeyIsUnsupported(t *testing.T) {
@@ -363,18 +377,44 @@ func TestExtractInlineRenamesBacktickedNewName(t *testing.T) {
 	assert.Equal(t, "old", got.Columns["new"])
 }
 
-func TestParseSQLErrorsOnConstraintRenameDirective(t *testing.T) {
-	// End-to-end: a -- myschema:renamed-from on a CONSTRAINT line
-	// should propagate up as a ParseSQL error, not silently disappear.
-	_, err := parser.ParseSQL(`CREATE TABLE t (
+func TestParseSQLAcceptsConstraintRenameDirective(t *testing.T) {
+	// End-to-end: a -- myschema:renamed-from on a CONSTRAINT … CHECK line
+	// no longer errors at parse time. The CHECK constraint carries the
+	// RenameFrom marker through to the diff layer, which validates the
+	// source name against the current side as a typo-guard. ParseSQL
+	// itself is happy as long as the directive's target name resolves
+	// to a constraint inside the CREATE TABLE body.
+	res, err := parser.ParseSQL(`CREATE TABLE t (
     id INT NOT NULL,
     -- myschema:renamed-from old_chk
     CONSTRAINT chk_id CHECK (id > 0),
     PRIMARY KEY (id)
 );`, "shop")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "renamed-from")
-	assert.Contains(t, err.Error(), "old_chk")
+	require.NoError(t, err)
+	tbl, ok := res.Tables.GetOk("shop.t")
+	require.True(t, ok)
+	con, ok := tbl.Constraints.GetOk("chk_id")
+	require.True(t, ok)
+	require.NotNil(t, con.RenameFrom)
+	assert.Equal(t, "old_chk", *con.RenameFrom)
+}
+
+func TestParseSQLAcceptsForeignKeyRenameDirective(t *testing.T) {
+	res, err := parser.ParseSQL(`CREATE TABLE posts (
+    id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    -- myschema:renamed-from old_fk
+    CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id),
+    PRIMARY KEY (id),
+    KEY idx_user (user_id)
+);`, "shop")
+	require.NoError(t, err)
+	tbl, ok := res.Tables.GetOk("shop.posts")
+	require.True(t, ok)
+	fk, ok := tbl.ForeignKeys.GetOk("fk_user")
+	require.True(t, ok)
+	require.NotNil(t, fk.RenameFrom)
+	assert.Equal(t, "old_fk", *fk.RenameFrom)
 }
 
 func TestParseSQLErrorsOnDanglingRenameDirective(t *testing.T) {
