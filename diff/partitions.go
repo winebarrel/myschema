@@ -30,12 +30,17 @@ import (
 //     is a future PR).
 //   - HASH/KEY → error (count operations need their own grammar:
 //     COALESCE PARTITION / ADD PARTITION PARTITIONS n; future PR).
-//   - RANGE/LIST: definitions are compared positionally.
-//     Pure suffix add (current is a prefix of desired) → ADD
-//     PARTITION; pure suffix drop (desired is a prefix of
-//     current) → DROP PARTITION; anything else (mid-list insert,
-//     value change, reorder) → error so the user falls back to
-//     manual REORGANIZE.
+//   - RANGE/LIST: definitions go through an order-preserving
+//     subset diff. Pure suffix add (current's list is a prefix
+//     of desired's) → ADD PARTITION. Order-preserving subset
+//     drop (desired matches a same-order subsequence of
+//     current) → DROP PARTITION — head, middle, and tail
+//     removals are all generated, since `ALTER TABLE … DROP
+//     PARTITION p1, p2` accepts a discontinuous name list.
+//     Anything else (a value change, an interior insert, or a
+//     reorder — i.e. the diff yields both an ADD list AND a
+//     DROP list) → error so the user falls back to manual
+//     REORGANIZE.
 //
 // CAVEATS.md "Partitioning" documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {

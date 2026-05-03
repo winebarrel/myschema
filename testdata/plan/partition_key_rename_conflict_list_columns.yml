@@ -1,0 +1,26 @@
+# Same conflict shape against `PARTITION BY LIST COLUMNS(...)`.
+# Like KEY, COLUMNS partitioning carries the column refs in
+# `ColList`; the rename conflict detector's ColList fallback
+# must reject the rename here too.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      old_region CHAR(1) NOT NULL,
+      PRIMARY KEY (id, old_region)
+  ) PARTITION BY LIST COLUMNS(old_region) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D')
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      -- myschema:renamed-from old_region
+      region CHAR(1) NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST COLUMNS(region) (
+      PARTITION pAB VALUES IN ('A', 'B'),
+      PARTITION pCD VALUES IN ('C', 'D')
+  );
+
+error: "conflict with the partition expression"
