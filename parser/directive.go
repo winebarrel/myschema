@@ -11,6 +11,7 @@ import (
 // validator below errors on any directive whose name isn't listed.
 var knownDirectives = map[string]bool{
 	"renamed-from": true,
+	"execute":      true,
 }
 
 var (
@@ -36,6 +37,14 @@ var (
 	// myschema operates on a single database per invocation, so the
 	// directive only ever refers to an object inside that database.
 	renameDirectivePattern = regexp.MustCompile("(?m)^\\s*--+\\s*myschema:renamed-from\\s+(`[^`]+`|[A-Za-z_][A-Za-z0-9_$]*)\\s*$")
+
+	// executeDirectivePattern captures the check-SQL body from an
+	// execute directive. Group 1 is the rest-of-line after the
+	// directive prefix, trimmed of leading whitespace; the body is
+	// taken verbatim (free-form SELECT, no escaping or quoting rules).
+	// At least one non-space character is required so the body
+	// can't be empty.
+	executeDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:execute\s+(\S.*?)\s*$`)
 )
 
 // ValidateDirectives scans rawSQL for any -- myschema:<name> comment and
@@ -81,9 +90,100 @@ func ValidateDirectives(rawSQL string) error {
 			if !renameDirectivePattern.MatchString(trim) {
 				return fmt.Errorf("malformed -- myschema:renamed-from directive: %q (expected exactly one bareword or `backticked` identifier; schema-qualified names are not supported)", strings.TrimSpace(trim))
 			}
+		case "execute":
+			if !executeDirectivePattern.MatchString(trim) {
+				return fmt.Errorf("malformed -- myschema:execute directive: %q (expected `-- myschema:execute <check-sql>` with a non-empty check SQL on the same line)", strings.TrimSpace(trim))
+			}
 		}
 	}
 	return nil
+}
+
+// ExtractExecuteDirective looks at the first non-blank, non-comment-
+// stripped line of piece and, if it is an `-- myschema:execute
+// <check-sql>` directive, returns the check-SQL body and the
+// remainder of the piece (the SQL statement that the directive
+// guards) with the directive line removed.
+//
+// Comment handling mirrors ExtractStmtRenameFrom / ValidateDirectives:
+// `--` line comments, `#` line comments, and `/* … */` block comments
+// (single-line *and* multi-line) are skipped without breaking the
+// directive's anchor, and a directive after a `*/` on the same line
+// (`/* header */ -- myschema:execute …`) still counts.
+//
+// The remainder is returned verbatim — vitess can't parse the
+// typical execute payload (CREATE TRIGGER, CREATE PROCEDURE, …) so
+// the parser pipeline carries it as raw text.
+//
+// Multiple `-- myschema:execute` directives in the same leading
+// comment block return an error — ambiguous and almost always a typo,
+// matching ExtractStmtRenameFrom's "multiple directives" guard.
+//
+// `ok` is false when the piece doesn't start with an execute
+// directive; the caller falls through to the regular vitess parse
+// path in that case.
+func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool, err error) {
+	// Walk the leading lines to find either the execute directive or
+	// the first real SQL line. Only an execute directive that sits
+	// before any SQL line counts — same shape as ExtractStmtRenameFrom,
+	// where the directive must precede the statement it guards.
+	lines := strings.Split(piece, "\n")
+	var inBlock bool
+	var firstCheck string
+	firstIdx := -1
+	for i, line := range lines {
+		// Multi-line block-comment continuation — skip until we hit
+		// the closing `*/`, then re-process anything after it.
+		if inBlock {
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
+			}
+			inBlock = false
+			line = line[idx+2:]
+		}
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
+		if trim == "" {
+			continue
+		}
+		// `#` line-comments are skipped just like the rename-from
+		// extractor does — they don't break the directive's anchor.
+		if strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.HasPrefix(trim, "--") {
+			m := executeDirectivePattern.FindStringSubmatch(trim)
+			if m == nil {
+				continue // some other `--` comment, skip
+			}
+			if firstIdx >= 0 {
+				return "", "", false, fmt.Errorf("multiple -- myschema:execute directives in the same leading comment block (%q then %q); only one is allowed", firstCheck, m[1])
+			}
+			firstCheck = m[1]
+			firstIdx = i
+			continue
+		}
+		// Real SQL line reached. If we saw an execute directive in
+		// the leading block, return it now; otherwise this is just a
+		// regular non-execute piece.
+		if firstIdx >= 0 {
+			rest := strings.TrimLeft(strings.Join(lines[firstIdx+1:], "\n"), " \t\n")
+			return firstCheck, rest, true, nil
+		}
+		return "", "", false, nil
+	}
+	if firstIdx >= 0 {
+		// No SQL line in the piece at all — the guarded statement is
+		// missing. Caller turns the empty remainder into the
+		// "missing the SQL statement" error.
+		rest := strings.TrimLeft(strings.Join(lines[firstIdx+1:], "\n"), " \t\n")
+		return firstCheck, rest, true, nil
+	}
+	return "", "", false, nil
 }
 
 // ExtractStmtRenameFrom returns the old name from a leading
@@ -146,6 +246,40 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 		}
 	}
 	return oldName, nil
+}
+
+// payloadHasNoSQL reports whether s is empty or contains only blank
+// lines, `--` line comments, `#` line comments, and `/* … */` block
+// comments (single- and multi-line). Used by ParseSQL to catch the
+// case where a `-- myschema:execute <check>` directive is followed
+// only by comments or blank lines — without this guard, the
+// resulting ExecuteGroup would carry a comment-only payload and
+// MySQL would return "Query was empty" at apply time.
+func payloadHasNoSQL(s string) bool {
+	var inBlock bool
+	for line := range strings.SplitSeq(s, "\n") {
+		if inBlock {
+			idx := strings.Index(line, "*/")
+			if idx < 0 {
+				continue
+			}
+			inBlock = false
+			line = line[idx+2:]
+		}
+		trim, opened := reduceLeadingBlocks(strings.TrimSpace(line))
+		if opened {
+			inBlock = true
+			continue
+		}
+		if trim == "" {
+			continue
+		}
+		if strings.HasPrefix(trim, "--") || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // reduceLeadingBlocks repeatedly strips a leading `/* … */` block from

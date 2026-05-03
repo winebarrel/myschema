@@ -193,6 +193,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   exist on the current side aborts the plan with `renamed-from:
   source … not found in current schema` instead of silently DROP+ADD'ing
   the wrong target.
+- `-- myschema:execute <check-sql>` directive — escape hatch for
+  objects myschema doesn't model (triggers, routines, events,
+  grants). The check SQL is run against the live database; zero
+  rows back means "not applied yet, run the guarded statement",
+  non-zero means skip. Idempotent across re-applies; runs after
+  every other DDL bucket so the guarded SQL can refer to brand-
+  new tables. See CAVEATS.md for the workflow and limits.
 
 **Operational rules** (declarative-by-design constraints; see
 `CAVEATS.md` for the full list and rationale):
@@ -235,9 +242,6 @@ rather than declarative schema. Manage them out of band.)
   changes by hand outside myschema. See CAVEATS.md.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
-- `-- myschema:execute` arbitrary-SQL escape hatch (the directive
-  registry in `parser/directive.go` is already shaped for it; needs
-  a parser pass, model bucket, and apply-time runner).
 - Partition / sub-partition definitions
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after

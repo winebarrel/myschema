@@ -1,0 +1,33 @@
+# End-to-end pin for the `-- myschema:execute` skip path.
+#
+# Live DB already has the trigger that the directive guards. The
+# check SELECT returns one row, so the diff layer routes the
+# CREATE TRIGGER into the disallowed bucket as a `-- skipped:
+# (myschema:execute check matched) <sql>` line instead of into
+# executable plan SQL. Pins both halves of the contract:
+#   - plan stays empty (no executable SQL emitted)
+#   - disallowed_drops carries the canonical skip line so users /
+#     tooling can grep for it
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+  -- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg' AND TRIGGER_SCHEMA=DATABASE()
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+
+plan: ""
+
+disallowed_drops: |
+  -- skipped: (myschema:execute check matched) CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;

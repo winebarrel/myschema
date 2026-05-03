@@ -1,0 +1,26 @@
+# End-to-end pin for the `-- myschema:execute` run path — the
+# inverse of execute_directive_skips_when_check_matches.yml. The
+# trigger doesn't exist in the live DB, so the check SELECT
+# returns zero rows and the guarded CREATE TRIGGER lands in the
+# executable plan bucket. disallowed_drops stays empty.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+  -- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg' AND TRIGGER_SCHEMA=DATABASE()
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+
+plan: |
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+
+disallowed_drops: ""

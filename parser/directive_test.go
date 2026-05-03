@@ -597,3 +597,243 @@ func TestExtractInlineRenamesColumnIndexNameCollision(t *testing.T) {
 	assert.Equal(t, "old_col", got.Columns["user_id"], "column 'user_id' rename")
 	assert.Equal(t, "old_idx", got.Indexes["user_id"], "index 'user_id' rename")
 }
+
+func TestExtractExecuteDirective(t *testing.T) {
+	cases := []struct {
+		name     string
+		piece    string
+		wantOK   bool
+		wantCS   string
+		wantRest string
+	}{
+		{
+			name: "single-line SQL after directive",
+			piece: "-- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'\n" +
+				"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0",
+			wantOK:   true,
+			wantCS:   "SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'",
+			wantRest: "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0",
+		},
+		{
+			name: "leading blank lines + comment skipped before directive",
+			piece: "\n\n# comment\n-- myschema:execute SELECT 1\n" +
+				"CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+			wantOK:   true,
+			wantCS:   "SELECT 1",
+			wantRest: "CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+		},
+		{
+			name:   "no directive at the head → not an execute group",
+			piece:  "CREATE TABLE t (id INT, PRIMARY KEY (id));",
+			wantOK: false,
+		},
+		{
+			name:   "directive after a real SQL line is ignored (top-of-piece only)",
+			piece:  "CREATE TABLE t (id INT);\n-- myschema:execute SELECT 1\nCREATE TRIGGER tr ...",
+			wantOK: false,
+		},
+		{
+			name:   "non-execute -- comment before SQL is skipped, not treated as directive",
+			piece:  "-- some plain comment\nCREATE TABLE t (id INT);",
+			wantOK: false,
+		},
+		{
+			name: "multi-line block comment header before directive",
+			piece: "/*\n * generated header — keep this comment\n */\n" +
+				"-- myschema:execute SELECT 1\n" +
+				"CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+			wantOK:   true,
+			wantCS:   "SELECT 1",
+			wantRest: "CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+		},
+		{
+			name: "directive after a closed block comment on the same line",
+			piece: "/* header */ -- myschema:execute SELECT 1\n" +
+				"CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+			wantOK:   true,
+			wantCS:   "SELECT 1",
+			wantRest: "CREATE TRIGGER trg AFTER INSERT ON t FOR EACH ROW SET NEW.val = 1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs, rest, ok, err := parser.ExtractExecuteDirective(tc.piece)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOK, ok)
+			if tc.wantOK {
+				assert.Equal(t, tc.wantCS, cs)
+				assert.Equal(t, tc.wantRest, rest)
+			}
+		})
+	}
+}
+
+func TestParseSQLAcceptsExecuteDirective(t *testing.T) {
+	// End-to-end: ParseSQL parses CREATE TABLE + execute block,
+	// landing the trigger SQL on ParseResult.Executes verbatim
+	// (with `;` re-appended) without ever handing it to vitess.
+	res, err := parser.ParseSQL(`
+CREATE TABLE t (id BIGINT NOT NULL, val INT, PRIMARY KEY (id));
+
+-- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+`, "shop")
+	require.NoError(t, err)
+	require.Len(t, res.Executes, 1)
+	eg := res.Executes[0]
+	assert.Equal(t, "SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg'", eg.CheckSQL)
+	assert.Equal(t, "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;", eg.ExecuteSQL)
+	// Tables side still parses cleanly.
+	_, ok := res.Tables.GetOk("shop.t")
+	assert.True(t, ok)
+}
+
+func TestParseSQLAcceptsExecuteDirectiveWithMultilinePayload(t *testing.T) {
+	// Single-statement payloads can span multiple lines as long as
+	// they don't contain an internal `;` (which would be cut by
+	// SplitStatementToPieces — see the multi-statement pin test).
+	// A reformatted CREATE TRIGGER for readability must be held on
+	// ParseResult.Executes verbatim, newlines and indentation
+	// preserved.
+	res, err := parser.ParseSQL(`-- myschema:execute SELECT 1
+CREATE TRIGGER trg
+  BEFORE INSERT ON t
+  FOR EACH ROW
+  SET NEW.val = 0;
+`, "shop")
+	require.NoError(t, err)
+	require.Len(t, res.Executes, 1)
+	assert.Equal(t,
+		"CREATE TRIGGER trg\n  BEFORE INSERT ON t\n  FOR EACH ROW\n  SET NEW.val = 0;",
+		res.Executes[0].ExecuteSQL,
+	)
+}
+
+func TestParseSQLRejectsExecuteDirectiveWithEmptyBody(t *testing.T) {
+	// A directive whose next non-blank line is empty (no SQL to
+	// guard) must error rather than silently swallow the directive.
+	_, err := parser.ParseSQL("-- myschema:execute SELECT 1\n", "shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myschema:execute")
+	assert.Contains(t, err.Error(), "missing the SQL")
+}
+
+func TestValidateDirectivesRejectsMalformedExecute(t *testing.T) {
+	// Validator runs before extraction, so an `-- myschema:execute`
+	// with no check-SQL on the same line is caught upfront.
+	err := parser.ValidateDirectives("-- myschema:execute\nCREATE TRIGGER tr ...")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed -- myschema:execute")
+}
+
+func TestExtractExecuteDirectiveRejectsMultipleDirectives(t *testing.T) {
+	// Two `-- myschema:execute` directives stacked in the leading
+	// comment block is ambiguous (which guards the next statement?).
+	// Mirror ExtractStmtRenameFrom's "multiple" guard and error.
+	_, _, _, err := parser.ExtractExecuteDirective(
+		"-- myschema:execute SELECT 1\n" +
+			"-- myschema:execute SELECT 2\n" +
+			"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple")
+	assert.Contains(t, err.Error(), "execute")
+}
+
+func TestParseSQLRejectsExecuteCombinedWithRenameDirective(t *testing.T) {
+	// Stacking `myschema:execute` with `myschema:renamed-from` in the
+	// same piece is ambiguous — both describe how to act on the next
+	// statement, but execute short-circuits the vitess parse so the
+	// rename would be silently dropped. Reject upfront.
+	_, err := parser.ParseSQL(
+		"-- myschema:renamed-from old_trg\n"+
+			"-- myschema:execute SELECT 1\n"+
+			"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;",
+		"shop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myschema:execute")
+	assert.Contains(t, err.Error(), "renamed-from")
+}
+
+func TestParseSQLRejectsExecuteWithNonSelectCheck(t *testing.T) {
+	// The check SQL is run on every plan / apply, so accidentally
+	// putting DDL/DML there would silently mutate the database.
+	// Vitess Parse + type-switch keeps the check read-only.
+	cases := []string{
+		"DELETE FROM t WHERE id = 1",
+		"INSERT INTO t (id) VALUES (1)",
+		"DROP TABLE t",
+		"SELECT 1; DELETE FROM t",
+	}
+	for _, ck := range cases {
+		t.Run(ck, func(t *testing.T) {
+			_, err := parser.ParseSQL(
+				"-- myschema:execute "+ck+"\n"+
+					"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;",
+				"shop")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "myschema:execute")
+		})
+	}
+}
+
+func TestParseSQLAcceptsExecuteWithUnionAndWithCheck(t *testing.T) {
+	// UNION and WITH … SELECT are read-only check shapes — both
+	// must pass the validator. (vitess folds WITH into the Select
+	// shape, so the type switch sees *sqlparser.Select for it.)
+	for _, ck := range []string{
+		"SELECT 1 UNION SELECT 2",
+		"WITH c AS (SELECT 1 AS x) SELECT x FROM c",
+	} {
+		t.Run(ck, func(t *testing.T) {
+			_, err := parser.ParseSQL(
+				"-- myschema:execute "+ck+"\n"+
+					"CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;",
+				"shop")
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestParseSQLRejectsExecuteDirectiveWithCommentOnlyBody(t *testing.T) {
+	// `executeSQL == ""` after TrimSpace doesn't catch a payload
+	// whose only content is `--` / `#` / `/* … */` comments — those
+	// are non-empty strings but contain no SQL. MySQL would surface
+	// "Query was empty" at apply time; payloadHasNoSQL catches it
+	// at parse time instead.
+	cases := map[string]string{
+		"line comment only":     "-- myschema:execute SELECT 1\n-- just a comment\n",
+		"hash comment only":     "-- myschema:execute SELECT 1\n# also just a comment\n",
+		"block comment only":    "-- myschema:execute SELECT 1\n/* opaque header */\n",
+		"multi-line block only": "-- myschema:execute SELECT 1\n/*\n  spans\n  lines\n*/\n",
+		"only blanks and tabs":  "-- myschema:execute SELECT 1\n   \n\t\n",
+	}
+	for name, sql := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseSQL(sql, "shop")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "myschema:execute")
+			assert.Contains(t, err.Error(), "missing the SQL")
+		})
+	}
+}
+
+func TestParseSQLExecutePayloadWithInternalSemicolonsFails(t *testing.T) {
+	// CAVEATS pin: vitess's SplitStatementToPieces cuts on every `;`,
+	// so a `CREATE TRIGGER … BEGIN …; …; END;` body splits into
+	// multiple pieces and the orphan inner pieces (`SET NEW.val = …`,
+	// `END`) can't parse on their own. Documented as a v1 limit on
+	// the directive — equivalent to MySQL CLI requiring `DELIMITER //`
+	// for multi-statement bodies. This test pins the failure mode so
+	// future changes that add multi-statement support do so
+	// deliberately rather than by accident.
+	_, err := parser.ParseSQL(`CREATE TABLE t (id INT, val INT, PRIMARY KEY(id));
+
+-- myschema:execute SELECT 1
+CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW BEGIN
+  SET NEW.val = 0;
+  SET NEW.val = NEW.val + 1;
+END;
+`, "shop")
+	require.Error(t, err)
+}
