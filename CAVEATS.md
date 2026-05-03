@@ -260,11 +260,17 @@ TRIGGER` can reference brand-new tables.
   recognise `DELIMITER`. Workarounds: use the single-statement
   TRIGGER form (`FOR EACH ROW SET …`) when possible, or run the
   multi-statement body by hand outside myschema.
-- The check SQL is taken verbatim from the directive line and
-  passed to `db.Query`. No syntactic or semantic validation —
-  myschema only inspects whether the result set has at least one
-  row. Use a SELECT (any shape) that returns a row when the
-  guarded statement is "already applied" and zero rows otherwise.
+- The check SQL is parsed by vitess at desired-SQL parse time and
+  must be **exactly one read-only statement**: `SELECT`, `UNION`,
+  or `WITH … SELECT`. Multi-statement check SQL (a `;` between
+  statements), DDL, DML, `SHOW`, `EXPLAIN`, etc. are rejected up
+  front — the check runs on every plan / apply, so anything that
+  could mutate the database needs to fail at parse time rather
+  than during execution. At runtime the parsed statement is sent
+  verbatim to `db.Query` and myschema only inspects whether the
+  result set has at least one row: write a SELECT that returns a
+  row when the guarded statement is "already applied" and zero
+  rows otherwise.
 - The guarded statement is held as raw SQL — myschema doesn't
   parse it (vitess can't parse `CREATE TRIGGER` and friends), so
   a syntax error surfaces only at apply time when MySQL rejects
