@@ -56,7 +56,9 @@ desired SQL self-documenting and matches what `dump` already emits.
 **Round-trip via `dump` is unaffected.** `myschema dump` always
 materialises the covering index, so `dump → apply` (or `dump →
 review → apply`) needs no manual fix-up. The rule only matters when
-you handwrite a `CREATE TABLE` from scratch.
+you handwrite the FK in desired SQL — whether inline inside a
+`CREATE TABLE` or as a standalone `ALTER TABLE … ADD CONSTRAINT …
+FOREIGN KEY` — without also writing the matching covering index.
 
 **Migrating an existing schema into myschema.** Run `myschema dump`
 against the live database first and use that output as your starting
