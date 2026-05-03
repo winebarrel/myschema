@@ -150,3 +150,44 @@ myschema (`ALTER DEFINER=… SQL SECURITY {DEFINER|INVOKER} VIEW
 `DROP VIEW`). myschema's view diff stays focused on the SELECT
 body itself.
 
+## Unmodelled SQL in desired-side files is silently skipped
+
+**Behaviour.** Two skip paths in the parser silently drop SQL that
+myschema doesn't model:
+
+- *Top-level statements* other than `CREATE TABLE`, `CREATE VIEW`,
+  and `ALTER TABLE`. So `CREATE TRIGGER`, `CREATE PROCEDURE`,
+  `CREATE FUNCTION`, `CREATE EVENT`, `CREATE DATABASE`, `SET …`,
+  `INSERT`, `UPDATE`, `DELETE`, `SELECT`, `DROP TABLE`,
+  `RENAME TABLE`, `TRUNCATE`, `ALTER VIEW`, comments — all parse
+  successfully and produce nothing in the diff.
+- *ALTER TABLE clauses* other than `ADD CONSTRAINT` (FK / CHECK)
+  and `ADD INDEX` (which vitess also exposes as the `CREATE INDEX`
+  shape). So `ALTER TABLE t ADD COLUMN c INT`, `MODIFY COLUMN`,
+  `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`, partition ops, etc.
+  parse successfully and contribute nothing to the model.
+
+**Why this isn't an error.** The default behaviour is intentionally
+permissive so a raw `mysqldump` output (which is full of `SET …` /
+`CREATE DATABASE …` / `INSERT` / comments) can be fed straight to
+`myschema apply` without manual editing. A loud rejection would
+break that workflow.
+
+**Impact.** A user who writes `ALTER TABLE t ADD COLUMN c INT` in
+their desired SQL expecting it to land will get nothing — the
+column won't appear, and they'll only notice when the next plan
+re-emits the underlying `CREATE TABLE` without the column. The
+desired state is meant to live in `CREATE TABLE` (and `CREATE
+VIEW`), and the pipeline that turns desired into actual ALTERs
+lives in `diff/`, not in user-written DDL.
+
+**Workaround.** Express schema state via `CREATE TABLE` — the
+target shape is what gets compared against the catalog, and
+myschema generates the ALTERs needed to bring current → desired.
+Code-side state changes (`INSERT`, `UPDATE` for seed data, etc.)
+belong outside myschema, in the same migration tooling that runs
+schema apply.
+
+A `--strict` mode that rejects unmodelled SQL instead of skipping
+it would be useful for production CI but is out of scope for v1.
+
