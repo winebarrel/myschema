@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // DefaultCollationOf returns the default collation MySQL 8.0+ assigns
 // to the named character set when no COLLATE clause is specified.
 // Returns "" for charsets not in the built-in table; callers should
@@ -11,8 +13,12 @@ package model
 //
 // `utf8` is mapped to the `utf8mb3` default because MySQL 8.0+ treats
 // `utf8` as a deprecated alias for `utf8mb3`.
+//
+// Input is lower-cased before lookup so callers don't have to worry
+// about whether they pulled the value from the SQL text (where case
+// can vary) or from information_schema (always lower-case).
 func DefaultCollationOf(charset string) string {
-	return defaultCollations[charset]
+	return defaultCollations[strings.ToLower(charset)]
 }
 
 // CollapseDefaultCollation returns coll unchanged unless it equals the
@@ -21,11 +27,17 @@ func DefaultCollationOf(charset string) string {
 // declared as `CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci` compares
 // equal to the same object declared as bare `CHARSET=utf8mb4` — both
 // describe the same MySQL state.
+//
+// Both inputs are compared case-insensitively (charset and collation
+// identifiers are case-insensitive in MySQL); the returned pointer is
+// the original `coll` pointer when nothing collapses, so caller-side
+// pointer identity / explicit-casing is preserved unless the value
+// actually equals the default.
 func CollapseDefaultCollation(charset, coll *string) *string {
 	if charset == nil || coll == nil {
 		return coll
 	}
-	if def := DefaultCollationOf(*charset); def != "" && def == *coll {
+	if def := DefaultCollationOf(*charset); def != "" && strings.EqualFold(def, *coll) {
 		return nil
 	}
 	return coll

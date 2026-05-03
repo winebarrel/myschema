@@ -27,6 +27,11 @@ func TestDefaultCollationOf(t *testing.T) {
 		{"made_up_charset", ""},
 		// Empty input is benign.
 		{"", ""},
+		// Mixed-case input still resolves — MySQL identifiers are
+		// case-insensitive and we don't want a SQL written as
+		// `CHARSET=UTF8MB4` to bypass normalisation.
+		{"UTF8MB4", "utf8mb4_0900_ai_ci"},
+		{"Latin1", "latin1_swedish_ci"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.charset, func(t *testing.T) {
@@ -58,6 +63,17 @@ func TestCollapseDefaultCollation(t *testing.T) {
 		{"latin1 default → collapsed", &latin1, &latin1Default, nil},
 		{"unknown charset → coll kept (no normalisation possible)", &madeUp, &defaultColl, &defaultColl},
 	}
+	// MySQL identifiers are case-insensitive: `UTF8MB4_0900_AI_CI`
+	// in desired SQL collapses just like the canonical form. Pinned
+	// outside the table so the inputs can be local string literals.
+	upperCharset := "UTF8MB4"
+	upperColl := "UTF8MB4_0900_AI_CI"
+	cases = append(cases, struct {
+		name    string
+		charset *string
+		coll    *string
+		want    *string
+	}{"case-insensitive collapse", &upperCharset, &upperColl, nil})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := model.CollapseDefaultCollation(tc.charset, tc.coll)
