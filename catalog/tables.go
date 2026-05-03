@@ -388,17 +388,23 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 // information_schema.COLUMNS.COLUMN_DEFAULT (CHAR / VARCHAR /
 // VARBINARY / ENUM / SET) we wrap the bare empty string here so it
 // matches the parser side. TEXT / BLOB are excluded because MySQL
-// doesn't allow a literal default on those types at all. Fixed-
-// width BINARY is excluded because its empty default surfaces
-// through information_schema as a hex literal (`0x` for the
-// degenerate case, `0x000000…` for non-zero N) rather than the
-// empty string, and needs its own normalisation — see TODO.md.
+// doesn't allow a literal default on those types at all.
+//
+// Fixed-width BINARY(N) takes a separate path: MySQL surfaces its
+// empty default through information_schema as the literal two-
+// character string "0x" (independent of N — BINARY(1), BINARY(4),
+// and BINARY(16) all return the same sentinel). We recognise that
+// sentinel below and rewrite it to the quoted empty literal so the
+// round-trip closes.
 func normalizeColumnDefault(typeName, def string) string {
 	if def == "" {
 		if columnTypeAllowsEmptyStringDefault(typeName) {
 			return "''"
 		}
 		return def
+	}
+	if def == "0x" && strings.HasPrefix(typeName, "binary") {
+		return "''"
 	}
 	p, err := sqlparser.New(sqlparser.Options{})
 	if err != nil {
@@ -429,17 +435,15 @@ func normalizeColumnDefault(typeName, def string) string {
 // (e.g. `varchar(64)`) and modifiers, so we match by leading-token
 // prefix rather than full equality.
 //
-// Fixed-width BINARY is intentionally excluded: MySQL pads the empty
-// default to N zero bytes and surfaces it through information_schema
-// as a hex literal (`0x` for the degenerate case, `0x000000…` for
-// non-zero N), so it needs its own catalog-side normalisation rather
-// than the empty-string path here. VARBINARY (variable-length) does
-// surface its empty default as the bare empty string, so it round-
-// trips cleanly via this path. See TODO.md for the BINARY follow-up.
+// Fixed-width BINARY is excluded here because it doesn't follow the
+// bare-empty-string rule: its empty default surfaces as the literal
+// "0x" sentinel instead. That sentinel is handled directly in
+// normalizeColumnDefault, so this function only needs to enumerate
+// the types that take the bare-empty-string path.
 func columnTypeAllowsEmptyStringDefault(typeName string) bool {
-	// Fixed-width BINARY is the only excluded type — see function-doc
-	// for the hex-literal reason. Check it first so the supported list
-	// below stays a flat OR.
+	// Fixed-width BINARY does not use the bare-empty-string path — see
+	// function-doc. Check it first so the supported list below stays a
+	// flat OR.
 	if strings.HasPrefix(typeName, "binary") {
 		return false
 	}
