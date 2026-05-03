@@ -10,6 +10,7 @@ import (
 	"vitess.io/vitess/go/vt/sqlparser"
 
 	"github.com/winebarrel/myschema/model"
+	"github.com/winebarrel/myschema/parser"
 	"github.com/winebarrel/orderedmap"
 )
 
@@ -106,8 +107,78 @@ ORDER  BY t.TABLE_NAME`
 			return nil, err
 		}
 	}
+	if err := c.loadPartitions(ctx, out); err != nil {
+		return nil, err
+	}
 
 	return out, nil
+}
+
+// loadPartitions populates `Partition` on every partitioned table in
+// `out`. Two-phase to keep cost proportional to partitioned-table count
+// rather than total-table count: first list partitioned tables via
+// `information_schema.PARTITIONS` (one row per table is enough — DISTINCT
+// drops the per-partition rows we don't need), then `SHOW CREATE TABLE`
+// each and pull the `PARTITION BY …` clause out of the comment block
+// MySQL emits.
+//
+// Going through `SHOW CREATE TABLE` rather than reconstructing the
+// clause from `information_schema.PARTITIONS` saves the entire
+// catalog-side AST builder — MySQL emits SQL that vitess re-parses
+// straight back into the same `*sqlparser.PartitionOption` shape the
+// desired-side parser produces, so both sides normalise through one
+// formatter and compare bytewise. That's all v1 needs for
+// `dump → plan` to come back clean.
+func (c *Catalog) loadPartitions(ctx context.Context, tables *orderedmap.Map[string, *model.Table]) error {
+	q := `
+SELECT DISTINCT TABLE_SCHEMA, TABLE_NAME
+FROM   information_schema.PARTITIONS
+WHERE  TABLE_SCHEMA = ?
+  AND  PARTITION_NAME IS NOT NULL`
+	rows, err := c.conn.QueryContext(ctx, q, c.database)
+	if err != nil {
+		return fmt.Errorf("catalog: list partitioned tables: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	type ref struct{ db, name string }
+	var partitioned []ref
+	for rows.Next() {
+		var r ref
+		if err := rows.Scan(&r.db, &r.name); err != nil {
+			return fmt.Errorf("catalog: scan partitioned tables: %w", err)
+		}
+		partitioned = append(partitioned, r)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("catalog: iterate partitioned tables: %w", err)
+	}
+	for _, r := range partitioned {
+		t, ok := tables.GetOk(model.Ident(r.db, r.name))
+		if !ok {
+			// Table dropped between the two queries, or filtered out
+			// upstream — nothing to attach to.
+			continue
+		}
+		var name, ddl string
+		row := c.conn.QueryRowContext(ctx, "SHOW CREATE TABLE "+model.Ident(r.db, r.name))
+		if err := row.Scan(&name, &ddl); err != nil {
+			return fmt.Errorf("catalog: SHOW CREATE TABLE %s: %w", t.FQTN(), err)
+		}
+		clause, err := parser.ExtractPartitionFromShowCreate(ddl)
+		if err != nil {
+			return fmt.Errorf("catalog: extract partition clause for %s: %w", t.FQTN(), err)
+		}
+		if clause == "" {
+			// Listed in information_schema.PARTITIONS but SHOW CREATE
+			// TABLE didn't emit a PARTITION BY block — shouldn't
+			// happen on stock MySQL, but be defensive.
+			continue
+		}
+		c := clause
+		t.Partition = &c
+	}
+	return nil
 }
 
 func (c *Catalog) loadColumns(ctx context.Context, t *model.Table) error {

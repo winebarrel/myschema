@@ -1,0 +1,30 @@
+# A partitioned table whose desired SQL matches the catalog must
+# apply as a no-op AND verify_no_drift on the second plan. Pins
+# the round-trip property the v1 partition support exists for.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+applied: ""
+
+verify_no_drift: true

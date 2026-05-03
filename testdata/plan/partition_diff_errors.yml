@@ -1,0 +1,29 @@
+# v1 partition support is round-trip + drift-detect only — adding,
+# dropping, or reshaping partitions errors out instead of emitting
+# an ALTER (ADD/DROP/TRUNCATE/REORGANIZE PARTITION generation is
+# a future PR). Pin the failure mode so users get a clear "manage
+# by hand" message rather than silent drift.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+error: "partition definition differs"

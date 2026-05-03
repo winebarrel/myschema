@@ -1,0 +1,23 @@
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+dump: |
+  -- myschema_test.events
+  CREATE TABLE myschema_test.events (
+      id bigint NOT NULL,
+      dt date NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  partition by range (year(dt))
+  (partition p2020 values less than (2021),
+   partition p2021 values less than (2022),
+   partition pmax values less than maxvalue);

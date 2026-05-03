@@ -153,7 +153,8 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
 - `CREATE VIEW` (with optional column-alias list) — emitted as
   `CREATE OR REPLACE VIEW` on apply
 - Catalog reader: tables, columns, PRIMARY / secondary indexes (incl.
-  prefix length, DESC, INVISIBLE), CHECK constraints, foreign keys, views
+  prefix length, DESC, INVISIBLE), CHECK constraints, foreign keys, views,
+  and partition clauses (round-trip via `SHOW CREATE TABLE`)
 - Diff: CREATE / DROP TABLE, ADD / MODIFY / DROP COLUMN,
   ADD / DROP CONSTRAINT (PK / CHECK), ADD / DROP INDEX, ADD / DROP FK,
   CREATE OR REPLACE / DROP VIEW
@@ -253,7 +254,13 @@ rather than declarative schema. Manage them out of band.)
   changes by hand outside myschema. See CAVEATS.md.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
   literals; equality works but rename/order isn't tracked)
-- Partition / sub-partition definitions
+- Partition diff *generation* (ADD / DROP / TRUNCATE / REORGANIZE
+  PARTITION). v1 supports round-trip + drift detect only — both
+  sides normalise the partition clause through
+  `parser.NormalizePartitionOption`, `dump → plan` is no-op for
+  partitioned tables, but any partition difference between
+  catalog and desired errors out so users can run the change by
+  hand. See CAVEATS.md "Partitioning".
 - Topological ordering of DDL when one new table FK-references another that
   is also being created in the same plan (currently the FK adds run after
   all CREATE TABLEs, so this works for that case; FKs that point at tables

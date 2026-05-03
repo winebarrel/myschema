@@ -1,0 +1,30 @@
+# `dump → plan` round-trip pin for a partitioned table. The init
+# CREATE TABLE has a RANGE partition layout; the desired SQL
+# repeats it verbatim (in vitess's lower-case canonical form).
+# Both sides normalise through parser.NormalizePartitionOption
+# so the diff layer compares them bytewise and reports no changes.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+plan: ""
