@@ -9,16 +9,14 @@ import (
 // View models a MySQL view. Definition is the SELECT body (no leading
 // "AS"). Cols is the optional column-alias list from `CREATE VIEW name (a, b) AS …`.
 //
-// Algorithm / Definer / Security / CheckOption are catalogued but the v1 diff
-// does not act on changes to these fields — see TODO.md.
+// CheckOption is the only optional clause modelled here. ALGORITHM,
+// DEFINER, and SQL SECURITY are intentionally out of scope for v1 —
+// see CAVEATS.md.
 type View struct {
 	Database    string
 	Name        string
 	Definition  string
 	Cols        []string
-	Algorithm   string
-	Definer     string
-	Security    string
 	CheckOption string // empty / "CASCADED" / "LOCAL" / "NONE"
 }
 

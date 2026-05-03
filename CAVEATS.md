@@ -120,3 +120,33 @@ note the expected follow-up plan in a comment.
   SET …`, which also rewrites stored bytes), run that DDL by hand
   outside myschema. A future directive may wire it in.
 
+## View `DEFINER` and `SQL SECURITY` are out of scope
+
+**Behaviour.** myschema reads both `DEFINER` and `SECURITY_TYPE`
+from `information_schema.VIEWS` and stores them on `model.View`,
+but the diff ignores both and `CreateSQL` does not emit either
+clause on apply. Setting `DEFINER=…` or `SQL SECURITY {DEFINER |
+INVOKER}` in the desired SQL has no effect — myschema neither
+fails on it nor acts on it.
+
+**Why.**
+
+- *DEFINER*: the vitess parser does not accept the canonical
+  catalog-side host quoting that real MySQL servers return. Both
+  `DEFINER='root'@'%'` and `DEFINER=root@'%'` fail at parse time,
+  and the forms vitess does accept (e.g. `DEFINER=root@host` with
+  a bare hostname) don't round-trip against the catalog's
+  `root@%`. So even if myschema emitted DEFINER on apply, the
+  next plan would either fail to parse or drift on every run.
+- *SQL SECURITY*: technically diffable, but every view ships with
+  `SECURITY_TYPE = DEFINER` by default — emitting that clause on
+  every view would noise up dump output without serving a real
+  user need, and the asymmetry of "DEFINER off, SQL SECURITY on"
+  is worse than just leaving both alone for v1.
+
+**Workaround.** Manage DEFINER / SECURITY by hand outside
+myschema (`ALTER DEFINER=… SQL SECURITY {DEFINER|INVOKER} VIEW
+…`, or `CREATE DEFINER=… SQL SECURITY {…} VIEW …` after a manual
+`DROP VIEW`). myschema's view diff stays focused on the SELECT
+body itself.
+
