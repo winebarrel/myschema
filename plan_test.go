@@ -20,6 +20,8 @@ type planTestCase struct {
 	AllowDrop       []string `yaml:"allow_drop,omitempty"`
 	Include         []string `yaml:"include,omitempty"`
 	Exclude         []string `yaml:"exclude,omitempty"`
+	AlterAlgorithm  string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
+	AlterLock       string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
 }
 
 func TestPlanYAML(t *testing.T) {
@@ -37,6 +39,10 @@ func TestPlanYAML(t *testing.T) {
 			FilterOptions: myschema.FilterOptions{
 				Include: tc.Include,
 				Exclude: tc.Exclude,
+			},
+			AlterOption: myschema.AlterOption{
+				AlterAlgorithm: tc.AlterAlgorithm,
+				AlterLock:      tc.AlterLock,
 			},
 		})
 

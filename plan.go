@@ -9,6 +9,7 @@ import (
 type PlanOptions struct {
 	FilterOptions
 	DropPolicy
+	AlterOption
 	Files []string `arg:"" help:"Path to the desired schema SQL file(s)."`
 }
 
@@ -34,6 +35,7 @@ func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, e
 	r, err := c.diffAll(ctx, conn.Conn, database, &diffAllOptions{
 		FilterOptions: options.FilterOptions,
 		DropPolicy:    options.DropPolicy,
+		AlterOption:   options.AlterOption,
 		Files:         options.Files,
 	})
 	if err != nil {

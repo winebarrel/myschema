@@ -145,6 +145,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   CREATE OR REPLACE / DROP VIEW
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index`
 - `--include` / `--exclude` glob filtering on table names
+- `--alter-algorithm` / `--alter-lock` flags (and matching
+  `MYSCHEMA_ALTER_ALGORITHM` / `MYSCHEMA_ALTER_LOCK` env vars) to
+  inject MySQL online-DDL hints into every generated `ALTER TABLE` and
+  `CREATE INDEX`. myschema picks the right separator per DDL (comma
+  for ALTER TABLE, space for CREATE INDEX) so the user only supplies
+  the value (`INPLACE`, `NONE`, …); MySQL rejects unsupported
+  combinations at apply time, so CI catches non-online migrations.
 - CLI: `plan`, `apply`, `dump`
 - `-- myschema:renamed-from <old>` directive on tables, columns, and
   secondary indexes. Statement-level on `CREATE TABLE` for table
