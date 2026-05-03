@@ -11,20 +11,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## High — correctness bugs
 
-- [ ] **FK-implicit covering indexes look like drift.** Adding a
-      foreign key on un-indexed columns (inline `CREATE TABLE` or
-      `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` alike) silently
-      creates an index named after the FK; `information_schema.STATISTICS`
-      doesn't mark it as implicit. When desired SQL declares the FK
-      without the covering
-      index, the diff emits a `DROP INDEX` (suppressed unless
-      `--allow-drop=index` is set), and `apply` then fails with
-      `Error 1553`. Documented in AGENTS.md as a known limitation;
-      not fixed yet. The proper fix is a diff-side suppression: skip
-      a DROP INDEX whose columns form the left-most prefix of a
-      surviving FK and where no other surviving index covers it
-      (mirrors MySQL's reuse rule). Optional matching `dump` filter;
-      safer to leave dump verbose.
 - [ ] **`DROP TABLE` ordering when one being-dropped table is
       FK-referenced by another being-dropped table.** Currently the
       drop order is alphabetical by `TABLE_NAME`; if the parent comes
