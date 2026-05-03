@@ -6,6 +6,7 @@ import (
 
 	"vitess.io/vitess/go/vt/sqlparser"
 
+	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/myschema/parser"
 )
 
@@ -107,7 +108,13 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	if len(curTail) > 0 {
 		names := make([]string, 0, len(curTail))
 		for _, d := range curTail {
-			names = append(names, d.Name.String())
+			// Quote through model.Ident so a partition named with a
+			// MySQL reserved word or non-safe identifier round-trips
+			// correctly. ADD PARTITION already inherits quoting via
+			// vitess's PartitionDefinition formatter; DROP PARTITION
+			// needs to do it explicitly because we only emit the bare
+			// name list.
+			names = append(names, model.Ident(d.Name.String()))
 		}
 		drop := "ALTER TABLE " + fqtn + " DROP PARTITION " + strings.Join(names, ", ") + ";"
 		if dc.IsDropAllowed("partition") {
@@ -135,10 +142,17 @@ func partitionHeaderEqual(a, b *sqlparser.PartitionOption) bool {
 	if !stringSliceEqual(colListNames(a.ColList), colListNames(b.ColList)) {
 		return false
 	}
-	// Compare expressions through the formatter so we use the same
-	// normalisation NormalizePartitionOption applied (lower-cased
-	// function / column identifiers).
-	return formatExprNormalised(a.Expr) == formatExprNormalised(b.Expr)
+	// Compare expressions through vitess's formatter directly. Both
+	// AST trees were built by re-parsing the strings already
+	// produced by parser.NormalizePartitionOption, which lower-cased
+	// function / column identifiers in place — so the formatted
+	// outputs already match on identifier casing without us having
+	// to re-run anything here. Critically, we must NOT lower-case
+	// the formatted string ourselves: that would also collapse
+	// string-literal case (`'US'` vs `'us'`) and silently equate
+	// real expression changes like `WHEN region='US'` ↔
+	// `WHEN region='us'`.
+	return formatExpr(a.Expr) == formatExpr(b.Expr)
 }
 
 func colListNames(cols sqlparser.Columns) []string {
@@ -149,14 +163,11 @@ func colListNames(cols sqlparser.Columns) []string {
 	return out
 }
 
-func formatExprNormalised(e sqlparser.Expr) string {
+func formatExpr(e sqlparser.Expr) string {
 	if e == nil {
 		return ""
 	}
-	// Caller-supplied PartitionOption values came from
-	// NormalizePartitionOption, which already rewrote ColName /
-	// FuncExpr identifiers to lower case.
-	return strings.ToLower(sqlparser.String(e))
+	return sqlparser.String(e)
 }
 
 func stringSliceEqual(a, b []string) bool {

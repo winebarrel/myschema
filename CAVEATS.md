@@ -225,12 +225,16 @@ the two most common operational patterns:
   bringing the table under myschema's management.
 
 **Workaround for the "two systems of record" problem.** When
-the diff errors out (mid-list / HASH-count / scheme / SUBPARTITION),
-run the `ALTER TABLE … {REORGANIZE|COALESCE|REMOVE} PARTITION`
-or `PARTITION BY` by hand against the live database, then
-update the desired SQL's `PARTITION BY` clause to match. The
-next `plan` will report no diff. Keep the desired SQL and the
-live database in lockstep yourself for those cases.
+the diff errors out (mid-list / HASH-count / scheme /
+SUBPARTITION), run the appropriate ALTER by hand —
+`ALTER TABLE … REORGANIZE PARTITION old1, old2 INTO (…)` for
+mid-list value changes, `ALTER TABLE … COALESCE PARTITION n`
+or `ALTER TABLE … ADD PARTITION PARTITIONS n` for HASH/KEY
+count changes, `ALTER TABLE … REMOVE PARTITIONING` followed by
+`ALTER TABLE … PARTITION BY …` for scheme / expression changes
+— then update the desired SQL's `PARTITION BY` clause to match.
+The next `plan` will report no diff. Keep the desired SQL and
+the live database in lockstep yourself for those cases.
 
 ## View `DEFINER` and `SQL SECURITY` are out of scope
 
