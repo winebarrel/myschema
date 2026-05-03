@@ -2,13 +2,15 @@
 
 ## What this is
 
-myschema is the MySQL counterpart to [pistachio](https://github.com/winebarrel/pistachio).
-Same package layout (`parser/`, `catalog/`, `model/`, `diff/`, `cmd/`), same
-CLI surface (`plan` / `apply` / `dump`), but for MySQL.
+myschema is a declarative schema management tool for MySQL. The user
+writes the desired schema as plain SQL (`CREATE TABLE` / `CREATE VIEW`
+/ etc.); myschema reads the current state from MySQL's
+`information_schema`, diffs the two, and emits — or applies — the DDL
+that brings current → desired. Three subcommands: `plan` (preview the
+DDL), `apply` (run it), `dump` (serialise the live schema as SQL).
 
-The desired schema is parsed with the TiDB SQL parser; the current state is
-read from `information_schema`; the diff package emits the DDL that brings
-current → desired.
+The desired side is parsed with `vitess.io/vitess/go/vt/sqlparser`;
+the catalog side is read with `database/sql` + `go-sql-driver/mysql`.
 
 ## Build & test
 
@@ -82,47 +84,33 @@ instance the same way `clean-schema` does for 8.0.
 | `plan.go` / `apply.go` / `dump.go` | Top-level operations called by CLI |
 | `diff_all.go`         | Glues parser + catalog + diff for plan/apply |
 
-## Why `vitess.io/vitess/go/vt/sqlparser` (and not pingcap/tidb/pkg/parser)
+## Parser quirks worth knowing
 
-The bootstrap shipped with pingcap, since the user originally asked for the
-TiDB parser. We migrated to vitess once `make schema` surfaced two real
-gaps:
+vitess sits between an application and MySQL, so its grammar accepts
+the full MySQL surface (including GEOMETRY / SPATIAL types) and pretty-
+prints in the catalog-friendly form. The trade-offs and rough edges:
 
-- **GEOMETRY / SPATIAL types** — pingcap reserves the type code (`mysql.
-  TypeGeometry = 0xff`) but its grammar (`parser.y`) has no production that
-  creates a column with the type. Sakila's `address.location GEOMETRY`
-  could not be parsed, so its dump → plan round-trip never closed.
-- **MySQL coverage philosophy** — pingcap aims to parse what TiDB *executes*
-  (a subset of MySQL by design). vitess sits between application and MySQL,
-  so it must parse anything MySQL accepts and pass the rest through. Its
-  design contract is broader.
+- vitess restores `select` lists in the fully-qualified
+  back-tick-quoted form
+  (`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\``). View diffs
+  go through the AST visitors in `parser/view.go` to normalise both
+  sides into the same shape so spurious diffs don't fire.
+- `CREATE INDEX i ON t (...)` is parsed as `*sqlparser.AlterTable`
+  with an `AddIndexDefinition` AlterOption (vitess collapses the
+  standalone `CREATE INDEX` into an ALTER TABLE). `applyAlterTable`
+  handles both shapes.
+- CURRENT_TIMESTAMP / NOW / etc. are restored by vitess as
+  `current_timestamp()` (with empty parens). The catalog stores them
+  without parens, so `parser.normalizeDefaultExpr` strips them and
+  upper-cases the keyword to match.
+- ENUM / SET / CHAR / temporal defaults arrive from
+  `information_schema.COLUMNS.COLUMN_DEFAULT` as bareword values
+  (`G` rather than `'G'` for an enum). vitess can't parse the
+  bareword form, so `catalog.normalizeColumnDefault` wraps non-
+  numeric, non-expression defaults of these types in single quotes
+  before handing them off.
 
-Same Apache 2.0 license. Binary went from ~21 MB → ~15 MB after the swap
-(`go-sql-driver/mysql` + kong + orderedmap + parser, stripped). The
-trade-off is that vitess has a slightly different API surface
-(`SplitStatementToPieces` / `Walk(visit, node)` instead of
-`Parse / Accept(visitor)`) and pretty-prints differently — see
-`parser/view.go` for the AST visitors that normalise the catalog form
-(`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\``) into the parser
-form so view diffs stay quiet.
-
-`CREATE INDEX i ON t (...)` is parsed as `*sqlparser.AlterTable` with an
-`AddIndexDefinition` AlterOption (vitess collapses standalone CREATE INDEX
-into ALTER TABLE). `applyAlterTable` handles both shapes.
-
-CURRENT_TIMESTAMP / NOW / etc. are restored by vitess as
-`current_timestamp()` (with empty parens). The catalog stores them
-without parens, so `parser.normalizeDefaultExpr` strips them and
-upper-cases the keyword to match.
-
-ENUM / SET / CHAR / temporal defaults arrive from
-`information_schema.COLUMNS.COLUMN_DEFAULT` as bareword values
-(`G` rather than `'G'` for an enum). vitess can't parse the bareword
-form, so `catalog.normalizeColumnDefault` wraps non-numeric, non-
-expression defaults of these types in single quotes before handing
-them off.
-
-## Coverage vs. pistachio
+## Coverage
 
 **In scope (v1):**
 
@@ -176,15 +164,16 @@ them off.
   the FK still needs the index. `dump` always emits the covering
   index, so `dump → apply` is unaffected.
 
-**Not yet implemented (intentional v1 cuts; would mirror pistachio):**
+**Not yet implemented (intentional v1 cuts):**
 
 (Triggers, stored procedures / functions, and events are deliberately
 out of scope, not deferred — they are imperative, version-tagged code
 rather than declarative schema. Manage them out of band.)
-- View `WITH CHECK OPTION` fidelity: pingcap's AST cannot distinguish
-  "no WITH clause" from "WITH CASCADED CHECK OPTION", so the parser
-  collapses both to `NONE`. Users who explicitly write `WITH CASCADED`
-  see it dropped on round-trip. `WITH LOCAL CHECK OPTION` is preserved.
+- View `WITH CHECK OPTION` fidelity: vitess's AST surfaces "no WITH
+  clause" and "WITH CASCADED CHECK OPTION" indistinguishably (both
+  arrive as the empty string), so the parser collapses both to
+  `NONE`. Users who explicitly write `WITH CASCADED` see it dropped
+  on round-trip. `WITH LOCAL CHECK OPTION` is preserved.
 - View `DEFINER` and `SQL SECURITY` clauses are catalogued but not
   diffed; `CREATE OR REPLACE VIEW` uses MySQL's defaults.
 - `ENUM` / `SET` column-type-level diffing (CompactStr renders them as text
@@ -202,19 +191,17 @@ rather than declarative schema. Manage them out of band.)
   is also being created in the same plan (currently the FK adds run after
   all CREATE TABLEs, so this works for that case; FKs that point at tables
   in databases myschema is not managing are not handled)
-- Database-name remap (the MySQL analogue of pistachio's `--schema-map`):
-  let the desired SQL use database `foo` while applying to database `bar`.
-  Today the DSN's database is the single source of truth; if you point it
-  at `bar`, every table reference in the desired SQL must also use `bar`.
+- Database-name remap (`-m old=new`): let the desired SQL use database
+  `foo` while applying to database `bar`. Today the DSN's database is
+  the single source of truth; if you point it at `bar`, every table
+  reference in the desired SQL must also use `bar`.
 - `--split` for `dump`, `--pre-sql` / `--concurrently-pre-sql`
 
-When extending: prefer adding YAML-driven tests under a `testdata/` tree
-(matching pistachio's pattern) over Go-table tests, once a real MySQL
-fixture loader is added.
+When extending: prefer adding YAML-driven tests under a `testdata/`
+tree over Go table tests when the scenario is purely SQL-input →
+SQL-output.
 
 ## Development workflow
-
-Inherited from pistachio. Apply the same discipline here:
 
 1. Create a feature branch before starting implementation.
 2. Write a test that asserts the expected behaviour first, confirm it fails,
@@ -237,8 +224,6 @@ Inherited from pistachio. Apply the same discipline here:
    `information_schema` first; do not assume the parser side is wrong.
 
 ## Code conventions
-
-Inherited from pistachio. The MySQL-specific bits sit at the bottom.
 
 - Package-level tests use **external** test packages (e.g. `package
   catalog_test`, `package model_test`). Use same-package tests only when
@@ -268,16 +253,18 @@ Inherited from pistachio. The MySQL-specific bits sit at the bottom.
 - Identifiers go through `model.Ident`, which back-tick-quotes anything
   that isn't a safe `[a-zA-Z_][a-zA-Z0-9_$]*` token or that collides with
   a MySQL reserved word.
-- Type names from both the parser and the catalog are lowercased and
-  stripped of integer display widths (via
-  `types.TiDBStrictIntegerDisplayWidth = true`) so they compare equal
-  between sides.
+- Type names from both the parser and the catalog are lowercased
+  before comparison so casing differences (`BIGINT` vs `bigint`) don't
+  trigger spurious diffs. Integer display widths
+  (`int(11)`) don't surface from either side on MySQL 8.0+, so no
+  explicit stripping is needed.
 - Foreign keys live in `Table.ForeignKeys`, not in `Constraints`. The diff
   orders FK drops first, then table / column / index changes, then FK
   adds — never combine these phases.
-- Index parts: pingcap parser uses `Length = -1` for "no prefix length";
-  the catalog returns `0`. Normalise to `0` at parse time. Index types:
-  treat `""` and `"BTREE"` as equivalent (BTREE is the InnoDB default).
+- Index parts: vitess uses `Length *int` (nil = no prefix length); the
+  catalog returns `0`. The parser dereferences the pointer when set,
+  so both sides land on `0` for "no prefix". Index types: treat `""`
+  and `"BTREE"` as equivalent (BTREE is the InnoDB default).
 - The CHECK-constraint diff uses a deliberately loose normaliser
   (`strings.ToLower` + strip whitespace + strip backticks). Replace with a
   proper parser/restore pass when adding richer CHECK support.
