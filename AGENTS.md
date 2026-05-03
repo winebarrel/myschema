@@ -110,13 +110,23 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   for a varchar). vitess parses such barewords as a column reference
   (`*sqlparser.ColName`) rather than a string literal, so the
   catalog-side round-trip later breaks. `catalog.normalizeColumnDefault`
-  is type-agnostic for non-empty defaults: it parses `SELECT <def>`,
-  and if the resulting expression is a `*ColName` it wraps the value
-  in single quotes; anything else (Literal, NullVal, BoolVal, function
-  calls, …) is already valid SQL and passes through. The empty-string
-  default is the one type-aware special case (vitess can't parse a
-  `SELECT` with no expression) — see `columnTypeAllowsEmptyStringDefault`
-  for the supported-type list.
+  handles three cases:
+  - **Non-empty, type-agnostic (the common path)** — parses
+    `SELECT <def>`, and if the resulting expression is a `*ColName`
+    wraps the value in single quotes. Anything else (Literal,
+    NullVal, BoolVal, function calls, …) is already valid SQL and
+    passes through.
+  - **Empty string, type-aware** — vitess can't parse a `SELECT` with
+    no expression, so the empty default takes a separate path: for
+    string-shaped types listed in `columnTypeAllowsEmptyStringDefault`
+    the bare empty string is rewritten to `''`; everything else
+    passes through as-is.
+  - **Fixed-width `BINARY(N)`, type-aware** — MySQL surfaces an empty
+    `BINARY(N)` default as the literal sentinel `"0x"` (independent
+    of N) rather than the bare empty string. When the type-name
+    starts with `binary` and the value is `"0x"`, rewrite to `''`
+    so the round-trip closes; see PR #34 / TODO history for the
+    rationale.
 
 ## Coverage
 
