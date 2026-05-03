@@ -99,7 +99,21 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
 - `CREATE INDEX i ON t (...)` is parsed as `*sqlparser.AlterTable`
   with an `AddIndexDefinition` AlterOption (vitess collapses the
   standalone `CREATE INDEX` into an ALTER TABLE). `applyAlterTable`
-  handles both shapes.
+  handles both shapes; **every other ALTER clause** (`ADD COLUMN`,
+  `MODIFY COLUMN`, `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`,
+  partition ops, …) is silently skipped *when the target table is
+  already in the desired model*, mirroring the top-level parser
+  default that skips `CREATE TRIGGER` / `INSERT` / `SET` /
+  non-directive comments / etc. An `ALTER TABLE` against a table
+  that isn't declared in the desired SQL still fails fast with
+  `ALTER TABLE on unknown table …` — only the unhandled-clause
+  case is silent. (Comments shaped like
+  `-- myschema:<name>` are validated by `ValidateDirectives` first
+  and unknown / malformed shapes error out — they're the one
+  exception to the skip rule.) Both skip paths exist so raw
+  `mysqldump` output parses cleanly. See CAVEATS.md "Unmodelled SQL in desired-side
+  files is silently skipped" — a `--strict` mode that turns these
+  into errors was prototyped and considered out of scope for v1.
 - CURRENT_TIMESTAMP / NOW / etc. are restored by vitess as
   `current_timestamp()` (with empty parens). The catalog stores them
   without parens, so `parser.normalizeDefaultExpr` strips them and

@@ -73,10 +73,3 @@ Open items only. Done work is in `git log` / closed PRs.
 - [ ] `.goreleaser.yml`.
 - [ ] Renovate / dependabot config.
 
-## Cleanup
-
-- [ ] `applyAlterTable` already handles `ADD CONSTRAINT` and
-      `AddIndexDefinition` (the vitess shape for `CREATE INDEX`).
-      Other `ALTER TABLE` clauses are silently ignored — raise a clear
-      error so users learn that the desired state should be expressed
-      via `CREATE TABLE`.

@@ -152,3 +152,62 @@ myschema (`ALTER DEFINER=… SQL SECURITY {DEFINER|INVOKER} VIEW
 `DROP VIEW`). myschema's view diff stays focused on the SELECT
 body itself.
 
+## Unmodelled SQL in desired-side files is silently skipped
+
+**Behaviour.** Two skip paths in the parser silently drop SQL that
+myschema doesn't model:
+
+- *Top-level statements* other than `CREATE TABLE`, `CREATE VIEW`,
+  and `ALTER TABLE` (the latter is also the AST shape vitess uses
+  for user-written `CREATE INDEX`, so `CREATE INDEX` is supported
+  even though it's not listed here). So `CREATE TRIGGER`,
+  `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE EVENT`,
+  `CREATE DATABASE`, `SET …`, `INSERT`, `UPDATE`, `DELETE`,
+  `SELECT`, `DROP TABLE`, `RENAME TABLE`, `TRUNCATE`, `ALTER VIEW`,
+  non-directive comments — all parse successfully and produce
+  nothing in the diff. (Comments that look like `-- myschema:<name>`
+  are the exception: they go through `ValidateDirectives` first
+  and unknown / malformed shapes error out at parse time.)
+- *Unhandled `ALTER TABLE` clauses* on a table that is *also*
+  declared elsewhere in the desired SQL. `ADD CONSTRAINT`
+  (FK / CHECK) and `ADD INDEX` (the same AST shape vitess uses for
+  user-written `CREATE INDEX`) flow through `applyAlterTable`
+  into the in-memory model; everything else (`ADD COLUMN`,
+  `MODIFY COLUMN`, `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`,
+  partition ops, …) is silently ignored. Note: this skip only
+  applies when the target table is already in the desired model
+  — `ALTER TABLE` against a table that isn't declared anywhere in
+  the desired SQL fails fast with `ALTER TABLE on unknown table
+  …`, not silently.
+
+**Why this isn't an error.** This is the one intentional exception
+to the "be explicit, fail loudly" stance the file intro sets out —
+flagged here so the contrast doesn't read as inconsistent. The
+default behaviour is permissive so a raw `mysqldump` output (which
+is full of `SET …` / `CREATE DATABASE …` / `INSERT` / comments)
+can be fed straight to `myschema apply` without manual editing. A
+loud rejection would break that workflow.
+
+**Impact.** A user who writes `ALTER TABLE t ADD COLUMN c INT` in
+their desired SQL expecting it to land will get nothing — the
+column never enters the desired-side model. The skip is silent, so
+the symptom is "no observable plan output for that column": the
+next `plan` reports either `-- No changes` or only the diff for
+the *other* changes in the file, and `dump` over the live database
+shows the table without the column. The user has to read back the
+desired SQL or notice the missing column in `dump` output to
+realise the ALTER did nothing. The desired state is meant to live
+in `CREATE TABLE` (and `CREATE VIEW`), and the pipeline that turns
+desired into actual ALTERs lives in `diff/`, not in user-written
+DDL.
+
+**Workaround.** Express schema state via `CREATE TABLE` — the
+target shape is what gets compared against the catalog, and
+myschema generates the ALTERs needed to bring current → desired.
+Code-side state changes (`INSERT`, `UPDATE` for seed data, etc.)
+belong outside myschema, in the same migration tooling that runs
+schema apply.
+
+A `--strict` mode that rejects unmodelled SQL instead of skipping
+it would be useful for production CI but is out of scope for v1.
+
