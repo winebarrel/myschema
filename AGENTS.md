@@ -101,9 +101,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   standalone `CREATE INDEX` into an ALTER TABLE). `applyAlterTable`
   handles both shapes; **every other ALTER clause** (`ADD COLUMN`,
   `MODIFY COLUMN`, `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`,
-  partition ops, …) is silently skipped, mirroring the top-level
-  parser default that skips `CREATE TRIGGER` / `INSERT` / `SET` /
-  non-directive comments / etc. (Comments shaped like
+  partition ops, …) is silently skipped *when the target table is
+  already in the desired model*, mirroring the top-level parser
+  default that skips `CREATE TRIGGER` / `INSERT` / `SET` /
+  non-directive comments / etc. An `ALTER TABLE` against a table
+  that isn't declared in the desired SQL still fails fast with
+  `ALTER TABLE on unknown table …` — only the unhandled-clause
+  case is silent. (Comments shaped like
   `-- myschema:<name>` are validated by `ValidateDirectives` first
   and unknown / malformed shapes error out — they're the one
   exception to the skip rule.) Both skip paths exist so raw

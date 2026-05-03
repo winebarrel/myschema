@@ -157,7 +157,7 @@ myschema doesn't model:
 
 - *Top-level statements* other than `CREATE TABLE`, `CREATE VIEW`,
   and `ALTER TABLE` (the latter is also the AST shape vitess uses
-  for user-written `CREATE INDEX`, so `CREATE INDEX` IS supported
+  for user-written `CREATE INDEX`, so `CREATE INDEX` is supported
   even though it's not listed here). So `CREATE TRIGGER`,
   `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE EVENT`,
   `CREATE DATABASE`, `SET …`, `INSERT`, `UPDATE`, `DELETE`,
@@ -166,11 +166,17 @@ myschema doesn't model:
   nothing in the diff. (Comments that look like `-- myschema:<name>`
   are the exception: they go through `ValidateDirectives` first
   and unknown / malformed shapes error out at parse time.)
-- *ALTER TABLE clauses* other than `ADD CONSTRAINT` (FK / CHECK)
-  and `ADD INDEX` (which vitess also exposes as the `CREATE INDEX`
-  shape). So `ALTER TABLE t ADD COLUMN c INT`, `MODIFY COLUMN`,
-  `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`, partition ops, etc.
-  parse successfully and contribute nothing to the model.
+- *Unhandled `ALTER TABLE` clauses* on a table that is *also*
+  declared elsewhere in the desired SQL. `ADD CONSTRAINT`
+  (FK / CHECK) and `ADD INDEX` (the same AST shape vitess uses for
+  user-written `CREATE INDEX`) flow through `applyAlterTable`
+  into the in-memory model; everything else (`ADD COLUMN`,
+  `MODIFY COLUMN`, `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`,
+  partition ops, …) is silently ignored. Note: this skip only
+  applies when the target table is already in the desired model
+  — `ALTER TABLE` against a table that isn't declared anywhere in
+  the desired SQL fails fast with `ALTER TABLE on unknown table
+  …`, not silently.
 
 **Why this isn't an error.** This is the one intentional exception
 to the "be explicit, fail loudly" stance the file intro sets out —
