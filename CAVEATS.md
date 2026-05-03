@@ -170,11 +170,13 @@ myschema doesn't model:
   `DROP COLUMN`, `DROP INDEX`, `RENAME COLUMN`, partition ops, etc.
   parse successfully and contribute nothing to the model.
 
-**Why this isn't an error.** The default behaviour is intentionally
-permissive so a raw `mysqldump` output (which is full of `SET …` /
-`CREATE DATABASE …` / `INSERT` / comments) can be fed straight to
-`myschema apply` without manual editing. A loud rejection would
-break that workflow.
+**Why this isn't an error.** This is the one intentional exception
+to the "be explicit, fail loudly" stance the file intro sets out —
+flagged here so the contrast doesn't read as inconsistent. The
+default behaviour is permissive so a raw `mysqldump` output (which
+is full of `SET …` / `CREATE DATABASE …` / `INSERT` / comments)
+can be fed straight to `myschema apply` without manual editing. A
+loud rejection would break that workflow.
 
 **Impact.** A user who writes `ALTER TABLE t ADD COLUMN c INT` in
 their desired SQL expecting it to land will get nothing — the
