@@ -122,12 +122,14 @@ note the expected follow-up plan in a comment.
 
 ## View `DEFINER` and `SQL SECURITY` are out of scope
 
-**Behaviour.** myschema reads both `DEFINER` and `SECURITY_TYPE`
-from `information_schema.VIEWS` and stores them on `model.View`,
-but the diff ignores both and `CreateSQL` does not emit either
-clause on apply. Setting `DEFINER=…` or `SQL SECURITY {DEFINER |
-INVOKER}` in the desired SQL has no effect — myschema neither
-fails on it nor acts on it.
+**Behaviour.** myschema does not read `DEFINER` or `SECURITY_TYPE`
+from `information_schema.VIEWS`, doesn't carry them on
+`model.View`, doesn't diff them, and doesn't emit either clause
+in `CreateSQL` on apply. The forms of `DEFINER=…` and `SQL
+SECURITY {DEFINER | INVOKER}` that vitess can parse are silently
+stripped out by the parser; the forms vitess can't parse (see
+below) cause the desired SQL to fail at parse time. Either way,
+nothing about the catalog-side DEFINER / SECURITY is touched.
 
 **Why.**
 
