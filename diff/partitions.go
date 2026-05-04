@@ -420,8 +420,11 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//   - the catalog prefix must be byte-equal to desired's
 	//     prefix (no compound diffs — the operator splits those
 	//     into separate plans or runs a manual REORGANIZE);
-	//   - extras' names must not collide with anything in
-	//     catalog (rules out reorder / dup-name desired SQL).
+	//   - extras' names must be unique — both vs the catalog
+	//     names (rules out reorder / rename-and-insert) AND
+	//     vs each other (rules out copy-paste typos that would
+	//     otherwise emit a REORGANIZE MySQL rejects with a
+	//     duplicate-partition-name error).
 	// Anything outside the trigger envelope falls through to
 	// the existing split / merge / reorder error so the
 	// operator runs the right ALTER by hand.
@@ -646,10 +649,14 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 //   - Catalog's prefix `[0..n-2]` is `partitionDefEqual` to
 //     desired's prefix `[0..n-2]` for each pair (no compound
 //     diffs — body changes on prefix partitions disqualify).
-//   - Extras (`desired[n-1..m-2]`) don't reuse any name
-//     already present in catalog (rules out reorder / dup-name
-//     desired SQL that would otherwise look like a clean
-//     insert).
+//   - Extras (`desired[n-1..m-2]`) have unique names — neither
+//     reusing a name already present in catalog (rules out
+//     reorder / rename-and-insert that'd otherwise look like a
+//     clean insert) nor duplicating each other (rules out
+//     copy-paste typos in desired SQL that vitess accepts but
+//     MySQL would reject at apply with a duplicate-partition-
+//     name error). Comparison is case-insensitive (MySQL
+//     identifier rule).
 func detectCatchAllInteriorInsert(curPO *sqlparser.PartitionOption, curDefs, desDefs []*sqlparser.PartitionDefinition) (catchAll *sqlparser.PartitionDefinition, extras []*sqlparser.PartitionDefinition, ok bool) {
 	if curPO.Type != sqlparser.RangeType || len(curPO.ColList) > 0 {
 		return nil, nil, false
@@ -672,15 +679,28 @@ func detectCatchAllInteriorInsert(curPO *sqlparser.PartitionOption, curDefs, des
 			return nil, nil, false
 		}
 	}
-	catNames := make(map[string]struct{}, n)
+	// Track partition names case-insensitively (MySQL identifier
+	// rule). Seed with catalog names, then walk extras: each
+	// extra must be new — both wrt catalog (typo where the
+	// "extra" reuses an existing partition name) AND wrt extras
+	// already seen (typo where the user pasted the same new
+	// partition twice). vitess accepts duplicate partition
+	// names in CREATE TABLE and validateDesiredRangeMonotonic
+	// only checks boundary values, so without the second arm of
+	// the check we'd happily emit a `REORGANIZE pmax INTO
+	// (p_new …, p_new …, pmax …)` that MySQL would reject with
+	// a duplicate-partition-name error at apply time.
+	seenNames := make(map[string]struct{}, n+m)
 	for _, def := range curDefs {
-		catNames[strings.ToLower(def.Name.String())] = struct{}{}
+		seenNames[strings.ToLower(def.Name.String())] = struct{}{}
 	}
 	candidates := desDefs[n-1 : m-1]
 	for _, ex := range candidates {
-		if _, dup := catNames[strings.ToLower(ex.Name.String())]; dup {
+		key := strings.ToLower(ex.Name.String())
+		if _, dup := seenNames[key]; dup {
 			return nil, nil, false
 		}
+		seenNames[key] = struct{}{}
 	}
 	return catCatchAll, candidates, true
 }

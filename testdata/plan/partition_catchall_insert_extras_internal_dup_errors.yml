@@ -1,0 +1,38 @@
+# Companion to `partition_catchall_insert_extras_name_overlap_errors.yml`
+# (which pins the catalog-overlap arm of T7). This fixture
+# pins the *extras-internal* duplicate arm: desired SQL has
+# two new partitions with the same name (likely a copy-paste
+# typo). vitess accepts duplicate partition names in CREATE
+# TABLE and validateDesiredRangeMonotonic only checks
+# boundary values — without the extras-internal check the
+# auto-detect would happily emit a `REORGANIZE pmax INTO
+# (p_new VALUES LESS THAN (20), p_new VALUES LESS THAN (30),
+# pmax VALUES LESS THAN MAXVALUE)` that MySQL rejects with a
+# duplicate-partition-name error at apply time. T7's
+# extended check (case-insensitive, both against catalog AND
+# against extras seen so far) catches the duplicate at plan
+# time and the request falls through to the existing
+# split / merge / reorder error.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p_new VALUES LESS THAN (20),
+      PARTITION p_new VALUES LESS THAN (30),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: 'split / merge / reorder'
