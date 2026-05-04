@@ -2,8 +2,8 @@
 
 Open items only. Done work is in `git log` / closed PRs.
 For object families that are intentionally **not** on the roadmap
-(triggers / SP / functions / events / sequences), see
-`CAVEATS.md` → "What myschema deliberately doesn't manage".
+(triggers / stored procedures / functions / events / sequences),
+see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Medium — silent diffs / fidelity gaps
 
