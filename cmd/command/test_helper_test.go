@@ -28,7 +28,10 @@ func newTestClient(t *testing.T) *myschema.Client {
 		base = "root@tcp(127.0.0.1:3306)/"
 	}
 	cfg, err := mysqldrv.ParseDSN(base)
-	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN %q (must be a valid DSN, e.g. 'root@tcp(127.0.0.1:3306)/')", base)
+	// Don't echo `base` in the failure message: MYSCHEMA_TEST_DSN can
+	// embed a password and would leak into CI logs. The wrapped
+	// ParseDSN error is enough to identify the problem.
+	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN (must be a valid DSN, e.g. 'root@tcp(127.0.0.1:3306)/')")
 	cfg.DBName = testutil.DefaultDB
 	return myschema.NewClient(&myschema.Options{DSN: cfg.FormatDSN()})
 }

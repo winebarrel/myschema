@@ -39,8 +39,8 @@ func runYAMLCases[T any](t *testing.T, dir string, body func(t *testing.T, name 
 }
 
 // newClient returns a Client wired to MYSCHEMA_TEST_DSN (or the docker-compose
-// default), with the test database appended to the DSN since myschema requires
-// the DSN itself to carry the database name.
+// default). The DSN is parsed and DBName is overwritten with testutil.DefaultDB,
+// since myschema requires the DSN itself to carry the database name.
 func newClient(t *testing.T) *myschema.Client {
 	t.Helper()
 	return newClientWithDB(t, testutil.DefaultDB)
@@ -66,7 +66,10 @@ func newClientWithDB(t *testing.T, dbName string) *myschema.Client {
 		base = "root@tcp(127.0.0.1:3306)/"
 	}
 	cfg, err := mysqldrv.ParseDSN(base)
-	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN %q (must be a valid DSN, e.g. 'root@tcp(127.0.0.1:3306)/')", base)
+	// Don't echo `base` in the failure message: MYSCHEMA_TEST_DSN can
+	// embed a password and would leak into CI logs. The wrapped
+	// ParseDSN error is enough to identify the problem.
+	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN (must be a valid DSN, e.g. 'root@tcp(127.0.0.1:3306)/')")
 	cfg.DBName = dbName
 	return myschema.NewClient(&myschema.Options{DSN: cfg.FormatDSN()})
 }
