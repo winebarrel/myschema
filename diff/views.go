@@ -149,16 +149,21 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 
 // viewEqual reports whether two views are operationally identical for
 // diff purposes. The SELECT body goes through viewDefEqual (which
-// normalises qualifiers, redundant aliases, and casing); the optional
-// column-alias list (`CREATE VIEW v (a, b) AS …`) and the
-// `WITH … CHECK OPTION` clause are compared verbatim. Without the
-// Cols / CheckOption checks, a desired-side rename of a column-alias
-// or a flip of LOCAL ↔ NONE would silently compare equal and the
-// live view would never be replaced.
+// normalises qualifiers, redundant aliases, and casing); the
+// `WITH … CHECK OPTION` clause is compared verbatim — both parser
+// and catalog populate `CheckOption` to NONE/LOCAL/CASCADED so the
+// string compare is steady-state-stable.
+//
+// Cols (the optional column-alias list `CREATE VIEW v (a, b) AS …`)
+// is intentionally NOT compared here: catalog/views.go reads only
+// `information_schema.VIEWS`, which exposes the SELECT body but not
+// the user-supplied alias list (those live in
+// `information_schema.COLUMNS` keyed by view+column). Until the
+// catalog reader is taught to populate `model.View.Cols` from that
+// source, a direct `slices.Equal` would treat every column-alias-list
+// view as drifting on every plan. Cols changes therefore stay
+// silently ignored as before, tracked separately as a TODO.
 func viewEqual(a, b *model.View, database string) (bool, error) {
-	if !slices.Equal(a.Cols, b.Cols) {
-		return false, nil
-	}
 	if a.CheckOption != b.CheckOption {
 		return false, nil
 	}
