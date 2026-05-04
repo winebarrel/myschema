@@ -30,8 +30,10 @@ writes.
 `VALUES LESS THAN MAXVALUE` or LIST `VALUES IN (DEFAULT)`),
 inserting a new "real" partition in front of that catch-all is a
 mid-list change, not a suffix add — the new partition would land
-before the existing tail and the diff fails with the REORGANIZE
-error. Drop the catch-all first (or run REORGANIZE PARTITION by
+before the existing tail, so the name lists no longer line up
+position-by-position and the diff fails with the
+`split / merge / reorder` error (see "Split / merge / reorder"
+below). Drop the catch-all first (or run REORGANIZE PARTITION by
 hand), then add the new partition.
 
 ### Subset drop — RANGE / LIST
