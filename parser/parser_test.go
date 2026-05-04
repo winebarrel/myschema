@@ -734,6 +734,74 @@ SELECT 1;`,
 	}
 }
 
+func TestParseSQL_RejectsCrossDatabaseQualifier(t *testing.T) {
+	// Regression: PR #61 made emitted DDL unqualified, so a desired-side
+	// `CREATE TABLE other_db.users (...)` would silently apply to the
+	// invocation database instead of `other_db`. Reject it at parse
+	// time, with the same posture for CREATE VIEW and ALTER TABLE.
+	tests := []struct {
+		name   string
+		sql    string
+		errSub string
+	}{
+		{
+			name:   "CREATE TABLE qualified to a different database",
+			sql:    `CREATE TABLE other_db.users (id INT, PRIMARY KEY (id));`,
+			errSub: `CREATE TABLE other_db.users: cross-database reference not supported`,
+		},
+		{
+			name:   "CREATE VIEW qualified to a different database",
+			sql:    `CREATE VIEW other_db.v AS SELECT 1;`,
+			errSub: `CREATE VIEW other_db.v: cross-database reference not supported`,
+		},
+		{
+			name: "ALTER TABLE qualified to a different database",
+			sql: `CREATE TABLE users (id INT, PRIMARY KEY (id));
+ALTER TABLE other_db.users ADD CONSTRAINT chk_id CHECK (id > 0);`,
+			errSub: `ALTER TABLE other_db.users: cross-database reference not supported`,
+		},
+		{
+			// vitess collapses CREATE INDEX into an AlterTable, so the
+			// user-facing CREATE INDEX shape funnels through the same
+			// validation — pin it so the rejection survives if vitess
+			// ever stops doing the collapse.
+			name: "CREATE INDEX qualified to a different database",
+			sql: `CREATE TABLE users (id INT, PRIMARY KEY (id));
+CREATE INDEX idx_id ON other_db.users (id);`,
+			errSub: `ALTER TABLE other_db.users: cross-database reference not supported`,
+		},
+		{
+			// Qualifier wrapped in backticks must still match: vitess
+			// strips the quoting before exposing Qualifier.String(),
+			// so the rejection fires the same way and the user can't
+			// dodge the check with `other_db`.users.
+			name:   "CREATE TABLE with back-ticked cross-database qualifier",
+			sql:    "CREATE TABLE `other_db`.users (id INT, PRIMARY KEY (id));",
+			errSub: `CREATE TABLE other_db.users: cross-database reference not supported`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parser.ParseSQL(tt.sql, "app")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errSub)
+		})
+	}
+}
+
+func TestParseSQL_AcceptsMatchingDatabaseQualifier(t *testing.T) {
+	// Hand-written desired SQL that qualifies with the invocation
+	// database is fine — qualifier == defaultDB collapses to the same
+	// resolved Database, matching the dump-then-edit workflow where a
+	// user might keep the qualifier they pasted from elsewhere.
+	r, err := parser.ParseSQL(`CREATE TABLE app.users (id INT, PRIMARY KEY (id));`, "app")
+	require.NoError(t, err)
+	tbl, ok := r.Tables.GetOk("app.users")
+	require.True(t, ok)
+	assert.Equal(t, "app", tbl.Database)
+	assert.Equal(t, "users", tbl.Name)
+}
+
 func TestParseCheckConstraintAutoName(t *testing.T) {
 	// Pin the integration path: parser routes an unnamed CHECK through
 	// autoCheckName, producing the MySQL-compatible "<table>_chk_<n+1>"
