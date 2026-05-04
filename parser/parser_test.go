@@ -271,12 +271,13 @@ CREATE TABLE t (
 }
 
 // TestParseIndexEmptyCommentFoldedToNil pins the corner case: an
-// index declared with an *explicit* `COMMENT ”` must collapse to
-// `Comment=nil` on the parser side, matching the catalog reader's
-// normalisation of empty INDEX_COMMENT. Without this fold, a
-// desired-side `KEY idx (col) COMMENT ”` would compare unequal to
-// the catalog-side nil under indexEqual's ptrEq and `plan` would
-// re-emit DROP+CREATE on every run.
+// index declared with an *explicit* empty-string COMMENT clause
+// (the user wrote `COMMENT` followed by an empty literal) must
+// collapse to `Comment=nil` on the parser side, matching the
+// catalog reader's normalisation of empty INDEX_COMMENT. Without
+// this fold, a desired-side `KEY idx (col) COMMENT <empty>` would
+// compare unequal to the catalog-side nil under indexEqual's
+// ptrEq and `plan` would re-emit DROP+CREATE on every run.
 func TestParseIndexEmptyCommentFoldedToNil(t *testing.T) {
 	r, err := parser.ParseSQL(`
 CREATE TABLE t (
@@ -310,6 +311,74 @@ CREATE TABLE t (
 	tbl, _ := r.Tables.GetOk("app.t")
 	idx, _ := tbl.Indexes.GetOk("idx_a")
 	assert.Nil(t, idx.Comment)
+}
+
+// TestParseStandaloneCreateIndexComment exercises the standalone
+// `CREATE INDEX ... COMMENT '...'` path. vitess collapses the
+// statement into an *AlterTable with an AddIndexDefinition option,
+// which still routes through addIndex — so the COMMENT capture
+// must work for both inline (CREATE TABLE body) and standalone
+// shapes. Without this regression, a future refactor that splits
+// the inline / standalone code paths could drop COMMENT on one
+// side without surfacing the gap in fixture coverage.
+func TestParseStandaloneCreateIndexComment(t *testing.T) {
+	r, err := parser.ParseSQL(`
+CREATE TABLE t (
+    id INT NOT NULL,
+    a  INT NOT NULL,
+    PRIMARY KEY (id)
+);
+CREATE INDEX idx_a ON t (a) COMMENT 'standalone note';
+`, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	idx, ok := tbl.Indexes.GetOk("idx_a")
+	require.True(t, ok)
+	require.NotNil(t, idx.Comment)
+	assert.Equal(t, "standalone note", *idx.Comment)
+}
+
+// TestParseDuplicateIndexNameRejected exercises the duplicate-index
+// guard for every IndexType branch addIndex handles (KEY / UNIQUE /
+// FULLTEXT / SPATIAL). MySQL rejects duplicate index names at
+// CREATE TABLE time, so myschema must surface the conflict at parse
+// time rather than letting an invalid model reach the diff layer.
+func TestParseDuplicateIndexNameRejected(t *testing.T) {
+	tests := []struct {
+		name, body string
+	}{
+		{
+			name: "plain KEY",
+			body: "KEY idx (a), KEY idx (a)",
+		},
+		{
+			name: "UNIQUE",
+			body: "UNIQUE KEY idx (a), UNIQUE KEY idx (a)",
+		},
+		{
+			name: "FULLTEXT",
+			body: "FULLTEXT KEY idx (body), FULLTEXT KEY idx (body)",
+		},
+		{
+			name: "SPATIAL",
+			body: "SPATIAL KEY idx (location), SPATIAL KEY idx (location)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sql := `CREATE TABLE t (
+    id INT NOT NULL,
+    a INT NOT NULL,
+    body TEXT NOT NULL,
+    location POINT NOT NULL,
+    PRIMARY KEY (id),
+    ` + tt.body + `
+);`
+			_, err := parser.ParseSQL(sql, "app")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "duplicate index: idx")
+		})
+	}
 }
 
 // TestParseCheckConstraint verifies both inline and ALTER TABLE ADD

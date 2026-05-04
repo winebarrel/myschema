@@ -623,6 +623,9 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 		if name == "" && len(cols) > 0 {
 			name = cols[0]
 		}
+		if _, dup := t.Indexes.GetOk(name); dup {
+			return fmt.Errorf("duplicate index: %s on %s", name, t.FQTN())
+		}
 		t.Indexes.Set(name, &model.Index{
 			Name: name, Database: t.Database, Table: t.Name,
 			KeyType: model.IndexFulltext, Parts: parts, Invisible: invisible,
@@ -634,6 +637,9 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 		name := idx.Info.Name.String()
 		if name == "" && len(cols) > 0 {
 			name = cols[0]
+		}
+		if _, dup := t.Indexes.GetOk(name); dup {
+			return fmt.Errorf("duplicate index: %s on %s", name, t.FQTN())
 		}
 		t.Indexes.Set(name, &model.Index{
 			Name: name, Database: t.Database, Table: t.Name,
