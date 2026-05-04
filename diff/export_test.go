@@ -5,8 +5,6 @@ package diff
 
 var (
 	PtrEq                     = ptrEq[string]
-	SliceEqString             = sliceEq[string]
-	SliceEqInt                = sliceEq[int]
 	LooseEqual                = looseEqual
 	NormalizeIndexTyp         = normalizeIndexType
 	ColumnEqual               = columnEqual
@@ -24,6 +22,5 @@ var (
 	TemporarilySortListValues = temporarilySortListValues
 	PartitionValueRangeEqual  = partitionValueRangeEqual
 	PartitionHeaderEqual      = partitionHeaderEqual
-	StringSliceEqual          = stringSliceEqual
 	RangeBoundaryAsInt64      = rangeBoundaryAsInt64
 )

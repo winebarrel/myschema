@@ -81,14 +81,6 @@ func TestPartitionValueRangeEqual(t *testing.T) {
 	})
 }
 
-func TestStringSliceEqual(t *testing.T) {
-	// Pure helper for partition column-list comparison.
-	assert.True(t, diff.StringSliceEqual(nil, nil))
-	assert.True(t, diff.StringSliceEqual([]string{"a"}, []string{"a"}))
-	assert.False(t, diff.StringSliceEqual([]string{"a"}, []string{"a", "b"}), "length mismatch")
-	assert.False(t, diff.StringSliceEqual([]string{"a", "b"}, []string{"a", "c"}), "differs at index")
-}
-
 func TestPartitionHeaderEqual_NilCases(t *testing.T) {
 	// Both nil compare equal; one nil, one not → unequal.
 	assert.True(t, diff.PartitionHeaderEqual(nil, nil))

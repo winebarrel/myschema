@@ -385,14 +385,6 @@ func TestPtrEq(t *testing.T) {
 	assert.False(t, diff.PtrEq(new("x"), new("y")), "both set, different")
 }
 
-func TestSliceEq(t *testing.T) {
-	assert.True(t, diff.SliceEqString([]string{}, []string{}), "both empty")
-	assert.True(t, diff.SliceEqString([]string{"a", "b"}, []string{"a", "b"}), "equal")
-	assert.False(t, diff.SliceEqString([]string{"a"}, []string{"a", "b"}), "different length")
-	assert.False(t, diff.SliceEqString([]string{"a", "b"}, []string{"a", "c"}), "differs at index 1")
-	assert.True(t, diff.SliceEqInt([]int{1, 2, 3}, []int{1, 2, 3}), "int slices")
-}
-
 func TestLooseEqual(t *testing.T) {
 	tests := []struct {
 		name string
