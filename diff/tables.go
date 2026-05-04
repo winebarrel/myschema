@@ -553,10 +553,12 @@ func tableCharsetCollationSQL(tableIdent string, current, desired *model.Table) 
 // tableCommentSQL returns an ALTER TABLE that updates the table's
 // COMMENT clause when desired and current disagree. Returns "" when
 // they match. Both sides treat the absence of a clause as nil (the
-// catalog reader maps the empty TABLE_COMMENT to nil; the parser
-// only sets `Table.Comment` when the user spelled out
-// `COMMENT='…'`), so a missing-on-both case short-circuits via
-// ptrEq.
+// catalog reader maps the empty TABLE_COMMENT to nil), and a
+// desired-side explicit `COMMENT=”` is folded into nil here too —
+// MySQL stores both as the empty string, the catalog hands them
+// back as nil, so without the fold the parser-side `&""` would
+// never compare equal to the catalog-side `nil` and `plan` would
+// re-emit `ALTER TABLE … COMMENT=”` every run.
 //
 // Removing a previously-set comment is emitted as `COMMENT=”` —
 // MySQL's only way to clear `TABLE_COMMENT`, since ALTER TABLE has
@@ -564,14 +566,26 @@ func tableCharsetCollationSQL(tableIdent string, current, desired *model.Table) 
 // back to nil on the next read, so the change converges in one
 // apply.
 func tableCommentSQL(tableIdent string, current, desired *model.Table) string {
-	if ptrEq(current.Comment, desired.Comment) {
+	cur := canonicalComment(current.Comment)
+	des := canonicalComment(desired.Comment)
+	if ptrEq(cur, des) {
 		return ""
 	}
 	v := ""
-	if desired.Comment != nil {
-		v = *desired.Comment
+	if des != nil {
+		v = *des
 	}
 	return "ALTER TABLE " + tableIdent + " COMMENT=" + model.QuoteLiteral(v) + ";"
+}
+
+// canonicalComment folds `&""` to `nil` so an explicit empty
+// COMMENT clause on the desired side compares equal to the
+// catalog-side nil that empty TABLE_COMMENT round-trips to.
+func canonicalComment(c *string) *string {
+	if c == nil || *c == "" {
+		return nil
+	}
+	return c
 }
 
 // addColumnSQL / modifyColumnSQL share model.ColumnDefSQL with CREATE TABLE
