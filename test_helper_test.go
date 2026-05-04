@@ -54,14 +54,19 @@ func newClient(t *testing.T) *myschema.Client {
 // same MySQL instance the rest of the suite is using (so the MySQL 9.x CI
 // leg, which sets MYSCHEMA_TEST_DSN to port 3307, doesn't connect to 3306
 // by accident).
+//
+// The env DSN is passed to ParseDSN as-is — no string normalisation,
+// because doing so would corrupt query params on inputs like
+// `root@tcp(...)/?parseTime=true` (a trailing `/` would land *inside*
+// the query string).
 func newClientWithDB(t *testing.T, dbName string) *myschema.Client {
 	t.Helper()
 	base := os.Getenv("MYSCHEMA_TEST_DSN")
 	if base == "" {
 		base = "root@tcp(127.0.0.1:3306)/"
 	}
-	cfg, err := mysqldrv.ParseDSN(strings.TrimSuffix(base, "/") + "/")
-	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN base %q", base)
+	cfg, err := mysqldrv.ParseDSN(base)
+	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN %q (must be a valid DSN, e.g. 'root@tcp(127.0.0.1:3306)/')", base)
 	cfg.DBName = dbName
 	return myschema.NewClient(&myschema.Options{DSN: cfg.FormatDSN()})
 }

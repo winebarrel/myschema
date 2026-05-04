@@ -3,7 +3,6 @@ package command_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	mysqldrv "github.com/go-sql-driver/mysql"
@@ -18,18 +17,18 @@ import (
 // duplicate the wiring here (rather than export a helper) because cmd/command
 // sits below the root package.
 //
-// Parses MYSCHEMA_TEST_DSN through the MySQL driver and rewrites DBName, so
-// callers don't have to care whether the env DSN already carries a database
-// (a `root@tcp(...)/some_db` env value would otherwise produce
-// `root@tcp(...)/some_db/myschema_test` under naive string concat).
+// Parses MYSCHEMA_TEST_DSN as-is through ParseDSN and overwrites DBName, so
+// the test DB is always the only DBName regardless of what the env DSN
+// started with. No string normalisation: a `TrimSuffix + "/"` would corrupt
+// query params on inputs like `root@tcp(...)/?parseTime=true`.
 func newTestClient(t *testing.T) *myschema.Client {
 	t.Helper()
 	base := os.Getenv("MYSCHEMA_TEST_DSN")
 	if base == "" {
 		base = "root@tcp(127.0.0.1:3306)/"
 	}
-	cfg, err := mysqldrv.ParseDSN(strings.TrimSuffix(base, "/") + "/")
-	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN base %q", base)
+	cfg, err := mysqldrv.ParseDSN(base)
+	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN %q (must be a valid DSN, e.g. 'root@tcp(127.0.0.1:3306)/')", base)
 	cfg.DBName = testutil.DefaultDB
 	return myschema.NewClient(&myschema.Options{DSN: cfg.FormatDSN()})
 }
