@@ -44,6 +44,7 @@ func TestCanonicalExpr(t *testing.T) {
 		{"current_timestamp casing", "CURRENT_TIMESTAMP", "current_timestamp()", true},
 		{"unparseable returns input + false", "garbage )(", "garbage )(", false},
 		{"multi-expr select returns input + false", "1, 2", "1, 2", false},
+		{"non-AliasedExpr (SELECT *) returns input + false", "*", "*", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

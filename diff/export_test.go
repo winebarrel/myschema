@@ -23,4 +23,7 @@ var (
 	AddConstraintSQL          = addConstraintSQL
 	TemporarilySortListValues = temporarilySortListValues
 	PartitionValueRangeEqual  = partitionValueRangeEqual
+	PartitionHeaderEqual      = partitionHeaderEqual
+	StringSliceEqual          = stringSliceEqual
+	RangeBoundaryAsInt64      = rangeBoundaryAsInt64
 )

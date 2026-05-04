@@ -841,3 +841,25 @@ func TestParseSQL_UnparseableInputErrors(t *testing.T) {
 	_, err := parser.ParseSQL("CREATE TABLE )))) garbage (", "app")
 	require.Error(t, err)
 }
+
+func TestParseSQL_ValidateDirectivesError(t *testing.T) {
+	// An unknown directive prefix is rejected by ValidateDirectives
+	// before any vitess parse runs — pin the early-out path.
+	_, err := parser.ParseSQL(`-- myschema:bogus-directive
+CREATE TABLE t (id INT);`, "app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown myschema directive")
+}
+
+func TestParseSQL_EmptyPieceSkipped(t *testing.T) {
+	// Consecutive semicolons split into an empty piece between two
+	// real statements. The parser must skip the empty piece silently
+	// (not fail with "parse SQL: empty statement") and still register
+	// both real CREATE TABLEs.
+	r, err := parser.ParseSQL("CREATE TABLE a (id INT);;CREATE TABLE b (id INT);", "app")
+	require.NoError(t, err)
+	_, okA := r.Tables.GetOk("app.a")
+	_, okB := r.Tables.GetOk("app.b")
+	assert.True(t, okA, "table a must be parsed despite the empty piece")
+	assert.True(t, okB, "table b must be parsed despite the empty piece")
+}

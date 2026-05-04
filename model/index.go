@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // IndexKeyType reflects the optional CREATE INDEX keyword (UNIQUE / FULLTEXT /
 // SPATIAL). Empty means a plain INDEX.
@@ -31,26 +34,12 @@ func (p IndexPart) SQL() string {
 	}
 	s := Ident(p.Column)
 	if p.Length > 0 {
-		s += "(" + itoa(p.Length) + ")"
+		s += "(" + strconv.Itoa(p.Length) + ")"
 	}
 	if p.Desc {
 		s += " DESC"
 	}
 	return s
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }
 
 // Index represents a secondary or primary key index. The PRIMARY KEY is also

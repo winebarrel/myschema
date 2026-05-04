@@ -80,3 +80,50 @@ func TestPartitionValueRangeEqual(t *testing.T) {
 		assert.True(t, diff.PartitionValueRangeEqual(a, b))
 	})
 }
+
+func TestStringSliceEqual(t *testing.T) {
+	// Pure helper for partition column-list comparison.
+	assert.True(t, diff.StringSliceEqual(nil, nil))
+	assert.True(t, diff.StringSliceEqual([]string{"a"}, []string{"a"}))
+	assert.False(t, diff.StringSliceEqual([]string{"a"}, []string{"a", "b"}), "length mismatch")
+	assert.False(t, diff.StringSliceEqual([]string{"a", "b"}, []string{"a", "c"}), "differs at index")
+}
+
+func TestPartitionHeaderEqual_NilCases(t *testing.T) {
+	// Both nil compare equal; one nil, one not → unequal.
+	assert.True(t, diff.PartitionHeaderEqual(nil, nil))
+
+	po, err := parser.ParsePartitionClause("PARTITION BY HASH (id) PARTITIONS 4")
+	require.NoError(t, err)
+	assert.False(t, diff.PartitionHeaderEqual(po, nil))
+	assert.False(t, diff.PartitionHeaderEqual(nil, po))
+}
+
+func TestRangeBoundaryAsInt64(t *testing.T) {
+	// Pure helper. Three branches:
+	// (1) single literal IntVal → returns the value, true
+	// (2) tuple boundary (RANGE COLUMNS shape) → 0, false
+	// (3) non-Literal expression → 0, false
+	t.Run("single int literal", func(t *testing.T) {
+		def := firstPartition(t,
+			"PARTITION BY RANGE (id) (PARTITION p VALUES LESS THAN (42))")
+		v, ok := diff.RangeBoundaryAsInt64(def.Options.ValueRange)
+		assert.True(t, ok)
+		assert.Equal(t, int64(42), v)
+	})
+	t.Run("tuple boundary (RANGE COLUMNS) returns 0,false", func(t *testing.T) {
+		def := firstPartition(t,
+			"PARTITION BY RANGE COLUMNS (a, b) (PARTITION p VALUES LESS THAN (10, 20))")
+		v, ok := diff.RangeBoundaryAsInt64(def.Options.ValueRange)
+		assert.False(t, ok, "len(Range) != 1 → not a single-int boundary")
+		assert.Equal(t, int64(0), v)
+	})
+	t.Run("non-literal expression returns 0,false", func(t *testing.T) {
+		// `TO_DAYS('2026-01-01')` is a function call, not a Literal.
+		def := firstPartition(t,
+			"PARTITION BY RANGE (TO_DAYS(d)) (PARTITION p VALUES LESS THAN (TO_DAYS('2026-01-01')))")
+		v, ok := diff.RangeBoundaryAsInt64(def.Options.ValueRange)
+		assert.False(t, ok, "function call isn't a Literal")
+		assert.Equal(t, int64(0), v)
+	})
+}

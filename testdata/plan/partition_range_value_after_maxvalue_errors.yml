@@ -1,0 +1,29 @@
+# `validateDesiredRangeMonotonic` rejects desired SQL whose
+# RANGE partition list places a concrete `LESS THAN <value>`
+# partition AFTER the MAXVALUE partition. MySQL itself does
+# the same check at apply time, but the diff layer catches it
+# at plan time so the operator sees the offending pair of
+# partition names instead of waiting for MySQL to reject the
+# REORGANIZE.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION pmax VALUES LESS THAN MAXVALUE,
+      PARTITION p_late VALUES LESS THAN (100)
+  );
+
+error: 'comes after the MAXVALUE partition'

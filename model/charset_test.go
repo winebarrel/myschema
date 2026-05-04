@@ -67,6 +67,10 @@ func TestCharsetOfCollation(t *testing.T) {
 		// to the lowercased value — caller will get an empty result
 		// from DefaultCollationOf and skip the collapse.
 		{"made_up", "made"},
+		// Same fallthrough but no underscore at all → the whole input
+		// is returned (lowercased).
+		{"weird", "weird"},
+		{"WEIRD", "weird"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.collation, func(t *testing.T) {
