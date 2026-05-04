@@ -118,6 +118,38 @@ func TestNormalizeViewDefinition(t *testing.T) {
 			defaultDB: "app",
 			want:      "select id from users",
 		},
+		{
+			// MySQL identifiers are case-insensitive by default, so
+			// `id AS ID` is just as redundant as `id AS id`. The
+			// equality check must fold case (vitess'
+			// IdentifierCI.Equal does); pinning the behaviour here
+			// guards against a future swap to a case-sensitive
+			// comparison.
+			name:      "strips alias whose case differs from column",
+			def:       "SELECT id AS ID FROM users",
+			defaultDB: "app",
+			want:      "select id from users",
+		},
+		{
+			// SELECT * arrives as *StarExpr, not *AliasedExpr — the
+			// type-assertion in stripRedundantAliases must skip it
+			// without panicking, otherwise any view of the shape
+			// `SELECT * FROM …` would crash NormalizeViewDefinition.
+			name:      "leaves SELECT * untouched",
+			def:       "SELECT * FROM users",
+			defaultDB: "app",
+			want:      "select * from users",
+		},
+		{
+			// Mixed shape: redundant alias stripped, meaningful alias
+			// preserved, and a no-alias column passes through. Pins
+			// that the per-expression check runs independently for
+			// each item in the SELECT list.
+			name:      "mixed: strips redundant, keeps meaningful, skips bare",
+			def:       "SELECT id AS id, amount AS display_amount, email FROM users",
+			defaultDB: "app",
+			want:      "select id, amount as display_amount, email from users",
+		},
 	}
 
 	for _, tt := range tests {
