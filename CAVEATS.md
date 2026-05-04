@@ -258,29 +258,48 @@ patterns:
   permutations (the value list is a set semantically, so
   reordering literals doesn't change which rows land in which
   partition). Both are folded by `partitionDefEqual` and emit
-  no DDL. myschema emits
-  *one REORGANIZE per run of consecutive changed slots*, not
-  one giant REORGANIZE that drags every matched partition in
-  between through the rewrite. MySQL's Error 1519 "When
-  reorganizing a set of partitions they must be in consecutive
-  order" only constrains the partition_names list *within a
-  single REORGANIZE statement*; multiple REORGANIZE statements
-  in sequence each with their own consecutive list are fine.
-  So a "p0 + p3 changed" 4-partition LIST table emits two
-  separate REORGANIZEs (each trivially consecutive — one slot
-  apiece) instead of one `REORGANIZE p0, p1, p2, p3 …` that
-  uselessly rewrites p1 / p2. RANGE-style boundary edits
-  additionally extend each run by one slot when that run's
-  last changed slot's `VALUES LESS THAN` actually moved AND
-  that slot isn't the final partition — pulling
-  `p_{last+1}` in re-establishes the boundary alignment with
-  the unchanged tail (otherwise MySQL rejects with "VALUES
-  less than value must be strictly increasing"). Per-partition
-  option-only diffs leave the value range untouched, so the
-  cascade doesn't fire — a metadata-only edit stays a
-  one-slot REORGANIZE. MySQL redistributes existing rows into
-  the new boundaries (row-preserving). No `--allow-drop`
-  gating because every dropped name is reused on the add side.
+  no DDL. How myschema slices the REORGANIZE statements
+  depends on the partition strategy because the safety
+  constraints differ:
+
+    - **RANGE / RANGE COLUMNS**: one REORGANIZE per run of
+      consecutive changed slots. RANGE values are continuous
+      and bound by per-slot boundaries, so a value can only
+      move to an adjacent slot when its boundary shifts —
+      values can't cross over an unchanged slot in between.
+      A "p1 + p3 boundary edit" 5-partition RANGE table
+      emits two REORGANIZE statements rather than one giant
+      `REORGANIZE p1, p2, p3, p4 …` that drags the unchanged
+      p2 into the rewrite. Each run additionally extends by
+      one slot when that run's last changed slot's `VALUES
+      LESS THAN` actually moved AND that slot isn't the
+      final partition — pulling `p_{last+1}` in re-establishes
+      the boundary alignment with the unchanged tail
+      (otherwise MySQL rejects with "VALUES less than value
+      must be strictly increasing"). Per-partition option-only
+      diffs leave the value range untouched, so the cascade
+      doesn't fire — a metadata-only edit stays a one-slot
+      REORGANIZE.
+
+    - **LIST / LIST COLUMNS**: one single-span REORGANIZE
+      covering [first..last]. LIST values are a discrete set
+      per slot, and a value can move between any two
+      partitions regardless of position. A "p0 gains 4, p3
+      loses 4" cross-flow needs both ends of the move inside
+      a single REORGANIZE — splitting into per-run
+      REORGANIZEs would break MySQL's value-uniqueness rule
+      (Error 1495 "Multiple definition of same constant in
+      list partitioning") on the first statement while the
+      second partition still owned the value. Matched
+      partitions inside the span get re-stated unchanged
+      (MySQL no-ops them). myschema doesn't try to detect
+      whether a particular LIST diff is cross-flow-free and
+      could safely be split — the tracking overhead isn't
+      worth it for the common case.
+
+  In both cases MySQL redistributes existing rows into the
+  new boundaries (row-preserving). No `--allow-drop` gating
+  because every dropped name is reused on the add side.
   **Operationally** REORGANIZE PARTITION is data-moving —
   every row in the named partitions is read, redistributed
   according to the new boundaries, and rewritten in place.

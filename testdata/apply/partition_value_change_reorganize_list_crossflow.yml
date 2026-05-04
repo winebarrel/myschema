@@ -1,0 +1,48 @@
+# LIST cross-flow: a value moves from one partition to another
+# at a non-consecutive position. Round 11's per-run REORGANIZE
+# refactor was unsafe for LIST because each run's individual
+# REORGANIZE has to satisfy MySQL's value-uniqueness rule on
+# its own — a `REORGANIZE p0 INTO (p0 IN (1, 4))` while p3
+# still owns 4 fails with Error 1495 "Multiple definition of
+# same constant in list partitioning". Single-span keeps the
+# cross-flow inside one REORGANIZE: the new partitions
+# collectively own every value, so no transient duplicate.
+#
+# Setup: catalog `[p0(1), p1(2), p2(3), p3(4,5)]`. Desired
+# moves the value 4 from p3 to p0, leaving p1 / p2 alone:
+# `[p0(1,4), p1(2), p2(3), p3(5)]`. The diff has to emit ONE
+# REORGANIZE p0, p1, p2, p3 INTO (...) — splitting into two
+# would crash on the Error 1495 above.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p1 VALUES IN (2),
+      PARTITION p2 VALUES IN (3),
+      PARTITION p3 VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 4),
+      PARTITION p1 VALUES IN (2),
+      PARTITION p2 VALUES IN (3),
+      PARTITION p3 VALUES IN (5)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p0, p1, p2, p3 INTO (
+    partition p0 values in (1, 4),
+    partition p1 values in (2),
+    partition p2 values in (3),
+    partition p3 values in (5)
+  );
+
+verify_no_drift: true

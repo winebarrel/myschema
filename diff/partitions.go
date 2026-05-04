@@ -192,54 +192,97 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// boundaries, COMMENT, MAX_ROWS, etc. all flow through
 	// `parser.FormatPartitionDefinition`'s identity check.
 	//
-	// Emit *one REORGANIZE PARTITION per run of consecutive
-	// changed slots*, not one giant REORGANIZE that drags every
-	// matched in-between slot through the rewrite. MySQL's
-	// Error 1519 "When reorganizing a set of partitions they
-	// must be in consecutive order" only constrains the
-	// partition_names list *within a single REORGANIZE
-	// statement* — multiple REORGANIZE statements in sequence
-	// each with their own consecutive list are fine. So a
-	// "p0 + p3 changed" 4-partition LIST table emits two
-	// separate REORGANIZEs (each trivially consecutive) rather
-	// than one `REORGANIZE p0, p1, p2, p3 …` that uselessly
-	// rewrites p1 / p2.
+	// How the REORGANIZE statements are sliced depends on the
+	// partition strategy, because the safety constraints
+	// differ:
 	//
-	// RANGE-style boundary edits additionally cascade *within
-	// each run*: each partition's `VALUES LESS THAN <x>` is
-	// also the implicit lower bound of the next partition, so
-	// when the run's last slot's upper bound moved AND that
-	// slot isn't the final partition, pulling `last+1` into
-	// the run re-establishes the boundary alignment with the
-	// unchanged tail (otherwise MySQL rejects with "VALUES
-	// less than value must be strictly increasing"). Per-
-	// partition option-only diffs leave the value range
-	// untouched, so the cascade doesn't fire — keeps a
-	// metadata-only edit a one-slot REORGANIZE. LIST partitions
-	// don't have this cascade at all (`VALUES IN (…)` is a
-	// closed set per slot), so the extension only fires for
-	// RANGE / RANGE COLUMNS. Cascades from one run can't
-	// extend into the next: the slot the cascade pulls in is by
-	// definition matched (otherwise it'd already be part of the
-	// current run), and the next run starts at the next
-	// changed slot, which is at least one more position over.
+	//   - RANGE / RANGE COLUMNS: emit *one REORGANIZE per run
+	//     of consecutive changed slots*. RANGE values are
+	//     continuous and bound by per-slot boundaries, so a
+	//     value can only move to an adjacent slot when its
+	//     boundary shifts — values can't cross over an
+	//     unchanged slot in between. Per-run with the boundary
+	//     cascade (see below) keeps each statement self-
+	//     contained and correct. MySQL's Error 1519 ("When
+	//     reorganizing a set of partitions they must be in
+	//     consecutive order") only constrains the
+	//     partition_names list *within a single REORGANIZE
+	//     statement*; multiple REORGANIZE statements in
+	//     sequence each with their own consecutive list are
+	//     fine. So a "p1 + p3 boundary edit" 5-partition RANGE
+	//     table emits two REORGANIZE statements rather than
+	//     one giant `REORGANIZE p1, p2, p3, p4 …` that drags
+	//     unchanged p2 into the rewrite.
+	//
+	//   - LIST / LIST COLUMNS: emit *one single-span
+	//     REORGANIZE* covering [first..last]. LIST values are
+	//     a discrete set per slot, and a value can move
+	//     between any two partitions regardless of position —
+	//     so a "p0 gains 4, p3 loses 4" cross-flow needs both
+	//     ends of the move inside a single REORGANIZE.
+	//     Splitting into per-run REORGANIZEs would break MySQL's
+	//     value-uniqueness rule (Error 1495 "Multiple
+	//     definition of same constant in list partitioning")
+	//     on the first statement while the second partition
+	//     still owned the value. We could detect cross-flow
+	//     and use per-run only for the no-cross-flow case,
+	//     but the implementation overhead (per-value owner
+	//     tracking, tuple equality for LIST COLUMNS) isn't
+	//     worth it — the matched in-between slots get
+	//     re-stated unchanged, MySQL no-ops them, and the
+	//     resulting ALTER is still proportional to the diff
+	//     in real-world usage.
+	//
+	// RANGE boundary cascade *within each run*: each
+	// partition's `VALUES LESS THAN <x>` is also the implicit
+	// lower bound of the next partition, so when the run's
+	// last slot's upper bound moved AND that slot isn't the
+	// final partition, pulling `last+1` into the run re-
+	// establishes the boundary alignment with the unchanged
+	// tail (otherwise MySQL rejects with "VALUES less than
+	// value must be strictly increasing"). Per-partition
+	// option-only diffs leave the value range untouched, so
+	// the cascade doesn't fire — keeps a metadata-only edit a
+	// one-slot REORGANIZE. LIST has no equivalent cascade
+	// because `VALUES IN (…)` is a closed set per slot.
+	// Cascades from one RANGE run can't extend into the next:
+	// the slot the cascade pulls in is by definition matched
+	// (otherwise it'd already be part of the current run), and
+	// the next run starts at the next changed slot, which is
+	// at least one more position over.
 	if partitionNameListEqual(curDefs, desDefs) {
 		var stmts []string
-		for i := 0; i < len(curDefs); i++ {
-			if partitionDefEqual(curDefs[i], desDefs[i]) {
-				continue
+		switch curPO.Type {
+		case sqlparser.RangeType:
+			for i := 0; i < len(curDefs); i++ {
+				if partitionDefEqual(curDefs[i], desDefs[i]) {
+					continue
+				}
+				first := i
+				last := i
+				for last+1 < len(curDefs) && !partitionDefEqual(curDefs[last+1], desDefs[last+1]) {
+					last++
+				}
+				if last < len(curDefs)-1 &&
+					!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
+					last++
+				}
+				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last))
+				i = last
 			}
-			first := i
-			last := i
-			for last+1 < len(curDefs) && !partitionDefEqual(curDefs[last+1], desDefs[last+1]) {
-				last++
+		default:
+			first, last := -1, -1
+			for i := range curDefs {
+				if !partitionDefEqual(curDefs[i], desDefs[i]) {
+					if first < 0 {
+						first = i
+					}
+					last = i
+				}
 			}
-			if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 &&
-				!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
-				last++
+			if first >= 0 {
+				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last))
 			}
-			stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last))
-			i = last
 		}
 		if stmts == nil {
 			// Every position compares equal under partitionDefEqual,
