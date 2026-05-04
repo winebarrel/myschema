@@ -126,6 +126,62 @@ func TestAppendAlterHints(t *testing.T) {
 			lock:      "NONE",
 			want:      "ALTER TABLE shop.users ADD COLUMN c INT, ALGORITHM=INPLACE, LOCK=NONE",
 		},
+		{
+			name:      "REORGANIZE PARTITION: leading-position splice",
+			in:        "ALTER TABLE shop.events REORGANIZE PARTITION p1 INTO (\n  partition p1 values less than (15)\n);",
+			algorithm: "COPY",
+			lock:      "SHARED",
+			want:      "ALTER TABLE shop.events ALGORITHM=COPY, LOCK=SHARED, REORGANIZE PARTITION p1 INTO (\n  partition p1 values less than (15)\n);",
+		},
+		{
+			name:      "ADD PARTITION: leading-position splice",
+			in:        "ALTER TABLE shop.events ADD PARTITION (\n  partition p2 values less than (20)\n);",
+			algorithm: "INPLACE",
+			lock:      "NONE",
+			want:      "ALTER TABLE shop.events ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (\n  partition p2 values less than (20)\n);",
+		},
+		{
+			name:      "DROP PARTITION: leading-position splice",
+			in:        "ALTER TABLE shop.events DROP PARTITION p1;",
+			algorithm: "INPLACE",
+			lock:      "NONE",
+			want:      "ALTER TABLE shop.events ALGORITHM=INPLACE, LOCK=NONE, DROP PARTITION p1;",
+		},
+		{
+			name:      "COALESCE PARTITION: leading-position splice",
+			in:        "ALTER TABLE shop.events COALESCE PARTITION 2;",
+			algorithm: "COPY",
+			lock:      "SHARED",
+			want:      "ALTER TABLE shop.events ALGORITHM=COPY, LOCK=SHARED, COALESCE PARTITION 2;",
+		},
+		// Regression: partitionOpInsertPos previously did a global
+		// strings.Index for partition keywords, so an ADD COLUMN
+		// statement whose COMMENT mentioned 'ADD PARTITION' was
+		// misclassified as a partition op and the hints got
+		// spliced into the comment literal. The fixed detector
+		// only looks at the alter-spec keyword position right
+		// after `ALTER TABLE <name>`, so the comment is ignored.
+		{
+			name:      "ADD COLUMN with COMMENT mentioning ADD PARTITION: trailing splice (not partition op)",
+			in:        "ALTER TABLE shop.users ADD COLUMN c INT COMMENT 'see ADD PARTITION docs';",
+			algorithm: "INPLACE",
+			lock:      "NONE",
+			want:      "ALTER TABLE shop.users ADD COLUMN c INT COMMENT 'see ADD PARTITION docs', ALGORITHM=INPLACE, LOCK=NONE;",
+		},
+		// Regression: the splice index used to be computed from
+		// strings.ToUpper(stmt) and indexed back into stmt. ASCII
+		// keywords work fine, but a back-ticked table name with
+		// non-ASCII letters could change byte length under ToUpper
+		// and shift the splice point. The fixed detector indexes
+		// raw `stmt` directly and only ToUpper's a short prefix
+		// (the keyword itself, ASCII-only).
+		{
+			name:      "back-ticked non-ASCII table name with REORGANIZE: splice still in the right place",
+			in:        "ALTER TABLE shop.`tαble` REORGANIZE PARTITION p1 INTO (\n  partition p1 values less than (15)\n);",
+			algorithm: "COPY",
+			lock:      "SHARED",
+			want:      "ALTER TABLE shop.`tαble` ALGORITHM=COPY, LOCK=SHARED, REORGANIZE PARTITION p1 INTO (\n  partition p1 values less than (15)\n);",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
