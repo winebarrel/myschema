@@ -101,9 +101,12 @@ parent side. Specifically:
 - `(*ForeignKey).SQL()` preserves the `other_db.` prefix on emit
   whenever `RefDB != Database`, so a hand-written cross-DB FK
   doesn't silently re-target a same-named table in the current DB.
-- `dump` emits the FK as a separate `ALTER TABLE owner ADD CONSTRAINT
-  fk … REFERENCES other_db.parent(id);` line, matching what the user
-  would write by hand.
+- `dump` emits the FK as a separate statement, matching what the
+  user would write by hand:
+
+  ```sql
+  ALTER TABLE owner ADD CONSTRAINT fk … REFERENCES other_db.parent(id);
+  ```
 - Diff still detects changes on the *child* side: equality compares
   `(RefDB, RefTable)`, so renaming or re-pointing the FK fires the
   expected `DROP FOREIGN KEY + ADD CONSTRAINT`.
