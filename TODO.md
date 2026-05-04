@@ -7,12 +7,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Medium — silent diffs / fidelity gaps
 
-- **`ENUM` / `SET` element-list diff.** Today the type is compared
-  as one string, so the diff fires on any element-list change. ENUM
-  ordering matters in MySQL (it backs the internal numeric mapping
-  and ORDER BY result), so reordering is a real change — but
-  *appending* a new value at the end is online-safe and could be
-  surfaced as a hint or skipped from `--allow-drop` accounting.
 - **FK to a table outside the managed database** — myschema only
   reads / orders the tables it manages, so an FK whose target lives
   in another database is treated as a black box. Apply will fail
@@ -66,4 +60,3 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 - Demo asciinema or gif (pistachio-style).
 - `.goreleaser.yml`.
 - Renovate / dependabot config.
-

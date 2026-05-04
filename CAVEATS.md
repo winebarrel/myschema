@@ -131,6 +131,70 @@ CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
 `varchar`, etc. don't trigger drift — both sides are lower-cased
 before comparison. Write whichever you find readable.
 
+## `ENUM` / `SET` element-list changes are diffed as one opaque string
+
+**Behaviour.** `model.Column.TypeName` holds the rendered type
+(`enum('new','paid','shipped')`) as a single lowercase string, and
+`diff.columnEqual` compares it byte-for-byte. Any element-list
+change — append, reorder, remove, rename — surfaces as the same
+generic `MODIFY COLUMN`, with no hint about which kind it is and
+no `--allow-drop` accounting.
+
+```sql
+-- current
+CREATE TABLE orders (
+  id     BIGINT NOT NULL,
+  status ENUM('new','paid','shipped') NOT NULL,
+  PRIMARY KEY (id)
+);
+-- desired (any of the four shapes below)
+status ENUM('new','paid','shipped','refunded') NOT NULL  -- append
+status ENUM('paid','new','shipped')            NOT NULL  -- reorder
+status ENUM('new','paid')                      NOT NULL  -- remove
+status ENUM('new','settled','shipped')         NOT NULL  -- rename
+```
+
+Every one of these produces the same line:
+
+```sql
+ALTER TABLE orders MODIFY COLUMN status enum(...) NOT NULL;
+```
+
+**Why each shape matters differently.** ENUM stores values as
+1-based integers (`'new'=1, 'paid'=2, 'shipped'=3`) and SET as
+bit positions (`urgent=1, vip=2, beta=4`). The four shapes have
+very different runtime cost and safety:
+
+- **Append** (add a value at the *end* of the list): online-safe in
+  MySQL 8.0+ and qualifies for `ALGORITHM=INSTANT`. myschema does
+  not detect this and emits a plain `MODIFY COLUMN`. To run it
+  online today, pass `--alter-algorithm=INSTANT` (and let MySQL
+  reject the apply if the change isn't actually instant-eligible).
+- **Reorder**: silently rewrites the integer mapping. Existing
+  rows are reinterpreted — a row with `status='new'` becomes
+  `status='paid'` after `ENUM('paid','new',…)`. MySQL doesn't warn,
+  myschema doesn't warn, and the plan looks identical to the
+  append case.
+- **Remove**: rows holding the removed value are truncated to the
+  empty string (or rejected, depending on `sql_mode`). myschema
+  does **not** require `--allow-drop=column` for this — the
+  policy applies to whole-column drops, not enum-value drops —
+  so the removal slips through with the same `MODIFY COLUMN`.
+- **Rename** (e.g. `paid` → `settled`): equivalent to remove + add
+  from MySQL's perspective; rows with the old value are truncated.
+
+**Workarounds.**
+
+- For appends, pass `--alter-algorithm=INSTANT`; MySQL will succeed
+  for true append-only changes and fail loudly for anything else.
+- For reorders / removes / renames, treat the desired-side change
+  as destructive. Inspect plan output, take a backup, and consider
+  staging the change (add the new value first, migrate data, then
+  remove the old value).
+- If you need element-level fidelity in the diff, manage the column
+  out of band (run the `ALTER TABLE` by hand) and keep the
+  desired-side type aligned with what the catalog reports.
+
 ## Changing `DEFAULT CHARSET` on a table with string columns
 
 **Behaviour.** `ALTER TABLE … DEFAULT CHARSET=…` only updates the
