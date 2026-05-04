@@ -135,24 +135,26 @@ before comparison. Write whichever you find readable.
 
 **Behaviour.** `model.Column.TypeName` holds the rendered type
 (`enum('new','paid','shipped')`) as a single lowercase string, and
-`diff.columnEqual` compares it byte-for-byte. Any element-list
-change — append, reorder, remove, rename — surfaces as the same
-generic `MODIFY COLUMN`, with no hint about which kind it is and
-no `--allow-drop` accounting.
+the column diff (`columnEqual` in `diff/tables.go`) compares it
+byte-for-byte. Any element-list change — append, reorder, remove,
+rename — surfaces as the same generic `MODIFY COLUMN`, with no hint
+about which kind it is and no `--allow-drop` accounting.
 
 ```sql
--- current
 CREATE TABLE orders (
   id     BIGINT NOT NULL,
   status ENUM('new','paid','shipped') NOT NULL,
   PRIMARY KEY (id)
 );
--- desired (any of the four shapes below)
-status ENUM('new','paid','shipped','refunded') NOT NULL  -- append
-status ENUM('paid','new','shipped')            NOT NULL  -- reorder
-status ENUM('new','paid')                      NOT NULL  -- remove
-status ENUM('new','settled','shipped')         NOT NULL  -- rename
 ```
+
+The four element-list shapes — each just a different `status` column
+line in your desired `CREATE TABLE` — are:
+
+- **Append**: `status ENUM('new','paid','shipped','refunded') NOT NULL`
+- **Reorder**: `status ENUM('paid','new','shipped') NOT NULL`
+- **Remove**: `status ENUM('new','paid') NOT NULL`
+- **Rename**: `status ENUM('new','settled','shipped') NOT NULL`
 
 Every one of these produces the same line:
 
