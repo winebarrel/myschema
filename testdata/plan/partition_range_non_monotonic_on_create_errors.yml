@@ -1,0 +1,24 @@
+# Counterpart to `partition_range_non_monotonic_errors.yml`
+# (which exercises the modified-table path through
+# `diffPartitions`). New partitioned tables go through
+# `DiffTables`'s create-table branch and skip
+# `diffPartitions`, so the same desired-side RANGE
+# monotonicity guard has to fire on the create-table path
+# too — otherwise a `CREATE TABLE … PARTITION BY RANGE …`
+# whose `VALUES LESS THAN` sequence isn't strictly
+# increasing slips past plan and fails at apply time with
+# MySQL's "VALUES less than value must be strictly
+# increasing" error.
+init: ""
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p0 VALUES LESS THAN (25),
+      PARTITION p1 VALUES LESS THAN (20)
+  );
+
+error: 'desired RANGE partition p1 VALUES LESS THAN 20 is not strictly greater than partition p0 VALUES LESS THAN 25'

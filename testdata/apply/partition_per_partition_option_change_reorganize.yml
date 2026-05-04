@@ -1,0 +1,38 @@
+# End-to-end pin that the REORGANIZE PARTITION branch handles
+# per-partition *option* diffs (here: COMMENT only) — not just
+# `VALUES …` changes. The body of `partitionDefEqual` runs
+# `parser.FormatPartitionDefinition`, which preserves COMMENT /
+# MAX_ROWS / TABLESPACE / etc., so any byte-different definition
+# routes through this branch. This fixture pins:
+#   - diff emits the REORGANIZE with the new COMMENT inlined
+#   - MySQL accepts the generated REORGANIZE
+#   - the new COMMENT round-trips cleanly through SHOW CREATE TABLE
+#     so the next plan converges (verify_no_drift)
+# LIST avoids the RANGE upper-bound cascade so the REORGANIZE only
+# touches the one slot whose option actually changed.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pAB VALUES IN (1, 2) COMMENT 'old',
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pAB VALUES IN (1, 2) COMMENT 'new',
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION pAB INTO (
+    partition pAB values in (1, 2) comment 'new'
+  );
+
+verify_no_drift: true

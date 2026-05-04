@@ -1,0 +1,49 @@
+# `appendAlterHints` rewrites generated `ALTER TABLE …` SQL at
+# the string level after the partition formatter runs. For
+# *partition operations* (REORGANIZE / ADD / DROP / COALESCE /
+# TRUNCATE / EXCHANGE PARTITION) MySQL's parser rejects the
+# trailing-comma form (Error 1064 — the comma after `INTO (…)`
+# or after the partition list is treated as a new
+# partition_definition). So the hint inserter splices the
+# clauses *between the table name and the partition-op keyword*
+# instead, producing `ALTER TABLE t ALGORITHM=COPY, LOCK=SHARED,
+# REORGANIZE PARTITION p1 INTO (…)`. This fixture pins both
+# halves end-to-end:
+#   - the diff/formatter+appender combination produces well-
+#     formed SQL with the hints in the leading position;
+#   - MySQL accepts the resulting REORGANIZE PARTITION under
+#     ALGORITHM=COPY (the table is rebuilt) and LOCK=SHARED.
+# Without this pin a small change to the appender (e.g. going
+# back to trailing-comma) would ship invalid SQL under
+# `--alter-algorithm=COPY --alter-lock=SHARED` and no other
+# test would catch it.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p2 VALUES LESS THAN (20)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (15),
+      PARTITION p2 VALUES LESS THAN (20)
+  );
+
+alter_algorithm: COPY
+alter_lock: SHARED
+
+applied: |
+  ALTER TABLE myschema_test.events ALGORITHM=COPY, LOCK=SHARED, REORGANIZE PARTITION p1, p2 INTO (
+    partition p1 values less than (15),
+    partition p2 values less than (20)
+  );
+
+verify_no_drift: true

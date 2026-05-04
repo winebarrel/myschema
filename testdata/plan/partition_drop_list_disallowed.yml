@@ -1,0 +1,37 @@
+# LIST counterpart to `partition_drop_disallowed.yml` (the
+# RANGE version). Without `--allow-drop=partition` the
+# DROP PARTITION lands in the disallowed bucket as a
+# `-- skipped:` line and PlanResult.SQL stays empty.
+#
+# Regression: round 23's catalog-vs-desired LIST value-discard
+# guard ran *before* the diff layer decided whether the diff
+# was a REORGANIZE or a DROP PARTITION, so this same shape
+# (every catalog value of `p3` missing from desired because
+# `p3` was dropped entirely) used to hard-error with the
+# REORGANIZE-discard message instead of producing the
+# `-- skipped: DROP PARTITION p3` the existing DROP path
+# emits. Pin the correct DROP fall-through so a future move
+# of the discard check doesn't regress this path.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p3 VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1)
+  );
+
+plan: ""
+
+disallowed_drops: |
+  -- skipped: ALTER TABLE myschema_test.accts DROP PARTITION p3;

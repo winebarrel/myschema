@@ -1,0 +1,35 @@
+# End-to-end pin for the RANGE minimal-range REORGANIZE: only
+# p1's `LESS THAN` moves but the diff has to include p2 in the
+# REORGANIZE to keep the post-ALTER range covering the pre-ALTER
+# one. apply runs the generated `REORGANIZE p1, p2 INTO (...)`;
+# verify_no_drift confirms MySQL accepts it and the next plan
+# is clean.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (20),
+      PARTITION p2 VALUES LESS THAN (30),
+      PARTITION p3 VALUES LESS THAN (40)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (25),
+      PARTITION p2 VALUES LESS THAN (30),
+      PARTITION p3 VALUES LESS THAN (40)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION p1, p2 INTO (
+    partition p1 values less than (25),
+    partition p2 values less than (30)
+  );
+
+verify_no_drift: true

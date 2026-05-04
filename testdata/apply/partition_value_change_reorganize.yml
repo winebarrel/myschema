@@ -1,8 +1,6 @@
-# Mid-list partition mismatch (catalog and desired share no common
-# prefix at index 0 — the value of p2020 differs). Not a pure
-# suffix add or drop, so the diff layer can't generate ADD/DROP
-# safely without reorganising the data. v1 errors out and asks the
-# user to run REORGANIZE PARTITION by hand.
+# End-to-end pin for the REORGANIZE PARTITION value-change
+# path. Diff emits the REORGANIZE; apply runs it; verify_no_drift
+# confirms the next plan reports no changes.
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,
@@ -23,4 +21,10 @@ desired: |
       PARTITION p2021 VALUES LESS THAN (2026)
   );
 
-error: "REORGANIZE PARTITION generation is not yet implemented"
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION p2020, p2021 INTO (
+    partition p2020 values less than (2025),
+    partition p2021 values less than (2026)
+  );
+
+verify_no_drift: true

@@ -1,10 +1,17 @@
 # Pin the global appendAlterHints rewrite as it applies to a
-# partition ADD PARTITION statement. The hint helper inserts
-# `, ALGORITHM=…, LOCK=…` just before the trailing `;` at the
-# string level, after all per-table buckets are merged. Without
-# this fixture, a future format tweak to the ADD PARTITION builder
-# (or to appendAlterHints) could quietly break the splice point
-# and ship invalid SQL to MySQL.
+# partition ADD PARTITION statement. MySQL's parser rejects
+# the trailing-comma form on partition operations (Error 1064
+# — the comma after the closing `)` of the partition list is
+# treated as a new partition_definition), so the hint inserter
+# splices the clauses *between the table name and the
+# partition-op keyword* instead, producing
+# `ALTER TABLE t ALGORITHM=…, LOCK=…, ADD PARTITION (…)`.
+# Without this fixture, a future format tweak to the ADD
+# PARTITION builder (or to appendAlterHints) could quietly
+# break the splice point and ship invalid SQL to MySQL.
+# `testdata/apply/partition_add_range_with_alter_hints.yml` is
+# the apply counterpart that confirms MySQL actually accepts
+# the corrected form.
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,
@@ -28,6 +35,6 @@ alter_algorithm: INPLACE
 alter_lock: NONE
 
 plan: |
-  ALTER TABLE myschema_test.events ADD PARTITION (
+  ALTER TABLE myschema_test.events ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (
     partition p2021 values less than (2022)
-  ), ALGORITHM=INPLACE, LOCK=NONE;
+  );

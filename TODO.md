@@ -27,20 +27,30 @@ Open items only. Done work is in `git log` / closed PRs.
 - [ ] **Partition diff generation beyond the supported shapes.**
       Already shipped: RANGE / LIST suffix `ADD PARTITION` and
       order-preserving subset `DROP PARTITION` (head / middle /
-      tail OK), including `RANGE COLUMNS` / `LIST COLUMNS`; and
+      tail OK), including `RANGE COLUMNS` / `LIST COLUMNS`;
       HASH / KEY (incl. LINEAR) `PARTITIONS n` count grow /
       shrink via `ADD PARTITION PARTITIONS` /
       `COALESCE PARTITION` (`--allow-drop=partition` gates the
-      shrink + RANGE/LIST DROP). See CAVEATS.md "Partitioning".
-      Still on the floor: mid-list value changes (`REORGANIZE
-      PARTITION old1, old2 INTO (...)`), strategy / expression
-      changes (`REMOVE PARTITIONING` + new `PARTITION BY`), and
-      both directions of "one side has no partitioning" —
-      first-time `PARTITION BY` against an unpartitioned table
-      *and* `REMOVE PARTITIONING` against an already-partitioned
-      one. SUBPARTITION is intentionally out of scope (CAVEATS.md
-      notes both the desired-side parse error and the
-      catalog-side guard).
+      shrink + RANGE/LIST DROP); and per-partition definition
+      rewrite of RANGE / LIST partitions (including the
+      `RANGE COLUMNS` / `LIST COLUMNS` variants) via
+      `REORGANIZE PARTITION` whenever both sides have the same
+      partition names in the same order — case-insensitively,
+      so `pAB` ≡ `PAB` and a stand-alone case-only rename
+      emits no DDL (covers `VALUES …` boundary tweaks —
+      scalar and tuple — plus COMMENT / MAX_ROWS / TABLESPACE
+      / other per-partition option changes that round-trip
+      through vitess's PartitionDefinition formatter). See CAVEATS.md
+      "Partitioning". Still on the floor: split / merge /
+      reorder REORGANIZE shapes (the diff layer can't infer
+      the right boundaries from a name-only diff), strategy /
+      expression changes (`REMOVE PARTITIONING` + new
+      `PARTITION BY`), and both directions of "one side has
+      no partitioning" — first-time `PARTITION BY` against an
+      unpartitioned table *and* `REMOVE PARTITIONING` against
+      an already-partitioned one. SUBPARTITION is intentionally
+      out of scope (CAVEATS.md notes both the desired-side
+      parse error and the catalog-side guard).
 
 ## Low — CLI ergonomics
 

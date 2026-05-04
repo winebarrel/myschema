@@ -1,0 +1,29 @@
+# Regression: partition name case-only diff must be a no-op.
+# catalog has `pAB`, desired has `PAB` (everything else
+# identical). Before the partitionDefEqual fix that strips the
+# name from the formatted-body comparison, the diff would have
+# emitted a spurious `REORGANIZE PARTITION pAB INTO (...)`
+# even though the only thing that "changed" was identifier
+# casing — and partition names are case-insensitive in MySQL,
+# so an executable plan would still be a no-op there.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pAB VALUES IN (1, 2),
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION PAB VALUES IN (1, 2),
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+plan: ""

@@ -1,0 +1,34 @@
+# COALESCE PARTITION counterpart to the other partition-op +
+# alter-hints apply fixtures. The HASH/KEY shrink path uses
+# `COALESCE PARTITION n` and that keyword is in
+# `partitionOpKeywords`, so this fixture pins MySQL accepts
+# the leading-position splice
+# (`ALTER TABLE t ALGORITHM=…, LOCK=…, COALESCE PARTITION n`)
+# for the partition-count shrink direction (gated on
+# `--allow-drop=partition`). Without this pin a keyword-
+# specific splice bug would only surface as MySQL Error 1064
+# at apply time.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY HASH (n) PARTITIONS 4;
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY HASH (n) PARTITIONS 2;
+
+allow_drop:
+  - partition
+
+alter_algorithm: COPY
+alter_lock: SHARED
+
+applied: |
+  ALTER TABLE myschema_test.events ALGORITHM=COPY, LOCK=SHARED, COALESCE PARTITION 2;
+
+verify_no_drift: true

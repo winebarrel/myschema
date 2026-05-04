@@ -239,27 +239,119 @@ patterns:
   regular vs. linear choice matters more than how
   myschema phrases the diff.
 
+- *Per-partition definition change* — when the catalog and
+  desired partition name lists line up position-by-position
+  (every partition stays in the same slot, every name matches
+  case-insensitively), any per-partition definition difference
+  is generated as one or more `ALTER TABLE … REORGANIZE
+  PARTITION p_i, p_{i+1}, … INTO (PARTITION p_i …,
+  PARTITION p_{i+1} …, …)` statements. The most common shape
+  is a `VALUES LESS THAN` / `VALUES IN` boundary tweak (e.g.
+  `p2020 LESS THAN (2021)` → `p2020 LESS THAN (2025)`), but
+  COMMENT / MAX_ROWS / TABLESPACE and other per-partition
+  options that round-trip through vitess's PartitionDefinition
+  formatter are picked up here too. Two semantic no-ops are
+  *intentionally suppressed* even though they would otherwise
+  surface as byte-different formatted definitions: case-only
+  partition-name diffs (`pAB → PAB` — MySQL identifiers are
+  case-insensitive) and LIST / LIST COLUMNS `VALUES IN (…)`
+  permutations (the value list is a set semantically, so
+  reordering literals doesn't change which rows land in which
+  partition). Both are folded by `partitionDefEqual` and emit
+  no DDL. How myschema slices the REORGANIZE statements
+  depends on the partition strategy because the safety
+  constraints differ:
+
+    - **RANGE / RANGE COLUMNS**: one REORGANIZE per run of
+      consecutive changed slots. RANGE values are continuous
+      and bound by per-slot boundaries, so a value can only
+      move to an adjacent slot when its boundary shifts —
+      values can't cross over an unchanged slot in between.
+      A "p1 + p3 boundary edit" 5-partition RANGE table
+      emits two REORGANIZE statements rather than one giant
+      `REORGANIZE p1, p2, p3, p4 …` that drags the unchanged
+      p2 into the rewrite. Each run additionally extends by
+      one slot when that run's last changed slot's `VALUES
+      LESS THAN` actually moved AND that slot isn't the
+      final partition — pulling `p_{last+1}` in re-establishes
+      the boundary alignment with the unchanged tail
+      (otherwise MySQL rejects with "VALUES less than value
+      must be strictly increasing"). Per-partition option-only
+      diffs leave the value range untouched, so the cascade
+      doesn't fire — a metadata-only edit stays a one-slot
+      REORGANIZE.
+
+    - **LIST / LIST COLUMNS**: per-run when no value leaves
+      any changed slot (every changed slot's NEW
+      `VALUES IN (…)` is a *superset* of its OLD set), single
+      span otherwise. The superset check catches cross-flow
+      cases like "p0 gains 4, p3 loses 4" where splitting
+      into per-run REORGANIZEs would break MySQL's value-
+      uniqueness rule (Error 1495 "Multiple definition of
+      same constant in list partitioning") on the first
+      statement while the second partition still owned the
+      value. When the check fails myschema falls back to a
+      single span over [first..last] with the matched
+      in-betweens re-stated unchanged (MySQL no-ops them).
+      The pure-addition case ("p0 gains 9, p3 gains 10",
+      `p1`/`p2` unchanged) takes the per-run path so a tiny
+      endpoint edit doesn't drag a wide partition table
+      through a full data-moving rewrite. The check uses
+      `sqlparser.String` keying so it's tuple-safe for LIST
+      COLUMNS for free.
+
+  In both cases MySQL redistributes existing rows into the
+  new boundaries — *row-preserving when every catalog value
+  still has a home in the new layout*. The narrow exception
+  is a LIST diff that removes a constant from `VALUES IN (…)`
+  without re-assigning it to another partition: MySQL
+  silently drops any existing rows for that value on
+  REORGANIZE (no apply-time error, no warning). The diff
+  layer detects this catalog-vs-desired discard at plan time
+  and refuses to emit the REORGANIZE unless
+  `--allow-drop=partition` is set — same gate that authorises
+  DROP PARTITION / COALESCE PARTITION, which are the other
+  partition-level destructive operations. The error reads
+  `desired LIST partition layout discards value V (catalog
+  partition pX); MySQL silently drops any matching rows on
+  REORGANIZE`. With `--allow-drop=partition` the discard goes
+  through as the operator's explicit choice. Otherwise no
+  partition op needs that gate, because every dropped
+  partition name is reused on the add side.
+  **Operationally** REORGANIZE PARTITION is data-moving —
+  every row in the named partitions is read, redistributed
+  according to the new boundaries, and rewritten in place.
+  Cost scales with the row count of the slots in the run (and
+  the cascaded `last+1` slot when that fires), not with how
+  much the boundary moved — even a one-byte VALUES tweak on a
+  multi-million-row partition rewrites the whole partition.
+  Same caveat as the HASH/KEY count-change section above: the
+  diff is shaped to keep the rewrite proportional to the diff
+  (per-run REORGANIZE, minimal cascade), but on large
+  partitions the resulting ALTER is still a heavy operation —
+  size your maintenance windows accordingly, or set
+  `--alter-algorithm=COPY --alter-lock=SHARED` (or equivalent)
+  to make MySQL's locking choice explicit.
+
 **Diffs that still error (manage by hand).**
 
-- *Both ADD and DROP needed* — any diff where the
-  order-preserving subset walk produces both a non-empty
-  drops list and a non-empty adds list. Covers the obvious
-  REORGANIZE shapes (a value change on an existing partition,
-  an interior insert in front of a catch-all, a reorder), but
-  also "merge / split / replace" shapes that *look* harmless
-  because the dropped and added partition names are disjoint
-  — e.g. `[p0<10,p1<20,p2<30] → [p0<10,q1<40]`, where `q1`
-  semantically inherits the rows from `p1` and `p2` and a
-  plain DROP+ADD pair would silently lose them. Even
-  retention roll-forward (`[p2020,p2021] → [p2021,p2022]`)
-  falls here for the same reason: the diff layer can't tell
-  "discard the old data" from "merge it into the new
-  partition" by inspecting names alone. Fails with
-  `REORGANIZE PARTITION generation is not yet implemented`.
-  Workaround: run the right ALTER by hand — `REORGANIZE
-  PARTITION` when data needs to move, or an explicit
-  `DROP PARTITION` + `ADD PARTITION` pair when you really do
-  want to discard rows — then re-run plan.
+- *Split / merge / reorder* — any other "drops AND adds both
+  non-empty" shape where the name lists don't line up
+  position-by-position. Covers split / merge shapes whose
+  add and drop names are disjoint (e.g. `[p0<10,p1<20,p2<30]
+  → [p0<10,q1<40]`, where `q1` semantically inherits the
+  rows from `p1` and `p2`), interior inserts in front of a
+  catch-all, partition reorders, and the "retention
+  roll-forward" pair (`[p2020,p2021] → [p2021,p2022]` —
+  drops `p2020`, adds `p2022`, names disjoint). Inferring
+  the right `REORGANIZE PARTITION old INTO (…)` boundaries
+  from a name-only diff isn't safe (a DROP+ADD pair would
+  silently lose data when the user really meant a split or
+  merge), so the diff layer errors with `split / merge /
+  reorder`. Workaround: run the appropriate ALTER by hand —
+  `REORGANIZE PARTITION old1, old2 INTO (…)` with the
+  boundaries you want, or `DROP PARTITION` + `ADD PARTITION`
+  if discarding data is intended — then re-run plan.
 - *Strategy / expression change* (e.g. RANGE → HASH, or a
   different `PARTITION BY` expression) — needs `REMOVE
   PARTITIONING` followed by a new `PARTITION BY`. Future PR.
@@ -311,6 +403,32 @@ patterns:
   partition columns in the unique key, or drop partitioning
   first (REMOVE PARTITIONING by hand) and let the next plan
   reconverge.
+- *LIST `VALUES IN` constants overlapping across partitions*
+  — MySQL forbids the same constant in more than one LIST
+  partition (Error 1495 "Multiple definition of same constant
+  in list partitioning"). myschema catches this at plan time
+  with `desired LIST partition definitions assign value V to
+  both partition pX and partition pY` so the operator gets
+  actionable feedback before any ALTER is emitted. The check
+  runs on both the diff path (already-existing tables) and
+  the create-table path (brand-new partitioned tables), and
+  is tuple-safe for `LIST COLUMNS` (the constant is the whole
+  tuple). Workaround: remove the duplicate from one of the
+  partitions in the desired SQL.
+- *RANGE `VALUES LESS THAN` not strictly increasing* — MySQL
+  rejects schemas like `p0 LESS THAN (25), p1 LESS THAN (20)`
+  with "VALUES less than value must be strictly increasing",
+  but vitess's parser doesn't enforce the rule, so the diff
+  layer would otherwise emit a REORGANIZE that can never
+  apply. myschema catches the non-monotonic ordering at plan
+  time. Integer-literal boundaries are compared numerically;
+  MAXVALUE is treated as +∞ (allowed at most once and only
+  as the final partition). Non-integer / non-literal
+  boundaries (function calls, RANGE COLUMNS tuples) only
+  surface here on consecutive bytewise duplicates — deeper
+  ordering for those falls back to MySQL's own error at
+  apply time. Workaround: fix the boundary order in the
+  desired SQL.
 - `SUBPARTITION BY …` is out of scope for v1. A desired-side
   `CREATE TABLE` that declares SUBPARTITION fails at parse
   time; a catalog-side table with SUBPARTITION is rejected
@@ -319,16 +437,35 @@ patterns:
   bringing the table under myschema's management.
 
 **Workaround for the "two systems of record" problem.** When
-the diff errors out (mid-list / HASH-count / scheme /
-SUBPARTITION), run the appropriate ALTER by hand —
-`ALTER TABLE … REORGANIZE PARTITION old1, old2 INTO (…)` for
-mid-list value changes, `ALTER TABLE … COALESCE PARTITION n`
-or `ALTER TABLE … ADD PARTITION PARTITIONS n` for HASH/KEY
-count changes, `ALTER TABLE … REMOVE PARTITIONING` followed by
-`ALTER TABLE … PARTITION BY …` for scheme / expression changes
-— then update the desired SQL's `PARTITION BY` clause to match.
-The next `plan` will report no diff. Keep the desired SQL and
-the live database in lockstep yourself for those cases.
+the diff errors out — split / merge / reorder REORGANIZE
+shapes, scheme / expression changes, adding or removing
+partitioning entirely, SUBPARTITION — run the appropriate
+ALTER by hand:
+
+- *split / merge / reorder* — `ALTER TABLE … REORGANIZE
+  PARTITION old1, old2 INTO (PARTITION newA VALUES …,
+  PARTITION newB VALUES …)` with the boundaries you want
+  (myschema can't infer split points safely from a name-only
+  diff). For pure retention-discard the explicit
+  `DROP PARTITION` + `ADD PARTITION` pair is the right call.
+- *scheme / expression change* — `ALTER TABLE … REMOVE
+  PARTITIONING` followed by a fresh `ALTER TABLE …
+  PARTITION BY …`.
+- *first-time partitioning* — `ALTER TABLE … PARTITION BY …`
+  by hand once.
+- *removing partitioning* — `ALTER TABLE … REMOVE
+  PARTITIONING` by hand once.
+
+After running the manual ALTER, update the desired SQL's
+`PARTITION BY` clause (or remove it) to match. The next
+`plan` will report no diff. The supported shapes —
+RANGE/LIST suffix add, order-preserving subset DROP,
+HASH/KEY (incl. LINEAR) count grow / shrink, and per-
+partition definition rewrite via REORGANIZE PARTITION
+(VALUES boundary tweaks plus COMMENT / MAX_ROWS /
+TABLESPACE / other per-partition options that round-trip
+through vitess's PartitionDefinition formatter) — don't
+need a workaround; myschema generates them automatically.
 
 ## View `DEFINER` and `SQL SECURITY` are out of scope
 

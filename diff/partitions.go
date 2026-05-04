@@ -2,6 +2,8 @@ package diff
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
@@ -51,10 +53,18 @@ import (
 //     current) → DROP PARTITION — head, middle, and tail
 //     removals are all generated, since `ALTER TABLE … DROP
 //     PARTITION p1, p2` accepts a discontinuous name list.
-//     Anything else (a value change, an interior insert, or a
-//     reorder — i.e. the diff yields both an ADD list AND a
-//     DROP list) → error so the user falls back to manual
-//     REORGANIZE.
+//     Per-partition definition change of existing partitions
+//     (drops + adds both non-empty AND the full catalog /
+//     desired name lists line up position-by-position with the
+//     same names case-insensitively) → `REORGANIZE PARTITION
+//     p1, p2, … INTO (…)`. Covers `VALUES …` boundary tweaks
+//     plus COMMENT / MAX_ROWS / TABLESPACE / other per-partition
+//     options that round-trip through vitess's
+//     PartitionDefinition formatter. Anything else (split /
+//     merge / reorder / interior insert — i.e. the name lists
+//     don't line up) → error so the user falls back to a hand-
+//     written REORGANIZE with explicit boundaries (or a DROP+ADD
+//     pair if discarding data is intended).
 //
 // CAVEATS.md "Partitioning" documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {
@@ -85,6 +95,29 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	if err != nil {
 		return nil, nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", fqtn, err)
 	}
+	// Desired-side LIST validity: MySQL forbids the same `VALUES IN`
+	// constant in more than one partition (Error 1495 "Multiple
+	// definition of same constant in list partitioning"). Catch it
+	// at plan time so the operator gets a clear, actionable message
+	// before any ALTER is emitted — otherwise the per-run REORGANIZE
+	// gate (`partitionListChangedSlotsAreSuperset`) would happily
+	// emit `REORGANIZE p_changed INTO (… IN (V, …))` while an
+	// unchanged sibling partition still owns V, and apply would fail
+	// with the same Error 1495 deeper in the pipeline. The same
+	// helper also runs from the create-table path in DiffTables so
+	// new partitioned tables get the same plan-time guard.
+	if err := validateDesiredListValuesAreDisjoint(fqtn, desPO.Definitions); err != nil {
+		return nil, nil, err
+	}
+	if err := validateDesiredRangeMonotonic(fqtn, desPO.Definitions); err != nil {
+		return nil, nil, err
+	}
+	// (Catalog-vs-desired LIST data-discard guard runs further
+	// down, inside the matched-name-list REORGANIZE branch —
+	// see comment there. Doing it here would also fire on
+	// supported LIST DROP PARTITION shapes and on LIST → other-
+	// strategy scheme changes, which the dedicated DROP /
+	// strategy-error paths already handle.)
 	// Strategy / expression / column list mismatch → scheme change,
 	// out of scope for v1.
 	if !partitionHeaderEqual(curPO, desPO) {
@@ -142,7 +175,7 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// Order-preserving subset diff. Each current partition is either
 	// kept (matched by the next-unconsumed desired partition) or
 	// dropped; anything left in desired after the walk is a suffix
-	// add. The three observable outcomes:
+	// add. The four observable outcomes:
 	//   - both empty → no-op (catches the equality cases the raw-
 	//     string fast path missed because of formatting drift).
 	//   - pure ADD (drops empty, adds non-empty) → suffix grow.
@@ -150,21 +183,210 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//     dropped while preserving the remaining order; head /
 	//     tail / interior drops all generated as
 	//     `DROP PARTITION p1, p2, …`.
-	//   - drops AND adds both non-empty → REORGANIZE territory.
-	//     A previous attempt to emit DROP + ADD whenever the name
-	//     sets were disjoint was unsafe: a "merge" shape like
-	//     `[p0<10,p1<20,p2<30] -> [p0<10,q1<40]` has disjoint
-	//     names yet semantically expects q1 to inherit the rows
-	//     from p1 and p2. Plain DROP + ADD would silently lose
-	//     that data. Disjoint-name detection isn't enough on its
-	//     own to tell merge / split / replace shapes apart from a
-	//     pure retention roll-forward, so we conservatively error
-	//     and let the user run REORGANIZE PARTITION (or the
-	//     individual DROP / ADD pair, when they really do want to
-	//     discard the partitioned data) by hand.
+	//   - drops AND adds both non-empty:
+	//     - if the two name lists match position-by-position
+	//       (case-insensitively — `pAB` ≡ `PAB`), every partition
+	//       stays in the same slot and the diff is necessarily
+	//       an in-place rewrite of one or more per-partition
+	//       definitions — a `VALUES …` boundary tweak, a
+	//       COMMENT / MAX_ROWS / TABLESPACE change, or any other
+	//       per-partition option that round-trips through
+	//       vitess's PartitionDefinition formatter. Generates
+	//       `REORGANIZE PARTITION old_i, old_{i+1}, … INTO
+	//       (PARTITION p_i …, PARTITION p_{i+1} …, …)`. The
+	//       OLD-name list always uses the catalog name; the
+	//       INTO bodies are per-slot — desired-side definition
+	//       for changed slots (so a case-only-name+body diff
+	//       can carry the desired casing on INTO), catalog-side
+	//       definition for slots pulled in by the RANGE
+	//       boundary cascade (so a stand-alone case-only-name
+	//       no-op never leaks into the generated SQL). Row-
+	//       preserving (REORGANIZE redistributes rows into the
+	//       new value boundaries when those moved). The
+	//       detailed algorithm — RANGE per-run + cascade vs
+	//       LIST single-span, the case-only / LIST-permutation
+	//       no-op fallthroughs — lives in the comment over the
+	//       `partitionNameListEqual` branch in `diffPartitions`.
+	//     - any other shape (merge / split / interior insert /
+	//       reorder / "retention roll-forward") falls through to
+	//       error. Disjoint-name detection isn't enough to tell
+	//       merge / split / replace apart from a pure retention
+	//       discard, and split-point inference is out of scope
+	//       for v1, so the user runs the right ALTER (REORGANIZE
+	//       with explicit boundaries, or DROP+ADD if discarding
+	//       data is intended) by hand.
+	// "Pure per-partition definition change" path. When the
+	// catalog and desired name lists line up position-by-position
+	// (every partition stays in the same slot, every name
+	// matches case-insensitively) the diff is necessarily an
+	// in-place change to one or more definitions — value
+	// boundaries, COMMENT, MAX_ROWS, etc. all flow through
+	// `parser.FormatPartitionDefinition`'s identity check.
+	//
+	// How the REORGANIZE statements are sliced depends on the
+	// partition strategy, because the safety constraints
+	// differ:
+	//
+	//   - RANGE / RANGE COLUMNS: emit *one REORGANIZE per run
+	//     of consecutive changed slots*. RANGE values are
+	//     continuous and bound by per-slot boundaries, so a
+	//     value can only move to an adjacent slot when its
+	//     boundary shifts — values can't cross over an
+	//     unchanged slot in between. Per-run with the boundary
+	//     cascade (see below) keeps each statement self-
+	//     contained and correct. MySQL's Error 1519 ("When
+	//     reorganizing a set of partitions they must be in
+	//     consecutive order") only constrains the
+	//     partition_names list *within a single REORGANIZE
+	//     statement*; multiple REORGANIZE statements in
+	//     sequence each with their own consecutive list are
+	//     fine. So a "p1 + p3 boundary edit" 5-partition RANGE
+	//     table emits two REORGANIZE statements rather than
+	//     one giant `REORGANIZE p1, p2, p3, p4 …` that drags
+	//     unchanged p2 into the rewrite.
+	//
+	//   - LIST / LIST COLUMNS: choose between per-run and
+	//     single-span based on whether values *leave* any
+	//     changed slot. LIST values are a discrete set per
+	//     slot and a value can move between any two
+	//     partitions regardless of position, so a cross-flow
+	//     case ("p0 gains 4, p3 loses 4") needs both ends of
+	//     the move inside one REORGANIZE — splitting it would
+	//     break MySQL's value-uniqueness rule (Error 1495
+	//     "Multiple definition of same constant in list
+	//     partitioning") on the first statement while the
+	//     second partition still owned the value. The simple
+	//     safety check: if every changed slot's NEW
+	//     `VALUES IN (…)` is a *superset* of its OLD
+	//     `VALUES IN (…)` set, no value leaves any slot, so
+	//     no cross-flow is possible — emit per-run. As soon
+	//     as one slot drops a value (whether the value moves
+	//     elsewhere or is fully discarded), fall back to
+	//     single span over [first..last]; the matched
+	//     in-between slots get re-stated unchanged. The
+	//     superset check costs O(n) per slot and uses the
+	//     same `sqlparser.String` keying as
+	//     `temporarilySortListValues`, which makes it
+	//     tuple-safe for LIST COLUMNS for free.
+	//
+	// RANGE boundary cascade *within each run*: each
+	// partition's `VALUES LESS THAN <x>` is also the implicit
+	// lower bound of the next partition, so when the run's
+	// last slot's upper bound moved AND that slot isn't the
+	// final partition, pulling `last+1` into the run re-
+	// establishes the boundary alignment with the unchanged
+	// tail (otherwise MySQL rejects with "VALUES less than
+	// value must be strictly increasing"). Per-partition
+	// option-only diffs leave the value range untouched, so
+	// the cascade doesn't fire — keeps a metadata-only edit a
+	// one-slot REORGANIZE. LIST has no equivalent cascade
+	// because `VALUES IN (…)` is a closed set per slot.
+	// Cascades from one RANGE run can't extend into the next:
+	// the slot the cascade pulls in is by definition matched
+	// (otherwise it'd already be part of the current run), and
+	// the next run starts at the next changed slot, which is
+	// at least one more position over.
+	if partitionNameListEqual(curDefs, desDefs) {
+		// Walk both sides once: record per-slot match/mismatch and
+		// note the first/last differing slot. A single pass also
+		// removes the round-12 redundancy where formatReorganizeRun
+		// re-invoked partitionDefEqual on every slot it formatted.
+		matchedSlots := make([]bool, len(curDefs))
+		first, last := -1, -1
+		for i := range curDefs {
+			matchedSlots[i] = partitionDefEqual(curDefs[i], desDefs[i])
+			if !matchedSlots[i] {
+				if first < 0 {
+					first = i
+				}
+				last = i
+			}
+		}
+		if first < 0 {
+			// Every position compares equal under partitionDefEqual,
+			// even though the raw-string fast path didn't catch it.
+			// Reachable for: formatter-resolved formatting drift
+			// (whitespace, identifier casing inside the partition
+			// expression), case-only partition-name diffs like
+			// `pAB → PAB` (EqualFold in partitionDefEqual), and LIST
+			// `VALUES IN (…)` permutations like `(1,2) → (2,1)`
+			// (temporarilySortListValues in partitionDefEqual). All
+			// no-ops at the SQL level — emit nothing.
+			return nil, nil, nil
+		}
+		// Catalog-vs-desired LIST data-discard guard: if any catalog
+		// `VALUES IN (…)` constant is missing from desired entirely
+		// (not just moved to another partition), MySQL would
+		// silently DROP rows with that value on REORGANIZE — no
+		// apply-time error, no warning, just gone. Treat that as
+		// destructive and gate behind `--allow-drop=partition`
+		// (the same flag that authorises DROP PARTITION /
+		// COALESCE PARTITION). See CAVEATS.md "LIST value discard
+		// silently drops rows".
+		//
+		// This guard sits *inside* the matched-name-list branch
+		// because it only matters for the REORGANIZE path. The
+		// dedicated DROP PARTITION code further down already
+		// gates on `--allow-drop=partition` and surfaces a
+		// `-- skipped: …` line for unauthorised drops, and
+		// strategy-mismatch (LIST → HASH / RANGE / KEY) is
+		// caught earlier by `partitionHeaderEqual`. Running the
+		// discard check ahead of those would hard-error those
+		// supported / better-handled cases.
+		if curPO.Type == sqlparser.ListType {
+			if dropped := findDiscardedListValue(curDefs, desDefs); dropped.value != "" && !dc.IsDropAllowed("partition") {
+				return nil, nil, fmt.Errorf("table %s: desired LIST partition layout discards value %s (catalog partition %s); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss", fqtn, dropped.value, dropped.owner)
+			}
+		}
+		var stmts []string
+		switch curPO.Type {
+		case sqlparser.RangeType:
+			for i := 0; i < len(curDefs); i++ {
+				if matchedSlots[i] {
+					continue
+				}
+				runFirst := i
+				runLast := i
+				for runLast+1 < len(curDefs) && !matchedSlots[runLast+1] {
+					runLast++
+				}
+				if runLast < len(curDefs)-1 &&
+					!partitionValueRangeEqual(curDefs[runLast], desDefs[runLast]) {
+					runLast++
+				}
+				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, runFirst, runLast, matchedSlots))
+				i = runLast
+			}
+		default:
+			if partitionListChangedSlotsAreSuperset(curDefs, desDefs, matchedSlots) {
+				for i := 0; i < len(curDefs); i++ {
+					if matchedSlots[i] {
+						continue
+					}
+					runFirst := i
+					runLast := i
+					for runLast+1 < len(curDefs) && !matchedSlots[runLast+1] {
+						runLast++
+					}
+					stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, runFirst, runLast, matchedSlots))
+					i = runLast
+				}
+			} else {
+				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last, matchedSlots))
+			}
+		}
+		return stmts, nil, nil
+	}
+
 	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
 	if len(drops) > 0 && len(adds) > 0 {
-		return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way that needs both ADD and DROP (a value change, an interior insert, a reorder, or a merge / split using new partition names); REORGANIZE PARTITION generation is not yet implemented, and a plain DROP + ADD pair would silently lose any rows that should have moved into the new partition. Run the ALTER by hand and let the next plan reconverge", fqtn)
+		// Name lists differ by both add(s) and drop(s) — the
+		// shape needs more than a per-slot value rewrite (split,
+		// merge, reorder, interior insert, retention discard).
+		// myschema can't safely infer the right REORGANIZE
+		// boundaries from a name-only diff, so the user runs the
+		// ALTER by hand.
+		return nil, nil, fmt.Errorf("table %s: partition definitions differ in a way the diff layer can't generate — the catalog and desired partition name lists don't line up position-by-position, so this is some shape of split / merge / reorder / interior insert / retention roll-forward. Run REORGANIZE PARTITION (with explicit boundaries) or a DROP + ADD pair (when discarding data is intended) by hand", fqtn)
 	}
 
 	var stmts, disallowed []string
@@ -263,6 +485,31 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
+// partitionNameListEqual reports whether the two definition slices
+// have the same partition names in the same order. Used by the
+// REORGANIZE branch to confirm "pure per-partition definition
+// change" — every partition that's about to be dropped
+// corresponds positionally to one in the add list with the same
+// name. Comparison is case-insensitive because partition names
+// are MySQL identifiers (case-insensitive at the engine level)
+// AND because `parser.NormalizePartitionOption` does NOT lower-
+// case partition names — it only lower-cases function /
+// column-reference identifiers inside the partition expression.
+// Without `EqualFold` here a `pAB → PAB` desired-side rewrite
+// would slip past this check and tip the diff into the
+// disjoint-name "split / merge / reorder" error branch.
+func partitionNameListEqual(a, b []*sqlparser.PartitionDefinition) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(a[i].Name.String(), b[i].Name.String()) {
+			return false
+		}
+	}
+	return true
+}
+
 // partitionByNameOrderPreserving walks `cur` once, matching each
 // definition against the next-unconsumed entry of `des`. Matched
 // pairs are kept; unmatched current entries are added to `drops`;
@@ -289,12 +536,410 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 	return drops, adds
 }
 
+// formatReorganizeRun renders a single
+// `ALTER TABLE … REORGANIZE PARTITION old_first, …, old_last
+// INTO (PARTITION p_first …, …, PARTITION p_last …)` for one
+// run of consecutive partition slots in `[first, last]`.
+// The OLD-name list (the partition_names before INTO) always
+// uses the catalog name and goes through `model.Ident` so
+// reserved-word or non-safe-identifier partition names get
+// back-ticked. The INTO bodies go through
+// `parser.FormatPartitionDefinition` which delegates name
+// quoting to vitess's own formatter.
+//
+// The INTO body is picked per-slot using the precomputed
+// `matchedSlots` mask (caller built it once with one
+// `partitionDefEqual` walk over the whole partition list, so
+// this function doesn't re-invoke the comparator):
+//   - For matched slots — i.e. the slot pulled in by the RANGE
+//     boundary cascade, or the matched in-betweens left over
+//     in a LIST single-span — emit `curDefs[i]`. The matched
+//     slot's body is canonically the same on both sides; the
+//     only thing that can differ is the partition *name*
+//     (case-only rename, suppressed by the EqualFold in
+//     partitionDefEqual). Restating the catalog's body keeps
+//     the "case-only name diff emits no DDL" rule honest at
+//     those slots — without this the formatter would leak the
+//     desired-side renamed casing into the generated
+//     REORGANIZE even though MySQL would ignore the rename.
+//   - For changed slots, emit `desDefs[i]`. The desired side
+//     is the source of truth for the new definition (boundary,
+//     options, AND name casing). The case-only-name+body
+//     mixed case is supported here: the OLD-name list still
+//     uses the catalog's casing on the DROP side, but the
+//     INTO carries the desired casing — MySQL accepts the
+//     case-mismatched INTO and keeps whatever case it had
+//     stored, so verify_no_drift confirms no perpetual rename
+//     loop.
+func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int, matchedSlots []bool) string {
+	var b strings.Builder
+	b.WriteString("ALTER TABLE ")
+	b.WriteString(fqtn)
+	b.WriteString(" REORGANIZE PARTITION ")
+	for i := first; i <= last; i++ {
+		if i > first {
+			b.WriteString(", ")
+		}
+		b.WriteString(model.Ident(curDefs[i].Name.String()))
+	}
+	b.WriteString(" INTO (")
+	for i := first; i <= last; i++ {
+		if i > first {
+			b.WriteString(",\n  ")
+		} else {
+			b.WriteString("\n  ")
+		}
+		def := desDefs[i]
+		if matchedSlots[i] {
+			def = curDefs[i]
+		}
+		b.WriteString(parser.FormatPartitionDefinition(def))
+	}
+	b.WriteString("\n);")
+	return b.String()
+}
+
+// partitionListChangedSlotsAreSuperset reports whether every
+// changed slot's NEW `VALUES IN (…)` set is a superset of its
+// OLD `VALUES IN (…)` set. When true, no value leaves any
+// changed slot, so no value can flow to a different slot —
+// the per-run REORGANIZE shape is safe (no MySQL Error 1495
+// "Multiple definition of same constant in list partitioning"
+// risk). When false, at least one value is removed from a
+// changed slot; whether it moves to another slot or is
+// discarded is left ambiguous, so the caller falls back to a
+// single-span REORGANIZE that catches both cases under one
+// statement.
+//
+// Comparison keys go through `sqlparser.String`, which makes
+// the helper tuple-safe for LIST COLUMNS for free
+// (`(1, 'A')` formats deterministically, distinct from
+// `(2, 'A')`).
+func partitionListChangedSlotsAreSuperset(curDefs, desDefs []*sqlparser.PartitionDefinition, matchedSlots []bool) bool {
+	for i := range curDefs {
+		if matchedSlots[i] {
+			continue
+		}
+		if !partitionValueListIsSuperset(desDefs[i], curDefs[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateDesiredRangeMonotonic reports a plan-time error
+// when the desired-side RANGE partitions don't have strictly
+// increasing `VALUES LESS THAN` boundaries. MySQL itself
+// rejects such schemas at CREATE TABLE / ALTER TABLE time
+// with "VALUES less than value must be strictly increasing",
+// but vitess's parser doesn't enforce the rule — without
+// this guard the diff layer would happily emit a REORGANIZE
+// that can never apply.
+//
+// Comparison strategy:
+//   - MAXVALUE is treated as +∞: it must appear at most once
+//     and only as the final partition.
+//   - Integer-literal boundaries are compared numerically.
+//   - Non-integer / non-literal expressions (functions like
+//     `TO_DAYS(d)`, RANGE COLUMNS tuples, etc.) fall back to
+//     bytewise equality on `sqlparser.String` — only
+//     consecutive duplicates surface here; deeper ordering
+//     is left to MySQL because the diff layer doesn't have a
+//     general expression evaluator.
+func validateDesiredRangeMonotonic(fqtn string, defs []*sqlparser.PartitionDefinition) error {
+	var prevName, prevForm string
+	var prevMax, hasPrev bool
+	var prevInt int64
+	var prevIsInt bool
+	for _, def := range defs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.LessThanType {
+			continue
+		}
+		curName := def.Name.String()
+		curRange := def.Options.ValueRange
+		if curRange.Maxvalue {
+			if prevMax {
+				return fmt.Errorf("table %s: desired RANGE partitions %s and %s both use VALUES LESS THAN MAXVALUE — only one MAXVALUE partition is allowed and it must be the final partition", fqtn, prevName, curName)
+			}
+			prevName = curName
+			prevForm = "MAXVALUE"
+			prevMax = true
+			prevIsInt = false
+			hasPrev = true
+			continue
+		}
+		if prevMax {
+			return fmt.Errorf("table %s: desired RANGE partition %s comes after the MAXVALUE partition %s — MAXVALUE must be the final partition (every concrete LESS THAN value sorts below MAXVALUE)", fqtn, curName, prevName)
+		}
+		curForm := sqlparser.String(curRange)
+		curInt, curIsInt := rangeBoundaryAsInt64(curRange)
+		if hasPrev {
+			if prevIsInt && curIsInt {
+				if curInt <= prevInt {
+					return fmt.Errorf("table %s: desired RANGE partition %s VALUES LESS THAN %d is not strictly greater than partition %s VALUES LESS THAN %d — MySQL requires VALUES LESS THAN to be strictly increasing", fqtn, curName, curInt, prevName, prevInt)
+				}
+			} else if curForm == prevForm {
+				return fmt.Errorf("table %s: desired RANGE partitions %s and %s both use the same boundary %s — MySQL requires VALUES LESS THAN to be strictly increasing", fqtn, prevName, curName, curForm)
+			}
+		}
+		prevName = curName
+		prevForm = curForm
+		prevMax = false
+		prevInt = curInt
+		prevIsInt = curIsInt
+		hasPrev = true
+	}
+	return nil
+}
+
+// rangeBoundaryAsInt64 returns the integer value of a single
+// `VALUES LESS THAN (n)` boundary when it parses as a non-
+// negative int64 literal, plus a true flag. Returns
+// (0, false) for tuple boundaries (RANGE COLUMNS),
+// expressions, or values that don't fit in int64. The
+// strictly-increasing comparator falls back to bytewise
+// equality in those cases.
+func rangeBoundaryAsInt64(r *sqlparser.PartitionValueRange) (int64, bool) {
+	if len(r.Range) != 1 {
+		return 0, false
+	}
+	lit, ok := r.Range[0].(*sqlparser.Literal)
+	if !ok || lit.Type != sqlparser.IntVal {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(lit.Val, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// validateDesiredListValuesAreDisjoint reports a plan-time
+// error when the desired-side partition definitions assign
+// the same `VALUES IN (…)` constant to more than one
+// partition. Shared by `diffPartitions` (modified-table path)
+// and `DiffTables` (create-table path), so a CREATE TABLE
+// PARTITION BY LIST whose desired schema is internally
+// inconsistent surfaces with the same actionable message
+// instead of falling through to MySQL Error 1495 at apply
+// time. Caller is responsible for parsing the partition
+// clause; non-LIST partition strategies are no-ops here.
+func validateDesiredListValuesAreDisjoint(fqtn string, defs []*sqlparser.PartitionDefinition) error {
+	dup, slotA, slotB := findDuplicateListValue(defs)
+	if dup == "" {
+		return nil
+	}
+	return fmt.Errorf("table %s: desired LIST partition definitions assign value %s to both partition %s and partition %s — MySQL requires LIST values to be disjoint across partitions (Error 1495 %q). Remove the duplicate from one of the partitions", fqtn, dup, slotA, slotB, "Multiple definition of same constant in list partitioning")
+}
+
+type discardedListValue struct {
+	value string // formatted via sqlparser.String
+	owner string // catalog-side partition name that owned the value
+}
+
+// findDiscardedListValue returns the first LIST `VALUES IN (…)`
+// constant present in the catalog but missing from desired.
+// Used by the catalog-vs-desired discard guard: when the
+// desired schema removes a value entirely (rather than
+// reassigning it to another partition), MySQL silently drops
+// any rows for that value during REORGANIZE — no apply-time
+// error, no warning, just lost data. Surfacing the first
+// discard is enough for the operator to act; subsequent
+// discards in the same partition layout would emit the same
+// error after the first is fixed.
+//
+// Returns the zero `discardedListValue` (empty value /
+// owner) when every catalog LIST constant still has a home
+// in desired. Non-LIST partitions (`LessThanType`) are
+// skipped on both sides — RANGE row redistribution is bounded
+// by per-slot value ranges, not by per-value owners.
+func findDiscardedListValue(curDefs, desDefs []*sqlparser.PartitionDefinition) discardedListValue {
+	desValues := collectListValues(desDefs)
+	for _, def := range curDefs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.InType {
+			continue
+		}
+		for _, v := range def.Options.ValueRange.Range {
+			key := sqlparser.String(v)
+			if _, kept := desValues[key]; !kept {
+				return discardedListValue{value: key, owner: def.Name.String()}
+			}
+		}
+	}
+	return discardedListValue{}
+}
+
+func collectListValues(defs []*sqlparser.PartitionDefinition) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, def := range defs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.InType {
+			continue
+		}
+		for _, v := range def.Options.ValueRange.Range {
+			out[sqlparser.String(v)] = struct{}{}
+		}
+	}
+	return out
+}
+
+// findDuplicateListValue scans a `*PartitionDefinition` slice
+// for any `VALUES IN (…)` constant that appears in more than
+// one partition. Returns the offending value (formatted) and
+// both partition names; returns ("", "", "") when every
+// LIST constant is uniquely owned. Non-LIST partitions
+// (`LessThanType`) are skipped — RANGE values are bounded
+// per-slot by neighbours' boundaries, not by uniqueness, so
+// the check is meaningless there.
+//
+// Comparison keys go through `sqlparser.String`, the same
+// keying used by `partitionValueListIsSuperset` and
+// `temporarilySortListValues`, so the helper is tuple-safe
+// for LIST COLUMNS.
+func findDuplicateListValue(defs []*sqlparser.PartitionDefinition) (value, slotA, slotB string) {
+	owner := make(map[string]string)
+	for _, def := range defs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.InType {
+			continue
+		}
+		for _, v := range def.Options.ValueRange.Range {
+			key := sqlparser.String(v)
+			if existing, ok := owner[key]; ok {
+				return key, existing, def.Name.String()
+			}
+			owner[key] = def.Name.String()
+		}
+	}
+	return "", "", ""
+}
+
+func partitionValueListIsSuperset(superset, subset *sqlparser.PartitionDefinition) bool {
+	if subset.Options == nil || subset.Options.ValueRange == nil ||
+		subset.Options.ValueRange.Type != sqlparser.InType {
+		// Non-LIST or empty subset — trivially a superset of "no values".
+		return true
+	}
+	if superset.Options == nil || superset.Options.ValueRange == nil ||
+		superset.Options.ValueRange.Type != sqlparser.InType {
+		return false
+	}
+	have := make(map[string]struct{}, len(superset.Options.ValueRange.Range))
+	for _, v := range superset.Options.ValueRange.Range {
+		have[sqlparser.String(v)] = struct{}{}
+	}
+	for _, v := range subset.Options.ValueRange.Range {
+		if _, ok := have[sqlparser.String(v)]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// partitionValueRangeEqual reports whether the two definitions
+// describe the same value boundary (`VALUES LESS THAN …` or
+// `VALUES IN (…)`) — i.e. whether ONLY the per-partition
+// options changed (COMMENT / MAX_ROWS / TABLESPACE / …) when
+// `partitionDefEqual` already said the full definition differs.
+// Used by the RANGE boundary cascade decision: skip the cascade
+// when the last changed slot's boundary didn't move.
+//
+// LIST `VALUES IN (…)` permutations are folded to equal here
+// — same set-semantics rule `partitionDefEqual` enforces — so
+// the helper is safe to reuse outside the current RANGE-only
+// cascade gate without reintroducing the spurious-REORGANIZE
+// regression that the temp-sort in `partitionDefEqual` fixed.
+func partitionValueRangeEqual(a, b *sqlparser.PartitionDefinition) bool {
+	var ar, br *sqlparser.PartitionValueRange
+	if a.Options != nil {
+		ar = a.Options.ValueRange
+	}
+	if b.Options != nil {
+		br = b.Options.ValueRange
+	}
+	if ar == nil && br == nil {
+		return true
+	}
+	if ar == nil || br == nil {
+		return false
+	}
+	if restore := temporarilySortValueRangeListValues(ar, br); restore != nil {
+		defer restore()
+	}
+	return sqlparser.String(ar) == sqlparser.String(br)
+}
+
+// temporarilySortValueRangeListValues is the
+// `temporarilySortListValues` analogue for two
+// `*PartitionValueRange` rather than two
+// `*PartitionDefinition`. Same mechanic: temp-sort the Range
+// slices in place by formatted-string for InType comparison,
+// restore on defer so callers' subsequent formatting still
+// sees the original AST order.
+func temporarilySortValueRangeListValues(a, b *sqlparser.PartitionValueRange) func() {
+	if a.Type != sqlparser.InType || b.Type != sqlparser.InType {
+		return nil
+	}
+	savedA := append(sqlparser.ValTuple(nil), a.Range...)
+	savedB := append(sqlparser.ValTuple(nil), b.Range...)
+	sortValTupleByFormattedString(a.Range)
+	sortValTupleByFormattedString(b.Range)
+	return func() {
+		a.Range = savedA
+		b.Range = savedB
+	}
+}
+
 func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	if a.Name.String() != b.Name.String() {
+	// MySQL identifiers are case-insensitive, and the parser /
+	// catalog round-trip preserves whatever case the user wrote
+	// — so compare names with EqualFold to match
+	// partitionNameListEqual and avoid misclassifying a
+	// `pAB → PAB` style diff as a value-change REORGANIZE.
+	if !strings.EqualFold(a.Name.String(), b.Name.String()) {
 		return false
 	}
+	// FormatPartitionDefinition includes the partition name in
+	// its output, so even after the EqualFold name check above
+	// `pAB` and `PAB` would format to different strings and
+	// trip a spurious REORGANIZE. Temporarily make b's name
+	// match a's so the formatter compares only the bodies; the
+	// AST is restored before this function returns.
+	savedName := b.Name
+	b.Name = a.Name
+	defer func() { b.Name = savedName }()
+	// LIST `VALUES IN (…)` is a set semantically — reordering
+	// the literals doesn't change which rows land in which
+	// partition. Without this normaliser the formatted-body
+	// comparison below would treat `(2, 1)` vs `(1, 2)` as a
+	// real diff and emit a spurious data-moving REORGANIZE.
+	// Temp-sort both Range slices in place by formatted-string
+	// so the canonical orders match; the AST is restored before
+	// this function returns so any later
+	// FormatPartitionDefinition call (e.g. building the
+	// REORGANIZE INTO list when other slots actually changed)
+	// still sees the user's original order.
+	if restore := temporarilySortListValues(a, b); restore != nil {
+		defer restore()
+	}
 	return parser.FormatPartitionDefinition(a) == parser.FormatPartitionDefinition(b)
+}
+
+func temporarilySortListValues(a, b *sqlparser.PartitionDefinition) func() {
+	if a.Options == nil || b.Options == nil ||
+		a.Options.ValueRange == nil || b.Options.ValueRange == nil {
+		return nil
+	}
+	return temporarilySortValueRangeListValues(a.Options.ValueRange, b.Options.ValueRange)
+}
+
+func sortValTupleByFormattedString(vs sqlparser.ValTuple) {
+	sort.Slice(vs, func(i, j int) bool {
+		return sqlparser.String(vs[i]) < sqlparser.String(vs[j])
+	})
 }

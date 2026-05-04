@@ -1,0 +1,41 @@
+# RANGE COLUMNS counterpart to the minimal-range cascade pin.
+# When a single non-tail slot's tuple boundary moves
+# (`VALUES LESS THAN (10, 100)` → `(15, 150)` on slot 0 of a
+# 3-partition table), the new upper bound of slot 0 silently
+# moves slot 1's implicit lower bound, so MySQL needs slot 1 in
+# the REORGANIZE too — otherwise it rejects with "VALUES less
+# than value must be strictly increasing". The plain-RANGE
+# fixture (`partition_value_change_reorganize_minimal_range`)
+# already pins this for scalar boundaries; this fixture pins
+# that the same cascade fires for `RANGE COLUMNS` tuple
+# boundaries (and only for those — slot 2 stays untouched
+# because the diff is "tail-aligned" once slot 1 is included).
+init: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (10, 100),
+      PARTITION p1 VALUES LESS THAN (20, 200),
+      PARTITION p2 VALUES LESS THAN (30, 300)
+  );
+
+desired: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (15, 150),
+      PARTITION p1 VALUES LESS THAN (20, 200),
+      PARTITION p2 VALUES LESS THAN (30, 300)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.shards REORGANIZE PARTITION p0, p1 INTO (
+    partition p0 values less than (15, 150),
+    partition p1 values less than (20, 200)
+  );
+
+verify_no_drift: true

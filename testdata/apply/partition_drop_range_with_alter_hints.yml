@@ -1,0 +1,41 @@
+# DROP PARTITION counterpart to
+# `partition_value_change_reorganize_alter_hints.yml` and
+# `partition_add_range_with_alter_hints.yml`. DROP PARTITION
+# is one of the partition-op keywords whose trailing-comma
+# form MySQL rejects (Error 1064), so the apply pin makes
+# sure the leading-position splice
+# (`ALTER TABLE t ALGORITHM=…, LOCK=…, DROP PARTITION p`)
+# isn't silently broken under
+# `--alter-algorithm=INPLACE --alter-lock=NONE` for the
+# subset-drop path.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2021 VALUES LESS THAN (2022),
+      PARTITION p2022 VALUES LESS THAN (2023)
+  );
+
+allow_drop:
+  - partition
+
+alter_algorithm: INPLACE
+alter_lock: NONE
+
+applied: |
+  ALTER TABLE myschema_test.events ALGORITHM=INPLACE, LOCK=NONE, DROP PARTITION p2020;
+
+verify_no_drift: true

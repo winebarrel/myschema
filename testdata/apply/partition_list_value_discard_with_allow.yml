@@ -1,0 +1,35 @@
+# Counterpart to partition_list_value_discard_disallowed.yml:
+# with --allow-drop=partition the diff layer treats the
+# value-discard as user-acknowledged data loss and emits the
+# REORGANIZE. MySQL silently drops any rows whose LIST value
+# was removed from the new `VALUES IN (…)`; the operator
+# opted in via the same gate that DROP PARTITION uses.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p3 VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p3 VALUES IN (5)
+  );
+
+allow_drop:
+  - partition
+
+applied: |
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p3 INTO (
+    partition p3 values in (5)
+  );
+
+verify_no_drift: true

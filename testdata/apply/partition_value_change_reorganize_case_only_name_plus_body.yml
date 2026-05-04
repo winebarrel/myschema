@@ -1,0 +1,39 @@
+# Mixed case-only-name + real body diff at the same slot.
+# `partitionDefEqual` already folds names case-insensitively
+# (round 5: temp-swap b.Name = a.Name before format-comparing
+# the body), so a `pAB → PAB` rename combined with a real
+# `VALUES IN` change at the same slot correctly registers as
+# "definition differs" rather than splitting the diff into a
+# rename plus a body rewrite. The emitted REORGANIZE then
+# names the OLD partition on the DROP side (`pAB`) and emits
+# the NEW PartitionDefinition verbatim on the INTO side
+# (`partition PAB values in (1, 2, 7)`). Because MySQL
+# identifiers are case-insensitive, MySQL stores it under
+# whatever case it already had — verify_no_drift then confirms
+# the next plan converges (no perpetual rename loop).
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pAB VALUES IN (1, 2),
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION PAB VALUES IN (1, 2, 7),
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION pAB INTO (
+    partition PAB values in (1, 2, 7)
+  );
+
+verify_no_drift: true

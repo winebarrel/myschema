@@ -152,13 +152,25 @@ func executeCheckMatched(ctx context.Context, conn *sql.Conn, checkSQL string) (
 }
 
 // appendAlterHints adds the user-supplied ALGORITHM= / LOCK= clauses
-// just before the trailing `;` on every statement that begins with
-// ALTER TABLE or CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX
-// (case-insensitive, leading whitespace tolerated). The two DDLs need
-// different separators: ALTER TABLE expects a leading comma plus
-// comma-separated clauses, while CREATE INDEX wants the clauses
-// separated by spaces with no leading comma. The function picks the
-// right shape per statement; the user just supplies the values.
+// to every statement that begins with ALTER TABLE or
+// CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX (case-insensitive,
+// leading whitespace tolerated). The exact splice point depends on
+// the statement shape:
+//   - CREATE INDEX: append the clauses (space-separated, no leading
+//     comma) just before the trailing `;`.
+//   - ALTER TABLE column / index / constraint changes (ADD COLUMN,
+//     DROP INDEX, MODIFY COLUMN, …): append `, ALGORITHM=…, LOCK=…`
+//     just before the trailing `;`. MySQL parses these as
+//     comma-separated alter_specifications and tolerates the
+//     trailing position.
+//   - ALTER TABLE *partition* operations (REORGANIZE / ADD / DROP /
+//     COALESCE / TRUNCATE / EXCHANGE PARTITION): MySQL's parser
+//     rejects the trailing-comma form (Error 1064 — the comma after
+//     `INTO (…)` or after the partition list is treated as a new
+//     partition_definition). Insert hints between the table name
+//     and the partition-op keyword instead, so the output reads
+//     `ALTER TABLE t ALGORITHM=COPY, LOCK=SHARED, REORGANIZE
+//     PARTITION p1 INTO (…)`.
 //
 // CREATE TABLE is intentionally excluded — online-DDL hints don't
 // apply to fresh-table creation. DROP TABLE, DROP VIEW, CREATE [OR
@@ -176,22 +188,23 @@ func appendAlterHints(stmts []string, algorithm, lock string) []string {
 	return out
 }
 
+// partitionOpKeywords are the alter_specification keywords whose
+// MySQL grammar reject `, ALGORITHM=…, LOCK=…` appended at the
+// trailing-comma position. For these statements `appendHintsTo`
+// inserts the hints between the table name and the keyword
+// instead.
+var partitionOpKeywords = []string{
+	"REORGANIZE PARTITION",
+	"ADD PARTITION",
+	"DROP PARTITION",
+	"COALESCE PARTITION",
+	"TRUNCATE PARTITION",
+	"EXCHANGE PARTITION",
+}
+
 func appendHintsTo(stmt, algorithm, lock string) string {
 	leading := strings.TrimLeft(stmt, " \t\n")
 	upper := strings.ToUpper(leading)
-
-	var sep, clauseSep string
-	switch {
-	case strings.HasPrefix(upper, "ALTER TABLE "):
-		sep, clauseSep = ", ", ", "
-	case strings.HasPrefix(upper, "CREATE INDEX "),
-		strings.HasPrefix(upper, "CREATE UNIQUE INDEX "),
-		strings.HasPrefix(upper, "CREATE FULLTEXT INDEX "),
-		strings.HasPrefix(upper, "CREATE SPATIAL INDEX "):
-		sep, clauseSep = " ", " "
-	default:
-		return stmt
-	}
 
 	var clauses []string
 	if algorithm != "" {
@@ -200,7 +213,123 @@ func appendHintsTo(stmt, algorithm, lock string) string {
 	if lock != "" {
 		clauses = append(clauses, "LOCK="+lock)
 	}
-	suffix := sep + strings.Join(clauses, clauseSep)
+
+	switch {
+	case strings.HasPrefix(upper, "ALTER TABLE "):
+		if pos := partitionOpInsertPos(stmt); pos > 0 {
+			// Insert before the partition-op keyword.
+			return stmt[:pos] + strings.Join(clauses, ", ") + ", " + stmt[pos:]
+		}
+		// Trailing-comma position is fine for column / index /
+		// constraint alter_specifications.
+		return appendBeforeSemicolon(stmt, ", "+strings.Join(clauses, ", "))
+	case strings.HasPrefix(upper, "CREATE INDEX "),
+		strings.HasPrefix(upper, "CREATE UNIQUE INDEX "),
+		strings.HasPrefix(upper, "CREATE FULLTEXT INDEX "),
+		strings.HasPrefix(upper, "CREATE SPATIAL INDEX "):
+		return appendBeforeSemicolon(stmt, " "+strings.Join(clauses, " "))
+	}
+	return stmt
+}
+
+// partitionOpInsertPos returns the byte offset where the
+// partition-op keyword starts inside `stmt` (after `ALTER TABLE
+// <name> `), or -1 if the alter_specification immediately
+// following the table name isn't a partition op. The caller
+// uses the returned offset to splice ALGORITHM= / LOCK= clauses
+// in the leading position MySQL requires for partition ops
+// (see `appendAlterHints` for the full rationale).
+//
+// The detector deliberately only inspects the keyword *right
+// after the table name* — not anywhere else in the SQL. A
+// global `strings.Index` would misclassify e.g.
+// `ALTER TABLE t ADD COLUMN c INT COMMENT 'see ADD PARTITION'`
+// as a partition op and splice the hints into the literal.
+// Indices are computed on raw `stmt` (not on a ToUpper'd copy)
+// so non-ASCII byte-length shifts under ToUpper can't displace
+// the splice point — only the short keyword prefix is
+// uppercased for case-insensitive comparison.
+func partitionOpInsertPos(stmt string) int {
+	pos := skipASCIIWhitespace(stmt, 0)
+	if !hasPrefixFold(stmt, pos, "ALTER TABLE ") {
+		return -1
+	}
+	pos += len("ALTER TABLE ")
+	pos = skipASCIIWhitespace(stmt, pos)
+	pos = skipQualifiedIdentifier(stmt, pos)
+	pos = skipASCIIWhitespace(stmt, pos)
+	for _, kw := range partitionOpKeywords {
+		if hasPrefixFold(stmt, pos, kw) {
+			return pos
+		}
+	}
+	return -1
+}
+
+func hasPrefixFold(s string, pos int, prefix string) bool {
+	if len(s)-pos < len(prefix) {
+		return false
+	}
+	return strings.EqualFold(s[pos:pos+len(prefix)], prefix)
+}
+
+func skipASCIIWhitespace(s string, pos int) int {
+	for pos < len(s) && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r') {
+		pos++
+	}
+	return pos
+}
+
+// skipQualifiedIdentifier advances past one identifier or a
+// `db.table` chain. Each segment is either back-ticked (with
+// the standard MySQL escape — an embedded backtick is
+// doubled inside the back-ticked identifier) or unquoted
+// (letters / digits / `_` / `$`). Operates on raw bytes so a
+// multi-byte UTF-8 sequence inside a back-ticked identifier
+// stays intact in the returned offset.
+func skipQualifiedIdentifier(s string, pos int) int {
+	for pos < len(s) {
+		pos = skipIdentifier(s, pos)
+		if pos < len(s) && s[pos] == '.' {
+			pos++
+			continue
+		}
+		break
+	}
+	return pos
+}
+
+func skipIdentifier(s string, pos int) int {
+	if pos >= len(s) {
+		return pos
+	}
+	if s[pos] == '`' {
+		pos++
+		for pos < len(s) {
+			if s[pos] == '`' {
+				if pos+1 < len(s) && s[pos+1] == '`' {
+					pos += 2 // escaped backtick `` inside the identifier
+					continue
+				}
+				return pos + 1
+			}
+			pos++
+		}
+		return pos
+	}
+	for pos < len(s) {
+		b := s[pos]
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
+			(b >= '0' && b <= '9') || b == '_' || b == '$' {
+			pos++
+			continue
+		}
+		break
+	}
+	return pos
+}
+
+func appendBeforeSemicolon(stmt, suffix string) string {
 	if !strings.HasSuffix(stmt, ";") {
 		return stmt + suffix
 	}

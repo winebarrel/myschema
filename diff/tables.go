@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/winebarrel/myschema/model"
+	"github.com/winebarrel/myschema/parser"
 	"github.com/winebarrel/orderedmap"
 )
 
@@ -58,14 +59,29 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		if _, ok := current.GetOk(k); ok {
 			continue
 		}
-		// Same MySQL rule the diffTable path enforces: every
-		// unique key on a partitioned table must include all
-		// columns in the partition expression. Without this
-		// check on the create-table path, MySQL would reject
-		// the CREATE TABLE itself at apply time (or worse,
-		// accept the CREATE and reject a follow-up
-		// CREATE UNIQUE INDEX). Surface the gap at plan time.
+		// Same MySQL rules the diffTable path enforces on the
+		// modified-table side: (1) LIST `VALUES IN (…)`
+		// constants must be disjoint across partitions, (2)
+		// RANGE `VALUES LESS THAN` sequences must be strictly
+		// increasing, and (3) every unique key on a
+		// partitioned table must include all columns in the
+		// partition expression. All three would otherwise
+		// surface as MySQL errors at apply time (or, worse,
+		// the CREATE accepted and a follow-up rejected). Run
+		// them at plan time so the operator gets the same
+		// actionable message regardless of whether the table
+		// is brand-new or already exists.
 		if dt.Partition != nil {
+			desPO, err := parser.ParsePartitionClause(*dt.Partition)
+			if err != nil {
+				return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", k, err)
+			}
+			if err := validateDesiredListValuesAreDisjoint(k, desPO.Definitions); err != nil {
+				return nil, err
+			}
+			if err := validateDesiredRangeMonotonic(k, desPO.Definitions); err != nil {
+				return nil, err
+			}
 			required, err := partitionRequiredColumns(*dt.Partition)
 			if err != nil {
 				return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", k, err)
