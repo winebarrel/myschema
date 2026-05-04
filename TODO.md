@@ -7,10 +7,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Medium — silent diffs / fidelity gaps
 
-- **FK to a table outside the managed database** — myschema only
-  reads / orders the tables it manages, so an FK whose target lives
-  in another database is treated as a black box. Apply will fail
-  if the referenced table doesn't already exist; plan can't help.
 - **CHECK constraint `NOT ENFORCED` not preserved.** The
   `Enforced` flag is already plumbed end-to-end on the desired side
   (`model.Constraint.Enforced`, `diff.constraintEqual` compares it),

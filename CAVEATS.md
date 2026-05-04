@@ -86,6 +86,80 @@ against the live database first and use that output as your starting
 point — every implicit FK covering index will be materialised in the
 output, so the first `apply` is a no-op.
 
+## Foreign keys to tables in another database are passed through, not managed
+
+**Behaviour.** A foreign key whose target lives in a different
+database than the one myschema is invoked against
+(`REFERENCES other_db.parent (id)`) is accepted by the parser and
+faithfully round-tripped, but myschema does **not** manage the
+parent side. Specifically:
+
+- The parser stores `model.ForeignKey.RefDB = "other_db"` (cross-DB
+  qualifiers on the REFERENCES target are intentionally allowed, in
+  contrast to the *table-name* qualifier on the owning table which
+  is rejected at parse time).
+- `(*ForeignKey).SQL()` preserves the `other_db.` prefix on emit
+  whenever `RefDB != Database`, so a hand-written cross-DB FK
+  doesn't silently re-target a same-named table in the current DB.
+- `dump` emits the FK as a separate statement, matching what the
+  user would write by hand:
+
+  ```sql
+  ALTER TABLE child ADD CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES other_db.parent (id);
+  ```
+- Diff still detects changes on the *child* side: equality compares
+  `(RefDB, RefTable)`, so renaming or re-pointing the FK fires the
+  expected `DROP FOREIGN KEY + ADD CONSTRAINT`.
+
+**What myschema does NOT do.**
+
+- **No plan-time validation that the parent exists.** myschema
+  reads `information_schema` for the invocation database only;
+  `other_db.parent` is invisible to it. A typo in the parent
+  table name surfaces as a MySQL error at apply time
+  (`Error 1146 Table 'other_db.parent' doesn't exist`,
+  `Error 1822 Failed to add the foreign key constraint`, etc.) —
+  not as a clean `plan` error.
+- **No topological ordering with the parent's lifecycle.** Same-DB
+  cross-table FKs are sequenced naturally because all `CREATE TABLE`
+  statements run before the `FKAddStmts` bucket. Cross-DB FKs are
+  emitted in that same bucket, but myschema can't sequence them
+  against the parent DB's schema changes — the operator has to
+  apply changes to `other_db` *before* any plan that references
+  it lands.
+- **Limited drift detection on the parent side.** myschema reads
+  the child's FK row only; whatever MySQL writes into
+  `information_schema.KEY_COLUMN_USAGE` is what the diff sees.
+  That covers FK-metadata-level changes (a parent table rename
+  via `RENAME TABLE` or a parent column rename via `ALTER TABLE
+  RENAME COLUMN` cascades into the child's FK row, so the diff
+  fires `DROP FOREIGN KEY + ADD CONSTRAINT` to restore the
+  desired reference) but **not** structural changes that don't
+  touch the FK metadata: parent column type widening / narrowing,
+  parent unique-key reshuffles, parent collation changes, or any
+  hand-written `foreign_key_checks=0` surgery. Those silently
+  diverge until something forces MySQL to revalidate the FK
+  (a write that touches the constrained column, an integrity
+  check tool, …), at which point the failure surfaces unrelated
+  to any plan run.
+
+**Why myschema doesn't manage cross-DB FKs.** The "one database
+per invocation" contract (the DSN carries it; emitted DDL is
+unqualified) is the load-bearing simplification behind the rest
+of the tool — schema ordering, drop policy, dump output, all
+assume a single managed namespace. Reaching into `other_db` would
+require either a multi-DSN model or speculative cross-database
+reads under the same connection, both of which expand the
+operational surface (privileges, DSNs, error paths) far beyond
+what the project's scope supports. So cross-DB FKs are
+"transparently passed through" rather than managed.
+
+**What to do instead.** Manage `other_db` with its own
+myschema invocation (or by hand). Sequence applies so the
+parent table exists with the required columns / unique key
+*before* any plan that references it lands. Use `dump` to
+verify the child-side FK survived the round trip.
+
 ## Integer display widths drift; type-name casing doesn't
 
 **Display widths.** Writing `INT(11)`, `BIGINT(20)`, `TINYINT(4)`,
