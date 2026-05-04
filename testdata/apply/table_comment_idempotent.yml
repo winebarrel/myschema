@@ -1,0 +1,19 @@
+# Idempotence: matching COMMENT on both sides must not fire any
+# diff. Pins the ptrEq short-circuit in tableCommentSQL — without
+# it, a re-emit would cycle the apply count and break the
+# verify_no_drift contract.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='steady';
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='steady';
+
+applied: ""
+
+verify_no_drift: true

@@ -248,10 +248,17 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// new table default (catalog-side column normalisation collapses a
 	// column-level value that matches the table default to nil, so
 	// changing the table default is functionally equivalent to changing
-	// every "inherited" column). Engine and Comment are intentionally
-	// not diffed here yet — out of scope for the charset gap.
+	// every "inherited" column). Engine is intentionally not diffed
+	// here yet.
 	if charsetStmt := tableCharsetCollationSQL(tableIdent, current, desired); charsetStmt != "" {
 		res.Stmts = append(res.Stmts, charsetStmt)
+	}
+
+	// Table-level COMMENT diff. Order doesn't interact with the
+	// column pass below — COMMENT is metadata only, no row rewrite —
+	// so it sits next to the charset branch for symmetry.
+	if commentStmt := tableCommentSQL(tableIdent, current, desired); commentStmt != "" {
+		res.Stmts = append(res.Stmts, commentStmt)
 	}
 
 	colStmts, colDisallowed := diffColumns(tableIdent, current.Columns, desired.Columns, dc)
@@ -541,6 +548,30 @@ func tableCharsetCollationSQL(tableIdent string, current, desired *model.Table) 
 	}
 	b.WriteString(";")
 	return b.String()
+}
+
+// tableCommentSQL returns an ALTER TABLE that updates the table's
+// COMMENT clause when desired and current disagree. Returns "" when
+// they match. Both sides treat the absence of a clause as nil (the
+// catalog reader maps the empty TABLE_COMMENT to nil; the parser
+// only sets `Table.Comment` when the user spelled out
+// `COMMENT='…'`), so a missing-on-both case short-circuits via
+// ptrEq.
+//
+// Removing a previously-set comment is emitted as `COMMENT=”` —
+// MySQL's only way to clear `TABLE_COMMENT`, since ALTER TABLE has
+// no `DROP COMMENT` syntax. Catalog round-trips that empty string
+// back to nil on the next read, so the change converges in one
+// apply.
+func tableCommentSQL(tableIdent string, current, desired *model.Table) string {
+	if ptrEq(current.Comment, desired.Comment) {
+		return ""
+	}
+	v := ""
+	if desired.Comment != nil {
+		v = *desired.Comment
+	}
+	return "ALTER TABLE " + tableIdent + " COMMENT=" + model.QuoteLiteral(v) + ";"
 }
 
 // addColumnSQL / modifyColumnSQL share model.ColumnDefSQL with CREATE TABLE

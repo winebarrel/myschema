@@ -1,0 +1,20 @@
+# Adding a COMMENT to a table that didn't have one — symmetric
+# counterpart to drop_table_comment.yml. Pre-fix: the diff layer
+# skipped Comment, so even introducing a brand-new COMMENT was
+# silently lost.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='just added';
+
+applied: |
+  ALTER TABLE t COMMENT='just added';
+
+verify_no_drift: true
