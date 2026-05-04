@@ -32,12 +32,14 @@ Open items only. Done work is in `git log` / closed PRs.
       shrink via `ADD PARTITION PARTITIONS` /
       `COALESCE PARTITION` (`--allow-drop=partition` gates the
       shrink + RANGE/LIST DROP); and per-partition definition
-      rewrite of RANGE / LIST partitions via `REORGANIZE
-      PARTITION` whenever both sides have the same partition
-      names in the same order (covers `VALUES …` boundary
-      tweaks plus COMMENT / MAX_ROWS / TABLESPACE / other
-      per-partition option changes that round-trip through
-      vitess's PartitionDefinition formatter). See CAVEATS.md
+      rewrite of RANGE / LIST partitions (including the
+      `RANGE COLUMNS` / `LIST COLUMNS` variants) via
+      `REORGANIZE PARTITION` whenever both sides have the same
+      partition names in the same order (covers `VALUES …`
+      boundary tweaks — scalar and tuple — plus
+      COMMENT / MAX_ROWS / TABLESPACE / other per-partition
+      option changes that round-trip through vitess's
+      PartitionDefinition formatter). See CAVEATS.md
       "Partitioning". Still on the floor: split / merge /
       reorder REORGANIZE shapes (the diff layer can't infer
       the right boundaries from a name-only diff), strategy /

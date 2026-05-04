@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
@@ -456,5 +457,42 @@ func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
 	savedName := b.Name
 	b.Name = a.Name
 	defer func() { b.Name = savedName }()
+	// LIST `VALUES IN (…)` is a set semantically — reordering
+	// the literals doesn't change which rows land in which
+	// partition. Without this normaliser the formatted-body
+	// comparison below would treat `(2, 1)` vs `(1, 2)` as a
+	// real diff and emit a spurious data-moving REORGANIZE.
+	// Temp-sort both Range slices in place by formatted-string
+	// so the canonical orders match; the AST is restored before
+	// this function returns so any later
+	// FormatPartitionDefinition call (e.g. building the
+	// REORGANIZE INTO list when other slots actually changed)
+	// still sees the user's original order.
+	if restore := temporarilySortListValues(a, b); restore != nil {
+		defer restore()
+	}
 	return parser.FormatPartitionDefinition(a) == parser.FormatPartitionDefinition(b)
+}
+
+func temporarilySortListValues(a, b *sqlparser.PartitionDefinition) func() {
+	if a.Options == nil || b.Options == nil ||
+		a.Options.ValueRange == nil || b.Options.ValueRange == nil ||
+		a.Options.ValueRange.Type != sqlparser.InType ||
+		b.Options.ValueRange.Type != sqlparser.InType {
+		return nil
+	}
+	savedA := append(sqlparser.ValTuple(nil), a.Options.ValueRange.Range...)
+	savedB := append(sqlparser.ValTuple(nil), b.Options.ValueRange.Range...)
+	sortValTupleByFormattedString(a.Options.ValueRange.Range)
+	sortValTupleByFormattedString(b.Options.ValueRange.Range)
+	return func() {
+		a.Options.ValueRange.Range = savedA
+		b.Options.ValueRange.Range = savedB
+	}
+}
+
+func sortValTupleByFormattedString(vs sqlparser.ValTuple) {
+	sort.Slice(vs, func(i, j int) bool {
+		return sqlparser.String(vs[i]) < sqlparser.String(vs[j])
+	})
 }

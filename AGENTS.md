@@ -163,12 +163,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   variants, HASH / KEY (incl. LINEAR) `PARTITIONS n` count
   changes via ADD PARTITION PARTITIONS / COALESCE PARTITION,
   and per-partition definition rewrite of RANGE / LIST
-  partitions via REORGANIZE PARTITION when both sides have the
+  partitions (including the `RANGE COLUMNS` / `LIST COLUMNS`
+  variants) via REORGANIZE PARTITION when both sides have the
   same partition names in the same order (covers `VALUES …`
-  boundary tweaks plus COMMENT / MAX_ROWS / TABLESPACE / other
-  per-partition option changes that round-trip through vitess's
-  PartitionDefinition formatter) — see CAVEATS.md
-  "Partitioning" for the full scope
+  boundary tweaks — scalar and tuple — plus COMMENT / MAX_ROWS
+  / TABLESPACE / other per-partition option changes that
+  round-trip through vitess's PartitionDefinition formatter) —
+  see CAVEATS.md "Partitioning" for the full scope
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
 - `--alter-algorithm` / `--alter-lock` flags (and matching
@@ -273,9 +274,11 @@ rather than declarative schema. Manage them out of band.)
   shrink via `ADD PARTITION PARTITIONS` /
   `COALESCE PARTITION` (the shrink path is also gated on
   `--allow-drop=partition`); and per-partition definition
-  rewrite of RANGE / LIST partitions via `REORGANIZE PARTITION`
-  whenever both sides have the same partition names in the same
-  order (covers `VALUES …` boundary tweaks plus
+  rewrite of RANGE / LIST partitions (including the
+  `RANGE COLUMNS` / `LIST COLUMNS` variants) via
+  `REORGANIZE PARTITION` whenever both sides have the same
+  partition names in the same order (covers `VALUES …`
+  boundary tweaks — scalar and tuple — plus
   COMMENT / MAX_ROWS / TABLESPACE / other per-partition option
   changes that round-trip through vitess's PartitionDefinition
   formatter). Anything else — split / merge / reorder

@@ -1,0 +1,29 @@
+# LIST `VALUES IN (…)` is a set semantically — reordering the
+# literals doesn't change which rows land in which partition.
+# Without a normaliser the partition-definition equality check
+# is bytewise on the formatted body, so a desired-side `(2, 1)`
+# vs catalog `(1, 2)` (with no real change) would slip into the
+# REORGANIZE branch and emit a data-moving statement for what
+# is semantically a no-op. This fixture pins the no-op so a
+# regression of the LIST-set normaliser surfaces at plan time.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 2),
+      PARTITION p1 VALUES IN (3, 4)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (2, 1),
+      PARTITION p1 VALUES IN (4, 3)
+  );
+
+plan: ""
