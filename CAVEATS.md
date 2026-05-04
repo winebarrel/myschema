@@ -156,10 +156,22 @@ line in your desired `CREATE TABLE` — are:
 - **Remove**: `status ENUM('new','paid') NOT NULL`
 - **Rename**: `status ENUM('new','settled','shipped') NOT NULL`
 
-Every one of these produces the same line:
+Every shape surfaces as the same kind of statement — a single
+`MODIFY COLUMN` whose `enum(...)` body mirrors whatever the user
+wrote — so plan output looks structurally identical even though
+the rendered enum literal and the runtime impact (online-safe
+append, integer-mapping rewrite, data truncation, …) differ
+sharply per shape:
 
 ```sql
-ALTER TABLE orders MODIFY COLUMN status enum(...) NOT NULL;
+-- append
+ALTER TABLE orders MODIFY COLUMN status enum('new','paid','shipped','refunded') NOT NULL;
+-- reorder
+ALTER TABLE orders MODIFY COLUMN status enum('paid','new','shipped') NOT NULL;
+-- remove
+ALTER TABLE orders MODIFY COLUMN status enum('new','paid') NOT NULL;
+-- rename
+ALTER TABLE orders MODIFY COLUMN status enum('new','settled','shipped') NOT NULL;
 ```
 
 **Why each shape matters differently.** ENUM stores values as
@@ -193,8 +205,15 @@ very different runtime cost and safety:
 
 **Workarounds.**
 
-- For appends, pass `--alter-algorithm=INSTANT`; MySQL will succeed
-  for true append-only changes and fail loudly for anything else.
+- For appends, pass `--alter-algorithm=INSTANT`. Caveat: this flag
+  is plan-wide — myschema appends `, ALGORITHM=INSTANT` to **every**
+  generated `ALTER TABLE` and `CREATE INDEX` (see `appendAlterHints`),
+  so any non-INSTANT-eligible operation in the same plan (e.g. an
+  index add that needs `INPLACE` / `COPY`) will fail at apply time.
+  Either run the ENUM-append apply on its own (split your desired
+  SQL or use `--include` / `--exclude` to scope the plan to the one
+  table) or accept that the rest of the plan also needs to be
+  INSTANT-eligible.
 - For reorders / removes / renames, treat the desired-side change
   as destructive. Inspect plan output, take a backup, and consider
   staging the change (add the new value first, migrate data, then
