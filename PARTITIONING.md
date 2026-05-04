@@ -205,14 +205,16 @@ assigning it to another partition, MySQL silently DROPs any rows
 for that value on REORGANIZE — no apply-time error, no warning,
 just data gone (verified against MySQL 8.0). Treated as
 destructive and gated behind `--allow-drop=partition` (the same
-flag DROP PARTITION / COALESCE PARTITION already use for
+flag DROP PARTITION / COALESCE PARTITION already uses for
 partition-level data destruction).
 
-The error reads `desired LIST partition layout discards value V
-(catalog partition pX); MySQL silently drops any matching rows on
-REORGANIZE — re-add the value to a desired partition, or pass
-\`--allow-drop=partition\` to acknowledge the data loss`. With the
-flag, the discard goes through as the operator's explicit choice.
+The error reads:
+
+```
+desired LIST partition layout discards value V (catalog partition pX); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss
+```
+
+With the flag, the discard goes through as the operator's explicit choice.
 
 The check sits inside the matched-name-list (REORGANIZE) branch
 because it only matters for the REORGANIZE path — DROP PARTITION
