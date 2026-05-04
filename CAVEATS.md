@@ -243,37 +243,37 @@ patterns:
   desired partition name lists line up position-by-position
   (every partition stays in the same slot, every name matches
   case-insensitively), any per-partition definition difference
-  is generated as a single `ALTER TABLE … REORGANIZE PARTITION
-  p_i, p_{i+1}, … INTO (PARTITION p_i …, PARTITION p_{i+1} …,
-  …)`. The most common shape is a `VALUES LESS THAN` /
-  `VALUES IN` boundary tweak (e.g. `p2020 LESS THAN (2021)` →
-  `p2020 LESS THAN (2025)`), but COMMENT / MAX_ROWS / TABLESPACE
-  and other per-partition options that round-trip through
-  vitess's PartitionDefinition formatter are picked up here
-  too — anything that makes the formatted definitions
-  byte-different counts. The emitted REORGANIZE covers the
-  *minimal* contiguous span between the first and the last
-  differing slot. Matched partitions inside that span get
-  re-stated unchanged because MySQL requires the partitions
-  named in REORGANIZE PARTITION to be consecutive in the
-  partition ordering (Error 1519 "When reorganizing a set of
-  partitions they must be in consecutive order" — fires for
-  both RANGE and LIST), so a "p0 + p3 changed" 4-partition
-  table can't be reshaped with `REORGANIZE PARTITION p0, p3
-  INTO (…)` even though their `VALUES IN` sets are independent.
-  Untouched partitions on either side of the span stay alone.
-  RANGE-style boundary edits additionally extend the span by
-  one slot when the last changed slot's `VALUES LESS THAN`
-  actually moved AND that slot isn't the final partition —
-  pulling `p_{last+1}` in re-establishes the boundary
-  alignment with the unchanged tail (otherwise MySQL rejects
-  with "VALUES less than value must be strictly increasing").
-  Per-partition option-only diffs leave the value range
-  untouched, so the cascade doesn't fire — a metadata-only
-  edit stays a one-slot REORGANIZE. MySQL redistributes
-  existing rows into the new boundaries (row-preserving). No
-  `--allow-drop` gating because every dropped name is reused
-  on the add side.
+  is generated as one or more `ALTER TABLE … REORGANIZE
+  PARTITION p_i, p_{i+1}, … INTO (PARTITION p_i …,
+  PARTITION p_{i+1} …, …)` statements. The most common shape
+  is a `VALUES LESS THAN` / `VALUES IN` boundary tweak (e.g.
+  `p2020 LESS THAN (2021)` → `p2020 LESS THAN (2025)`), but
+  COMMENT / MAX_ROWS / TABLESPACE and other per-partition
+  options that round-trip through vitess's PartitionDefinition
+  formatter are picked up here too — anything that makes the
+  formatted definitions byte-different counts. myschema emits
+  *one REORGANIZE per run of consecutive changed slots*, not
+  one giant REORGANIZE that drags every matched partition in
+  between through the rewrite. MySQL's Error 1519 "When
+  reorganizing a set of partitions they must be in consecutive
+  order" only constrains the partition_names list *within a
+  single REORGANIZE statement*; multiple REORGANIZE statements
+  in sequence each with their own consecutive list are fine.
+  So a "p0 + p3 changed" 4-partition LIST table emits two
+  separate REORGANIZEs (each trivially consecutive — one slot
+  apiece) instead of one `REORGANIZE p0, p1, p2, p3 …` that
+  uselessly rewrites p1 / p2. RANGE-style boundary edits
+  additionally extend each run by one slot when that run's
+  last changed slot's `VALUES LESS THAN` actually moved AND
+  that slot isn't the final partition — pulling
+  `p_{last+1}` in re-establishes the boundary alignment with
+  the unchanged tail (otherwise MySQL rejects with "VALUES
+  less than value must be strictly increasing"). Per-partition
+  option-only diffs leave the value range untouched, so the
+  cascade doesn't fire — a metadata-only edit stays a
+  one-slot REORGANIZE. MySQL redistributes existing rows into
+  the new boundaries (row-preserving). No `--allow-drop`
+  gating because every dropped name is reused on the add side.
 
 **Diffs that still error (manage by hand).**
 

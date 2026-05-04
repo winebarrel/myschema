@@ -186,46 +186,58 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// matches case-insensitively) the diff is necessarily an
 	// in-place change to one or more definitions — value
 	// boundaries, COMMENT, MAX_ROWS, etc. all flow through
-	// `parser.FormatPartitionDefinition`'s identity check. Emit
-	// a single REORGANIZE PARTITION over the *minimal* contiguous
-	// span from the first to the last differing slot.
+	// `parser.FormatPartitionDefinition`'s identity check.
 	//
-	// MySQL requires the partitions named in REORGANIZE
-	// PARTITION to be consecutive in the partition ordering
-	// (Error 1519 "When reorganizing a set of partitions they
-	// must be in consecutive order" — fires for both RANGE and
-	// LIST), so even when only `p0` and `p3` differ in a
-	// 4-partition LIST table, the REORGANIZE still has to
-	// enumerate p0, p1, p2, p3 with the in-between matched
-	// partitions re-stated unchanged. The minimal span keeps
-	// the rewrite proportional to the diff (one tail-only edit
-	// stays one-slot) instead of REORGANIZing the whole table.
+	// Emit *one REORGANIZE PARTITION per run of consecutive
+	// changed slots*, not one giant REORGANIZE that drags every
+	// matched in-between slot through the rewrite. MySQL's
+	// Error 1519 "When reorganizing a set of partitions they
+	// must be in consecutive order" only constrains the
+	// partition_names list *within a single REORGANIZE
+	// statement* — multiple REORGANIZE statements in sequence
+	// each with their own consecutive list are fine. So a
+	// "p0 + p3 changed" 4-partition LIST table emits two
+	// separate REORGANIZEs (each trivially consecutive) rather
+	// than one `REORGANIZE p0, p1, p2, p3 …` that uselessly
+	// rewrites p1 / p2.
 	//
-	// RANGE-style boundary edits additionally cascade: each
-	// partition's `VALUES LESS THAN <x>` is also the implicit
-	// lower bound of the next partition, so when slot `last`'s
-	// upper bound moved AND `last` isn't the final partition,
-	// pulling `last+1` into the REORGANIZE re-establishes the
-	// boundary alignment with the unchanged tail (otherwise
-	// MySQL rejects with "VALUES less than value must be
-	// strictly increasing"). Per-partition option-only diffs
-	// (COMMENT / MAX_ROWS / TABLESPACE / …) leave the value
-	// range untouched, so the cascade doesn't fire — keeps a
+	// RANGE-style boundary edits additionally cascade *within
+	// each run*: each partition's `VALUES LESS THAN <x>` is
+	// also the implicit lower bound of the next partition, so
+	// when the run's last slot's upper bound moved AND that
+	// slot isn't the final partition, pulling `last+1` into
+	// the run re-establishes the boundary alignment with the
+	// unchanged tail (otherwise MySQL rejects with "VALUES
+	// less than value must be strictly increasing"). Per-
+	// partition option-only diffs leave the value range
+	// untouched, so the cascade doesn't fire — keeps a
 	// metadata-only edit a one-slot REORGANIZE. LIST partitions
 	// don't have this cascade at all (`VALUES IN (…)` is a
 	// closed set per slot), so the extension only fires for
-	// RANGE / RANGE COLUMNS.
+	// RANGE / RANGE COLUMNS. Cascades from one run can't
+	// extend into the next: the slot the cascade pulls in is by
+	// definition matched (otherwise it'd already be part of the
+	// current run), and the next run starts at the next
+	// changed slot, which is at least one more position over.
 	if partitionNameListEqual(curDefs, desDefs) {
-		first, last := -1, -1
-		for i := range curDefs {
-			if !partitionDefEqual(curDefs[i], desDefs[i]) {
-				if first < 0 {
-					first = i
-				}
-				last = i
+		var stmts []string
+		for i := 0; i < len(curDefs); i++ {
+			if partitionDefEqual(curDefs[i], desDefs[i]) {
+				continue
 			}
+			first := i
+			last := i
+			for last+1 < len(curDefs) && !partitionDefEqual(curDefs[last+1], desDefs[last+1]) {
+				last++
+			}
+			if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 &&
+				!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
+				last++
+			}
+			stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last))
+			i = last
 		}
-		if first < 0 {
+		if stmts == nil {
 			// Every position compares equal under partitionDefEqual,
 			// even though the raw-string fast path didn't catch it.
 			// Reachable for: formatter-resolved formatting drift
@@ -237,31 +249,7 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			// no-ops at the SQL level — emit nothing.
 			return nil, nil, nil
 		}
-		if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 &&
-			!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
-			last++
-		}
-		var b strings.Builder
-		b.WriteString("ALTER TABLE ")
-		b.WriteString(fqtn)
-		b.WriteString(" REORGANIZE PARTITION ")
-		for i := first; i <= last; i++ {
-			if i > first {
-				b.WriteString(", ")
-			}
-			b.WriteString(model.Ident(curDefs[i].Name.String()))
-		}
-		b.WriteString(" INTO (")
-		for i := first; i <= last; i++ {
-			if i > first {
-				b.WriteString(",\n  ")
-			} else {
-				b.WriteString("\n  ")
-			}
-			b.WriteString(parser.FormatPartitionDefinition(desDefs[i]))
-		}
-		b.WriteString("\n);")
-		return []string{b.String()}, nil, nil
+		return stmts, nil, nil
 	}
 
 	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
@@ -429,6 +417,30 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 // `partitionDefEqual` already said the full definition differs.
 // Used by the RANGE boundary cascade decision: skip the cascade
 // when the last changed slot's boundary didn't move.
+func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int) string {
+	var b strings.Builder
+	b.WriteString("ALTER TABLE ")
+	b.WriteString(fqtn)
+	b.WriteString(" REORGANIZE PARTITION ")
+	for i := first; i <= last; i++ {
+		if i > first {
+			b.WriteString(", ")
+		}
+		b.WriteString(model.Ident(curDefs[i].Name.String()))
+	}
+	b.WriteString(" INTO (")
+	for i := first; i <= last; i++ {
+		if i > first {
+			b.WriteString(",\n  ")
+		} else {
+			b.WriteString("\n  ")
+		}
+		b.WriteString(parser.FormatPartitionDefinition(desDefs[i]))
+	}
+	b.WriteString("\n);")
+	return b.String()
+}
+
 func partitionValueRangeEqual(a, b *sqlparser.PartitionDefinition) bool {
 	var ar, br *sqlparser.PartitionValueRange
 	if a.Options != nil {

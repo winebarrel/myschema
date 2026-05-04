@@ -1,15 +1,15 @@
-# Pin MySQL's "consecutive partitions" rule for LIST REORGANIZE.
-# A natural intuition is that LIST slots are independent
-# (`VALUES IN (…)` is a closed set per slot, no shared boundary)
-# so a "p0 + p3 changed" diff could emit
-# `REORGANIZE PARTITION p0, p3 INTO (...)` and skip the matched
-# p1 / p2 in between. MySQL rejects that with Error 1519 "When
-# reorganizing a set of partitions they must be in consecutive
-# order" — the consecutive-ordering rule applies to LIST too,
-# not just RANGE. So the diff has to restate the matched
-# partitions inside the span unchanged. This fixture pins both
-# halves: the diff produces the contiguous span, and MySQL
-# accepts the resulting REORGANIZE end-to-end (verify_no_drift).
+# Disjoint per-partition diffs become *one REORGANIZE per run*
+# of consecutive changed slots — not one giant REORGANIZE that
+# restates every matched partition in between. MySQL's Error
+# 1519 ("When reorganizing a set of partitions they must be in
+# consecutive order") only requires the partition_names list
+# *within a single REORGANIZE statement* to be consecutive; it
+# doesn't say anything about how many REORGANIZE statements you
+# can issue in sequence. So a "p0 + p3 changed" 4-partition
+# table emits two separate REORGANIZEs (each trivially
+# consecutive — one slot apiece), keeping the rewrite
+# proportional to the diff instead of dragging p1 / p2 through
+# a data-moving rewrite they don't need.
 init: |
   CREATE TABLE accts (
       id INT NOT NULL,
@@ -35,10 +35,10 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p0, p1, p2, p3 INTO (
-    partition p0 values in (1, 2, 9),
-    partition p1 values in (3, 4),
-    partition p2 values in (5, 6),
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p0 INTO (
+    partition p0 values in (1, 2, 9)
+  );
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p3 INTO (
     partition p3 values in (7, 8, 10)
   );
 
