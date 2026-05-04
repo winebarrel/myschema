@@ -22,15 +22,6 @@ Open items only. Done work is in `git log` / closed PRs.
       in another database is treated as a black box. Apply will fail
       if the referenced table doesn't already exist; plan can't help.
 
-## Medium — object coverage
-
-- [ ] **Partition diff generation beyond the supported shapes** —
-      split / merge / reorder REORGANIZE, strategy / expression
-      change, first-time `PARTITION BY`, `REMOVE PARTITIONING`.
-      What's already shipped, what still errors, and the
-      workarounds are all in PARTITIONING.md (`diff/partitions.go`
-      is where the supported cases live).
-
 ## Low — CLI ergonomics
 
 - [ ] `--enable` / `--disable` flag to scope a run to specific object
