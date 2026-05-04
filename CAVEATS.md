@@ -181,7 +181,7 @@ the full picture — what diffs are generated automatically (RANGE /
 LIST suffix add, subset drop, HASH/KEY count change, per-partition
 definition rewrite via REORGANIZE), what plan-time errors fire
 (LIST overlap / value discard / RANGE non-monotonic / unique-key
-cover gap), and what shapes still require a manual ALTER (split /
+coverage gap), and what shapes still require a manual ALTER (split /
 merge / reorder, strategy change, adding or removing partitioning
 entirely, SUBPARTITION).
 

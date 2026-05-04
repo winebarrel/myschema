@@ -338,7 +338,7 @@ the table under myschema's management.
 ## Workaround for the "two systems of record" problem
 
 When the diff errors out — split / merge / reorder REORGANIZE
-shapes, scheme / expression changes, adding or removing
+shapes, strategy / expression changes, adding or removing
 partitioning entirely, SUBPARTITION — run the appropriate ALTER by
 hand and update the desired SQL's `PARTITION BY` clause (or remove
 it) to match. The next `plan` will report no diff. Operations
