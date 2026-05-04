@@ -35,11 +35,12 @@ Open items only. Done work is in `git log` / closed PRs.
       rewrite of RANGE / LIST partitions (including the
       `RANGE COLUMNS` / `LIST COLUMNS` variants) via
       `REORGANIZE PARTITION` whenever both sides have the same
-      partition names in the same order (covers `VALUES …`
-      boundary tweaks — scalar and tuple — plus
-      COMMENT / MAX_ROWS / TABLESPACE / other per-partition
-      option changes that round-trip through vitess's
-      PartitionDefinition formatter). See CAVEATS.md
+      partition names in the same order — case-insensitively,
+      so `pAB` ≡ `PAB` and a stand-alone case-only rename
+      emits no DDL (covers `VALUES …` boundary tweaks —
+      scalar and tuple — plus COMMENT / MAX_ROWS / TABLESPACE
+      / other per-partition option changes that round-trip
+      through vitess's PartitionDefinition formatter). See CAVEATS.md
       "Partitioning". Still on the floor: split / merge /
       reorder REORGANIZE shapes (the diff layer can't infer
       the right boundaries from a name-only diff), strategy /

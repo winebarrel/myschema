@@ -160,22 +160,29 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//     tail / interior drops all generated as
 	//     `DROP PARTITION p1, p2, …`.
 	//   - drops AND adds both non-empty:
-	//     - if the two name lists match position-by-position,
-	//       every partition stays in the same slot and the diff
-	//       is necessarily an in-place rewrite of one or more
-	//       per-partition definitions — a `VALUES …` boundary
-	//       tweak, a COMMENT / MAX_ROWS / TABLESPACE change, or
-	//       any other per-partition option that round-trips
-	//       through vitess's PartitionDefinition formatter.
-	//       Generates one `REORGANIZE PARTITION old_i,
-	//       old_{i+1}, … INTO (PARTITION old_i …,
-	//       PARTITION old_{i+1} …, …)` *per run of consecutive
-	//       changed slots*, each row-preserving (REORGANIZE
-	//       redistributes rows into the new value boundaries
-	//       when those moved). The detailed algorithm — runs,
-	//       RANGE cascade, the no-op fallthroughs — lives in
-	//       the comment over the `partitionNameListEqual`
-	//       branch in `diffPartitions`.
+	//     - if the two name lists match position-by-position
+	//       (case-insensitively — `pAB` ≡ `PAB`), every partition
+	//       stays in the same slot and the diff is necessarily
+	//       an in-place rewrite of one or more per-partition
+	//       definitions — a `VALUES …` boundary tweak, a
+	//       COMMENT / MAX_ROWS / TABLESPACE change, or any other
+	//       per-partition option that round-trips through
+	//       vitess's PartitionDefinition formatter. Generates
+	//       `REORGANIZE PARTITION old_i, old_{i+1}, … INTO
+	//       (PARTITION p_i …, PARTITION p_{i+1} …, …)`. The
+	//       OLD-name list always uses the catalog name; the
+	//       INTO bodies are per-slot — desired-side definition
+	//       for changed slots (so a case-only-name+body diff
+	//       can carry the desired casing on INTO), catalog-side
+	//       definition for slots pulled in by the RANGE
+	//       boundary cascade (so a stand-alone case-only-name
+	//       no-op never leaks into the generated SQL). Row-
+	//       preserving (REORGANIZE redistributes rows into the
+	//       new value boundaries when those moved). The
+	//       detailed algorithm — RANGE per-run + cascade vs
+	//       LIST single-span, the case-only / LIST-permutation
+	//       no-op fallthroughs — lives in the comment over the
+	//       `partitionNameListEqual` branch in `diffPartitions`.
 	//     - any other shape (merge / split / interior insert /
 	//       reorder / "retention roll-forward") falls through to
 	//       error. Disjoint-name detection isn't enough to tell
@@ -459,26 +466,36 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 
 // formatReorganizeRun renders a single
 // `ALTER TABLE … REORGANIZE PARTITION old_first, …, old_last
-// INTO (PARTITION old_first …, …, PARTITION old_last …)` for
-// one run of consecutive partition slots in `[first, last]`.
-// The OLD-name list goes through `model.Ident` so reserved-word
-// or non-safe-identifier partition names get back-ticked; the
-// INTO bodies go through `parser.FormatPartitionDefinition`
-// which delegates name quoting to vitess's own formatter.
+// INTO (PARTITION p_first …, …, PARTITION p_last …)` for one
+// run of consecutive partition slots in `[first, last]`.
+// The OLD-name list (the partition_names before INTO) always
+// uses the catalog name and goes through `model.Ident` so
+// reserved-word or non-safe-identifier partition names get
+// back-ticked. The INTO bodies go through
+// `parser.FormatPartitionDefinition` which delegates name
+// quoting to vitess's own formatter.
 //
-// Per-slot, the INTO body uses `desDefs[i]` for slots that
-// actually changed and `curDefs[i]` for slots that
-// `partitionDefEqual` already considers equal but were pulled
-// into the run by the RANGE boundary cascade. The cascaded
-// slot's body is canonically the same on both sides — the
-// only thing that can differ is the partition *name* (case-
-// only rename, suppressed by the EqualFold in
-// partitionDefEqual). Restating the catalog's body for the
-// cascaded slot keeps the "case-only name diff emits no DDL"
-// rule honest at the cascaded slot too — without this the
-// formatter would leak the desired-side renamed casing into
-// the generated REORGANIZE even though MySQL would ignore the
-// rename.
+// The INTO body is picked per-slot:
+//   - For slots `partitionDefEqual` already considers equal —
+//     i.e. the slot pulled in by the RANGE boundary cascade —
+//     emit `curDefs[i]`. The cascaded slot's body is
+//     canonically the same on both sides; the only thing that
+//     can differ is the partition *name* (case-only rename,
+//     suppressed by the EqualFold in partitionDefEqual).
+//     Restating the catalog's body keeps the "case-only name
+//     diff emits no DDL" rule honest at the cascaded slot —
+//     without this the formatter would leak the desired-side
+//     renamed casing into the generated REORGANIZE even though
+//     MySQL would ignore the rename.
+//   - For slots that actually changed, emit `desDefs[i]`. The
+//     desired side is the source of truth for the new
+//     definition (boundary, options, AND name casing). The
+//     case-only-name+body mixed case is supported here: the
+//     OLD-name list still uses the catalog's casing on the
+//     DROP side, but the INTO carries the desired casing —
+//     MySQL accepts the case-mismatched INTO and keeps
+//     whatever case it had stored, so verify_no_drift confirms
+//     no perpetual rename loop.
 func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int) string {
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")

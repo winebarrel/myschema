@@ -165,11 +165,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   and per-partition definition rewrite of RANGE / LIST
   partitions (including the `RANGE COLUMNS` / `LIST COLUMNS`
   variants) via REORGANIZE PARTITION when both sides have the
-  same partition names in the same order (covers `VALUES …`
-  boundary tweaks — scalar and tuple — plus COMMENT / MAX_ROWS
-  / TABLESPACE / other per-partition option changes that
-  round-trip through vitess's PartitionDefinition formatter) —
-  see CAVEATS.md "Partitioning" for the full scope
+  same partition names in the same order — case-insensitively,
+  so `pAB` ≡ `PAB` and a stand-alone case-only rename emits no
+  DDL (covers `VALUES …` boundary tweaks — scalar and tuple
+  — plus COMMENT / MAX_ROWS / TABLESPACE / other per-partition
+  option changes that round-trip through vitess's
+  PartitionDefinition formatter) — see CAVEATS.md
+  "Partitioning" for the full scope
 - `--allow-drop` policy with `all,table,view,column,constraint,foreign_key,index,partition`
 - `--include` / `--exclude` glob filtering on table names
 - `--alter-algorithm` / `--alter-lock` flags (and matching
