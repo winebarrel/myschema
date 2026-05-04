@@ -36,6 +36,27 @@ func TestIdent(t *testing.T) {
 	}
 }
 
+func TestQuoteIdent(t *testing.T) {
+	// Most of quoteIdent's behaviour is exercised through Ident, but Ident
+	// skips empty parts before calling quoteIdent — so the empty-name
+	// branch (`name == ""` returns the empty backtick pair) is only
+	// reachable directly. Pin it here.
+	tests := []struct {
+		name, in, want string
+	}{
+		{"empty name returns empty backticks", "", "``"},
+		{"safe identifier passes through", "users", "users"},
+		{"unsafe character quoted", "user-name", "`user-name`"},
+		{"reserved word quoted (case-insensitive)", "Select", "`Select`"},
+		{"backtick in name escaped", "a`b", "`a``b`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, model.QuoteIdent(tt.in))
+		})
+	}
+}
+
 func TestQuoteLiteral(t *testing.T) {
 	tests := []struct {
 		in, want string

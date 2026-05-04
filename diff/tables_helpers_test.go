@@ -9,14 +9,12 @@ import (
 	"github.com/winebarrel/myschema/model"
 )
 
-func sptr(s string) *string { return &s }
-
 func TestPtrEq(t *testing.T) {
 	assert.True(t, diff.PtrEq(nil, nil), "both nil")
-	assert.False(t, diff.PtrEq(sptr("x"), nil), "left set, right nil")
-	assert.False(t, diff.PtrEq(nil, sptr("x")), "left nil, right set")
-	assert.True(t, diff.PtrEq(sptr("x"), sptr("x")), "both set, equal")
-	assert.False(t, diff.PtrEq(sptr("x"), sptr("y")), "both set, different")
+	assert.False(t, diff.PtrEq(new("x"), nil), "left set, right nil")
+	assert.False(t, diff.PtrEq(nil, new("x")), "left nil, right set")
+	assert.True(t, diff.PtrEq(new("x"), new("x")), "both set, equal")
+	assert.False(t, diff.PtrEq(new("x"), new("y")), "both set, different")
 }
 
 func TestSliceEq(t *testing.T) {
@@ -79,19 +77,19 @@ func TestColumnEqual(t *testing.T) {
 	})
 	t.Run("default differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.Default = sptr("0")
-		b.Default = sptr("1")
+		a.Default = new("0")
+		b.Default = new("1")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("default canonicalised match", func(t *testing.T) {
 		a, b := base(), base()
-		a.Default = sptr("CURRENT_TIMESTAMP")
-		b.Default = sptr("current_timestamp()")
+		a.Default = new("CURRENT_TIMESTAMP")
+		b.Default = new("current_timestamp()")
 		assert.True(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("on-update differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.OnUpdate = sptr("CURRENT_TIMESTAMP")
+		a.OnUpdate = new("CURRENT_TIMESTAMP")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("auto-increment differs", func(t *testing.T) {
@@ -101,30 +99,30 @@ func TestColumnEqual(t *testing.T) {
 	})
 	t.Run("generated expr differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.Generated = sptr("a + 1")
-		b.Generated = sptr("a + 2")
+		a.Generated = new("a + 1")
+		b.Generated = new("a + 2")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("stored differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.Generated = sptr("a + 1")
-		b.Generated = sptr("a + 1")
+		a.Generated = new("a + 1")
+		b.Generated = new("a + 1")
 		b.Stored = true
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("comment differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.Comment = sptr("hi")
+		a.Comment = new("hi")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("character set differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.CharacterSet = sptr("utf8mb4")
+		a.CharacterSet = new("utf8mb4")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 	t.Run("collation differs", func(t *testing.T) {
 		a, b := base(), base()
-		a.Collation = sptr("utf8mb4_bin")
+		a.Collation = new("utf8mb4_bin")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
 }

@@ -33,12 +33,10 @@ func TestEqualExpr(t *testing.T) {
 }
 
 func TestEqualExprPtr(t *testing.T) {
-	s := func(v string) *string { return &v }
-
 	assert.True(t, equalExprPtr(nil, nil), "both nil")
-	assert.False(t, equalExprPtr(s("x"), nil), "one nil")
-	assert.False(t, equalExprPtr(nil, s("x")), "other nil")
-	assert.True(t, equalExprPtr(s("CURRENT_TIMESTAMP"), s("current_timestamp()")), "canonicalised match")
+	assert.False(t, equalExprPtr(new("x"), nil), "one nil")
+	assert.False(t, equalExprPtr(nil, new("x")), "other nil")
+	assert.True(t, equalExprPtr(new("CURRENT_TIMESTAMP"), new("current_timestamp()")), "canonicalised match")
 }
 
 func TestEqualCheckDef(t *testing.T) {

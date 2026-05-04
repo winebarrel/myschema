@@ -8,8 +8,6 @@ import (
 	"github.com/winebarrel/myschema/catalog"
 )
 
-func sptr(s string) *string { return &s }
-
 func TestNormalizeRefOpt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -67,17 +65,17 @@ func TestColumnTypeAllowsEmptyStringDefault(t *testing.T) {
 
 func TestNullIfMatchesTableDefault(t *testing.T) {
 	t.Run("col nil passes through", func(t *testing.T) {
-		assert.Nil(t, catalog.NullIfMatchesTableDefault(nil, sptr("utf8mb4")))
+		assert.Nil(t, catalog.NullIfMatchesTableDefault(nil, new("utf8mb4")))
 	})
 	t.Run("table default nil passes col through", func(t *testing.T) {
-		got := catalog.NullIfMatchesTableDefault(sptr("utf8mb4"), nil)
+		got := catalog.NullIfMatchesTableDefault(new("utf8mb4"), nil)
 		assert.Equal(t, "utf8mb4", *got)
 	})
 	t.Run("matching collapses to nil", func(t *testing.T) {
-		assert.Nil(t, catalog.NullIfMatchesTableDefault(sptr("utf8mb4"), sptr("utf8mb4")))
+		assert.Nil(t, catalog.NullIfMatchesTableDefault(new("utf8mb4"), new("utf8mb4")))
 	})
 	t.Run("differing passes col through", func(t *testing.T) {
-		got := catalog.NullIfMatchesTableDefault(sptr("latin1"), sptr("utf8mb4"))
+		got := catalog.NullIfMatchesTableDefault(new("latin1"), new("utf8mb4"))
 		assert.Equal(t, "latin1", *got)
 	})
 }
