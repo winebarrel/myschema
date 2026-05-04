@@ -1,0 +1,27 @@
+# `KEY (col DESC)` — descending index. AGENTS.md "In scope"
+# lists DESC index columns as covered by the catalog reader,
+# so this fixture pins the end-to-end shape: ADD INDEX with
+# DESC modifier on the column, MySQL accepts it (8.0+ honours
+# DESC physically; 5.7- silently treated as ASC), and
+# verify_no_drift confirms the next plan reports no further
+# changes (i.e. the catalog round-trips the DESC modifier
+# back through `information_schema.STATISTICS`).
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      score INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      score INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_score_desc (score DESC)
+  );
+
+applied: |
+  CREATE INDEX idx_score_desc ON myschema_test.t (score DESC);
+
+verify_no_drift: true

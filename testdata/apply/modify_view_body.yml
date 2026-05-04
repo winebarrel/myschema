@@ -1,0 +1,32 @@
+# Modify a view's SELECT body. AGENTS.md "In scope" lists
+# `CREATE OR REPLACE VIEW` on apply, but the existing
+# `create_view.yml` only pins fresh-create — the modify path
+# (catalog has the view, desired has a different SELECT)
+# isn't covered. Pin that the diff layer recognises the body
+# change and emits CREATE OR REPLACE VIEW so the apply
+# converges in one round (and verify_no_drift confirms the
+# next plan is clean).
+init: |
+  CREATE TABLE users (
+      id INT NOT NULL,
+      name VARCHAR(50) NOT NULL,
+      active TINYINT(1) NOT NULL DEFAULT 1,
+      PRIMARY KEY (id)
+  );
+
+  CREATE VIEW v_users AS SELECT id, name FROM users;
+
+desired: |
+  CREATE TABLE users (
+      id INT NOT NULL,
+      name VARCHAR(50) NOT NULL,
+      active TINYINT(1) NOT NULL DEFAULT 1,
+      PRIMARY KEY (id)
+  );
+
+  CREATE VIEW v_users AS SELECT id, name FROM users WHERE active = 1;
+
+applied: |
+  CREATE OR REPLACE VIEW myschema_test.v_users AS select id, `name` from users where active = 1;
+
+verify_no_drift: true

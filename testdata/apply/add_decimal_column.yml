@@ -1,0 +1,23 @@
+# DECIMAL(M, D) column with precision and scale. Catalog
+# returns it as `decimal(10,2)` in
+# `information_schema.COLUMNS.COLUMN_TYPE`; the parser AST
+# carries M and D as separate fields. Pin the round-trip so
+# a regression in DECIMAL formatter (e.g. forgetting the
+# scale, or quoting the precision) surfaces here.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      price DECIMAL(10, 2) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN price decimal(10,2) NOT NULL AFTER id;
+
+verify_no_drift: true

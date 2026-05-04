@@ -1,0 +1,26 @@
+# INVISIBLE index — MySQL 8.0+ `INVISIBLE` keyword on
+# secondary indexes makes them invisible to the optimizer
+# while still being maintained on writes. AGENTS.md "In
+# scope" calls out INVISIBLE explicitly. Pin the end-to-end
+# round-trip so a regression in either the parser side
+# (vitess restore) or the catalog side
+# (`information_schema.STATISTICS.IS_VISIBLE`) surfaces here.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      score INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      score INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_score_invisible (score) INVISIBLE
+  );
+
+applied: |
+  CREATE INDEX idx_score_invisible ON myschema_test.t (score) INVISIBLE;
+
+verify_no_drift: true

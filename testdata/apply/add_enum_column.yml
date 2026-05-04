@@ -1,0 +1,25 @@
+# ENUM column add. The element-list diff itself is a known
+# silent-fidelity gap (TODO.md ENUM/SET item) — adding /
+# removing / reordering elements compares the type as one
+# string. But the basic shape (CREATE / ADD an ENUM column,
+# round-trip the values) should still work end-to-end. Pin
+# that shape so a regression in the ENUM type formatter or
+# catalog reader (e.g. `'a','b','c'` value-list quoting)
+# surfaces immediately.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      status ENUM('draft','published','archived') NOT NULL DEFAULT 'draft',
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN status enum('draft','published','archived') NOT NULL DEFAULT 'draft' AFTER id;
+
+verify_no_drift: true

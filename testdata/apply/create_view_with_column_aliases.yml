@@ -1,0 +1,26 @@
+# `CREATE VIEW v_users (uid, uname) AS SELECT id, name FROM
+# users` — view with an explicit column-alias list. AGENTS.md
+# "In scope" lists this variant; pin the round-trip so the
+# catalog reader's column extraction (per-column rows in
+# `information_schema.COLUMNS`) and the parser side's
+# alias-list preservation stay in sync.
+init: |
+  CREATE TABLE users (
+      id INT NOT NULL,
+      name VARCHAR(50) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id INT NOT NULL,
+      name VARCHAR(50) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE VIEW v_users (uid, uname) AS SELECT id, name FROM users;
+
+applied: |
+  CREATE OR REPLACE VIEW myschema_test.v_users (uid, uname) AS select id, `name` from users;
+
+verify_no_drift: true

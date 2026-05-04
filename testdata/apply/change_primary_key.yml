@@ -1,0 +1,26 @@
+# Replace the PRIMARY KEY (single-column → multi-column).
+# AGENTS.md "In scope" lists ADD / DROP CONSTRAINT (PK /
+# CHECK), but the modify-PK shape (DROP + ADD in the right
+# order) wasn't pinned. Pin it so a regression in the diff
+# layer's PK ordering (PK has to drop before re-adding,
+# never overlap, can't combine in a single statement when
+# the column set changes) surfaces here.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      PRIMARY KEY (tenant_id, id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t DROP PRIMARY KEY;
+  ALTER TABLE myschema_test.t ADD PRIMARY KEY (tenant_id, id);
+
+verify_no_drift: true

@@ -1,0 +1,28 @@
+# Multi-column UNIQUE index. Catalog rebuilds the column
+# list from `information_schema.STATISTICS` ordered by
+# `SEQ_IN_INDEX`. Wrong column ordering would surface as a
+# spurious DROP+CREATE on every plan. Pin the round-trip
+# end-to-end so a regression in either side surfaces here
+# (the simple "single-column UNIQUE" path is implicitly
+# covered by `create_table.yml` already).
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      slug VARCHAR(50) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      slug VARCHAR(50) NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_tenant_slug (tenant_id, slug)
+  );
+
+applied: |
+  CREATE UNIQUE INDEX uniq_tenant_slug ON myschema_test.t (tenant_id, slug);
+
+verify_no_drift: true

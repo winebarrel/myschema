@@ -1,0 +1,23 @@
+# Column with COMMENT clause. Catalog stores the comment in
+# `information_schema.COLUMNS.COLUMN_COMMENT`; the parser
+# round-trips the COMMENT keyword. AGENTS.md "In scope" lists
+# COMMENT explicitly. Pin the round-trip so a regression in
+# COMMENT escaping (e.g. quotes / backslashes inside the
+# comment) on either side surfaces here for the simple case.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      kind VARCHAR(20) NOT NULL DEFAULT 'misc' COMMENT 'business kind label',
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN kind varchar(20) NOT NULL DEFAULT 'misc' COMMENT 'business kind label' AFTER id;
+
+verify_no_drift: true
