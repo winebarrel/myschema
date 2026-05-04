@@ -59,6 +59,29 @@ func TestTableSQLWithCheckConstraint(t *testing.T) {
 	sql := tbl.SQL()
 	assert.Contains(t, sql, "CONSTRAINT chk_price CHECK (price > 0)")
 	assert.NotContains(t, sql, "CHECK CHECK", "regression: don't double the CHECK keyword")
+	assert.NotContains(t, sql, "NOT ENFORCED", "Enforced=true must not emit the suffix")
+}
+
+// TestTableSQLWithNotEnforcedCheckConstraint pins the inline-emit
+// path for `Enforced: false`. Pair with the catalog reader that
+// now feeds `tc.ENFORCED` into Constraint.Enforced — without this
+// suffix the round-trip would re-fire DROP CHECK + ADD on every
+// plan.
+func TestTableSQLWithNotEnforcedCheckConstraint(t *testing.T) {
+	tbl := emptyTable("shop", "products")
+	tbl.Columns.Set("id", &model.Column{Name: "id", TypeName: "bigint", NotNull: true})
+	tbl.Columns.Set("price", &model.Column{Name: "price", TypeName: "int"})
+	tbl.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(id)", Columns: []string{"id"},
+	})
+	tbl.Constraints.Set("chk_price", &model.Constraint{
+		Name: "chk_price", Type: model.CheckConstraint,
+		Definition: "CHECK (price > 0)", Enforced: false,
+	})
+
+	sql := tbl.SQL()
+	assert.Contains(t, sql, "CONSTRAINT chk_price CHECK (price > 0) NOT ENFORCED")
 }
 
 func TestTableSQLWithEngineCharsetCollationComment(t *testing.T) {

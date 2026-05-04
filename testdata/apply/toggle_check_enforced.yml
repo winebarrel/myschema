@@ -1,0 +1,26 @@
+# Regression: changing only the ENFORCED flag (NOT ENFORCED →
+# enforced, or vice versa) must fire DROP CHECK + ADD CONSTRAINT
+# with the new flag, then converge. Without the catalog reader
+# reading tc.ENFORCED, the desired-side flip would never compare
+# unequal to the hard-coded Enforced=true.
+init: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED
+  );
+
+desired: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0)
+  );
+
+applied: |
+  ALTER TABLE products DROP CHECK chk_price;
+  ALTER TABLE products ADD CONSTRAINT chk_price CHECK (price >= 0);
+
+verify_no_drift: true

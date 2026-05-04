@@ -384,9 +384,13 @@ func (c *Catalog) loadCheckConstraints(ctx context.Context, t *model.Table) erro
 	// information_schema.CHECK_CONSTRAINTS exists in MySQL 8.0.16+; missing on
 	// older servers. Treat a missing table as "no checks" so we keep working.
 	// CHECK_CONSTRAINTS has no TABLE_NAME column, so JOIN TABLE_CONSTRAINTS
-	// (CONSTRAINT_TYPE = 'CHECK') to scope by table.
+	// (CONSTRAINT_TYPE = 'CHECK') to scope by table — and to also pick up
+	// `tc.ENFORCED` ("YES" / "NO") so a desired-side `CHECK (...) NOT
+	// ENFORCED` round-trips cleanly. Without ENFORCED in the read, the
+	// catalog would always report Enforced=true and any NOT ENFORCED
+	// constraint would re-fire DROP CHECK + ADD CONSTRAINT on every plan.
 	q := `
-SELECT cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+SELECT cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE, tc.ENFORCED
 FROM   information_schema.CHECK_CONSTRAINTS cc
 JOIN   information_schema.TABLE_CONSTRAINTS tc
        ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
@@ -407,15 +411,15 @@ WHERE  tc.TABLE_SCHEMA    = ?
 	}
 	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
-		var name, clause string
-		if err := rows.Scan(&name, &clause); err != nil {
+		var name, clause, enforced string
+		if err := rows.Scan(&name, &clause, &enforced); err != nil {
 			return fmt.Errorf("catalog: scan check constraints for %s: %w", t.FQTN(), err)
 		}
 		t.Constraints.Set(name, &model.Constraint{
 			Name:       name,
 			Type:       model.CheckConstraint,
 			Definition: "CHECK (" + clause + ")",
-			Enforced:   true,
+			Enforced:   enforced == "YES",
 		})
 	}
 	return rows.Err()

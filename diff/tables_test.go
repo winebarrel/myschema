@@ -679,9 +679,19 @@ func TestAddConstraintSQL_PrimaryKey(t *testing.T) {
 }
 
 func TestAddConstraintSQL_Check(t *testing.T) {
-	c := &model.Constraint{Type: model.CheckConstraint, Name: "chk_pos", Definition: "CHECK (id > 0)"}
-	got := diff.AddConstraintSQL("t", c)
-	assert.Equal(t, "ALTER TABLE t ADD CONSTRAINT chk_pos CHECK (id > 0);", got)
+	t.Run("enforced", func(t *testing.T) {
+		c := &model.Constraint{Type: model.CheckConstraint, Name: "chk_pos", Definition: "CHECK (id > 0)", Enforced: true}
+		got := diff.AddConstraintSQL("t", c)
+		assert.Equal(t, "ALTER TABLE t ADD CONSTRAINT chk_pos CHECK (id > 0);", got)
+	})
+	t.Run("not enforced", func(t *testing.T) {
+		// Enforced=false appends the NOT ENFORCED suffix; pins the
+		// emitter side of the round-trip with catalog.loadCheckConstraints
+		// reading tc.ENFORCED.
+		c := &model.Constraint{Type: model.CheckConstraint, Name: "chk_pos", Definition: "CHECK (id > 0)", Enforced: false}
+		got := diff.AddConstraintSQL("t", c)
+		assert.Equal(t, "ALTER TABLE t ADD CONSTRAINT chk_pos CHECK (id > 0) NOT ENFORCED;", got)
+	})
 }
 
 func TestDropConstraintSQL_PrimaryKey(t *testing.T) {

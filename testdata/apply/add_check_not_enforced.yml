@@ -1,0 +1,27 @@
+# Regression: a desired-side `CHECK (...) NOT ENFORCED` must
+# round-trip cleanly. Pre-fix, catalog.loadCheckConstraints
+# hard-coded `Enforced: true` regardless of the actual
+# `information_schema.TABLE_CONSTRAINTS.ENFORCED` column, so the
+# next plan would always see desired Enforced=false vs catalog
+# Enforced=true and re-emit DROP CHECK + ADD CONSTRAINT on every
+# run (perpetual drift loop). With the catalog reader now reading
+# `tc.ENFORCED`, verify_no_drift confirms one-shot convergence.
+init: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED
+  );
+
+applied: |
+  ALTER TABLE products ADD CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED;
+
+verify_no_drift: true

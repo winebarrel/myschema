@@ -896,6 +896,7 @@ func TestDiffRenameConstraintMissingSourceErrors(t *testing.T) {
 	chk := &model.Constraint{
 		Name: "chk_age", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 		RenameFrom: &from,
 	}
 	want.Constraints.Set("chk_age", chk)
@@ -959,6 +960,7 @@ func TestDiffRenameConstraintDuplicateSourceErrors(t *testing.T) {
 	cur.Constraints.Set("chk_old", &model.Constraint{
 		Name: "chk_old", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 	})
 	current.Set("shop.users", cur)
 
@@ -970,12 +972,14 @@ func TestDiffRenameConstraintDuplicateSourceErrors(t *testing.T) {
 	a := &model.Constraint{
 		Name: "chk_age_a", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 		RenameFrom: &from,
 	}
 	want.Constraints.Set("chk_age_a", a)
 	b := &model.Constraint{
 		Name: "chk_age_b", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 		RenameFrom: &from,
 	}
 	want.Constraints.Set("chk_age_b", b)
@@ -1051,6 +1055,7 @@ func TestDiffRenameConstraintSourceAlsoDeclaredErrors(t *testing.T) {
 	cur.Constraints.Set("chk_old", &model.Constraint{
 		Name: "chk_old", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 	})
 	current.Set("shop.users", cur)
 
@@ -1062,10 +1067,12 @@ func TestDiffRenameConstraintSourceAlsoDeclaredErrors(t *testing.T) {
 	want.Constraints.Set("chk_old", &model.Constraint{
 		Name: "chk_old", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 	}) // source still declared in desired
 	want.Constraints.Set("chk_new", &model.Constraint{
 		Name: "chk_new", Type: model.CheckConstraint,
 		Definition: "CHECK (age >= 0)",
+		Enforced:   true,
 		RenameFrom: &from,
 	})
 	desired.Set("shop.users", want)

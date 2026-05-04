@@ -1,0 +1,25 @@
+# Symmetric to toggle_check_enforced.yml: ENFORCED → NOT ENFORCED.
+# Pins both directions of the Enforced flip — without the catalog
+# read of tc.ENFORCED *and* the addConstraintSQL suffix emission,
+# this case would also drift forever.
+init: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0)
+  );
+
+desired: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED
+  );
+
+applied: |
+  ALTER TABLE products DROP CHECK chk_price;
+  ALTER TABLE products ADD CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED;
+
+verify_no_drift: true

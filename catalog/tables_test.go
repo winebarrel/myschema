@@ -234,7 +234,34 @@ CREATE TABLE products (
 	assert.Equal(t, model.CheckConstraint, c.Type)
 	assert.Contains(t, c.Definition, "CHECK")
 	assert.Contains(t, c.Definition, "price")
-	assert.True(t, c.Enforced)
+	assert.True(t, c.Enforced, "default CHECK is enforced")
+}
+
+// TestCheckConstraintNotEnforcedRoundTrip pins loadCheckConstraints
+// reading `tc.ENFORCED` from information_schema.TABLE_CONSTRAINTS.
+// Pre-fix the field was hard-coded `true`, causing every NOT
+// ENFORCED check to drift on every plan. Catalog must report
+// Enforced=false when MySQL stored ENFORCED='NO'.
+func TestCheckConstraintNotEnforcedRoundTrip(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE products (
+    id BIGINT NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_price CHECK (price > 0) NOT ENFORCED
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	products, ok := tables.GetOk("myschema_test.products")
+	require.True(t, ok)
+
+	c, ok := products.Constraints.GetOk("chk_price")
+	require.True(t, ok)
+	assert.False(t, c.Enforced, "NOT ENFORCED must round-trip from tc.ENFORCED='NO'")
 }
 
 // TestGeneratedColumnRoundTrip checks STORED and VIRTUAL columns round

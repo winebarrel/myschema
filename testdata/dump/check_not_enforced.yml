@@ -1,0 +1,21 @@
+# Dump must emit `NOT ENFORCED` so dump → re-apply preserves the
+# Enforced=false flag. Pre-fix, catalog.loadCheckConstraints
+# hard-coded Enforced=true and (*Table).SQL didn't append the
+# suffix anyway, so a NOT ENFORCED constraint silently became
+# enforced on the first dump → apply round trip.
+init: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED
+  );
+
+dump: |
+  -- products
+  CREATE TABLE products (
+      id int NOT NULL,
+      price int NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK ((`price` >= 0)) NOT ENFORCED
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
