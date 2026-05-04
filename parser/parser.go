@@ -567,7 +567,14 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 			// vitess parks the unquoted comment value in
 			// opt.Value.Val (a *Literal); opt.String holds
 			// `using`'s payload but is empty here.
-			if opt.Value != nil {
+			//
+			// An explicit `COMMENT ''` is folded to nil to match
+			// the catalog reader's normalisation of empty
+			// information_schema.STATISTICS.INDEX_COMMENT — without
+			// the fold, parser-side `&""` would never compare equal
+			// to catalog-side `nil` and `indexEqual` would fire
+			// DROP+CREATE on every plan.
+			if opt.Value != nil && opt.Value.Val != "" {
 				v := opt.Value.Val
 				comment = &v
 			}

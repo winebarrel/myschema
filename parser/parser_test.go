@@ -270,10 +270,33 @@ CREATE TABLE t (
 	}
 }
 
+// TestParseIndexEmptyCommentFoldedToNil pins the corner case: an
+// index declared with an *explicit* `COMMENT ”` must collapse to
+// `Comment=nil` on the parser side, matching the catalog reader's
+// normalisation of empty INDEX_COMMENT. Without this fold, a
+// desired-side `KEY idx (col) COMMENT ”` would compare unequal to
+// the catalog-side nil under indexEqual's ptrEq and `plan` would
+// re-emit DROP+CREATE on every run.
+func TestParseIndexEmptyCommentFoldedToNil(t *testing.T) {
+	r, err := parser.ParseSQL(`
+CREATE TABLE t (
+    id INT NOT NULL,
+    a  INT NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_a (a) COMMENT ''
+);
+`, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	idx, _ := tbl.Indexes.GetOk("idx_a")
+	assert.Nil(t, idx.Comment, `explicit COMMENT '' must fold to nil`)
+}
+
 // TestParseIndexNoComment pins the negative case: an index with
 // no COMMENT clause must produce Comment=nil (matches the catalog
-// reader's "empty TABLE_COMMENT → nil" normalisation, so steady
-// state stays equal under indexEqual's ptrEq).
+// reader's "empty information_schema.STATISTICS.INDEX_COMMENT → nil"
+// normalisation, so steady state stays equal under indexEqual's
+// ptrEq).
 func TestParseIndexNoComment(t *testing.T) {
 	r, err := parser.ParseSQL(`
 CREATE TABLE t (
