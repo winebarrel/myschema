@@ -207,7 +207,7 @@ assigning it to another partition, MySQL silently DROPs any rows
 for that value on REORGANIZE — no apply-time error, no warning,
 just data gone (verified against MySQL 8.0). Treated as
 destructive and gated behind `--allow-drop=partition` (the same
-flag DROP PARTITION / COALESCE PARTITION already uses for
+flag that already gates DROP PARTITION / COALESCE PARTITION for
 partition-level data destruction).
 
 The error reads:
