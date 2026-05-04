@@ -26,15 +26,18 @@ Catalog is a strict prefix of desired →
 Typical use: roll the next month's / year's partition out ahead of
 writes.
 
-**Caveat.** If the live table already ends in a catch-all (RANGE
-`VALUES LESS THAN MAXVALUE` or LIST `VALUES IN (DEFAULT)`),
-inserting a new "real" partition in front of that catch-all is a
-mid-list change, not a suffix add — the new partition would land
-before the existing tail, so the name lists no longer line up
-position-by-position and the diff fails with the
-`split / merge / reorder` error (see "Split / merge / reorder"
-below). Drop the catch-all first (or run REORGANIZE PARTITION by
-hand), then add the new partition.
+**Catch-all caveat.** If the live table already ends in a
+RANGE `VALUES LESS THAN MAXVALUE` catch-all, inserting a new
+"real" partition in front of it is technically a mid-list
+change (a naive `ADD PARTITION` would be rejected by MySQL
+with Error 1481 "MAXVALUE can only be used in last partition
+definition"). myschema auto-detects this exact shape and
+rewrites it as `REORGANIZE PARTITION pmax INTO (extras…,
+pmax)` — see "Catch-all interior insert (RANGE)" below for
+the trigger conditions and the limits. The LIST equivalent
+(`VALUES IN (DEFAULT)`) isn't auto-handled today; for that
+shape, drop the catch-all first or run REORGANIZE PARTITION
+by hand, then re-run plan.
 
 ### Subset drop — RANGE / LIST
 
@@ -175,6 +178,57 @@ hints between the table name and the keyword:
 Column / index / constraint operations keep the trailing-comma
 format MySQL accepts there.
 
+### Catch-all interior insert (RANGE)
+
+Catalog ends in `VALUES LESS THAN MAXVALUE`; desired slots one
+or more new partitions strictly between the catalog prefix and
+the catch-all (catch-all stays in place with the same body,
+prefix unchanged). myschema auto-emits a single
+`ALTER TABLE … REORGANIZE PARTITION pmax INTO (extras…, pmax)`
+that slices the catch-all's range without changing total
+coverage, so MySQL's "ADD PARTITION can only add at the tail
+and MAXVALUE must be the last partition" constraint
+(Error 1481) doesn't surface and the operator doesn't have to
+drop and rebuild by hand. Row-preserving — rows in the old
+catch-all's range whose values fall into the new partitions'
+boundaries are redistributed; rows past the last extra stay in
+the catch-all.
+
+The trigger is intentionally narrow so the auto-emit only
+fires when the shape is unambiguous:
+
+- scalar RANGE only — `RANGE COLUMNS` is excluded (the
+  monotonicity check punts on tuple boundaries, and vitess
+  can't even round-trip `VALUES LESS THAN (MAXVALUE,
+  MAXVALUE)` today, so the catalog re-parse fails before
+  this branch is reached);
+- catch-all body byte-equal between catalog and desired
+  (case-only name folding via `partitionDefEqual`'s
+  EqualFold is allowed; option changes on the catch-all
+  itself disqualify);
+- catalog prefix `[0..n-2]` byte-equal to desired prefix —
+  no compound diffs (body changes on prefix partitions
+  disqualify so the operator splits the change rather than
+  bundling it);
+- extras' names don't reuse any name already present in
+  catalog (rules out reorder / dup-name desired SQL — vitess
+  accepts duplicate partition names in CREATE TABLE so this
+  guard is real).
+
+Anything outside the trigger envelope falls through to the
+existing "Split / merge / reorder" error so the operator
+runs the right ALTER by hand. The new partitions' boundary
+ordering (strictly increasing, MAXVALUE only at the tail) is
+already enforced by `validateDesiredRangeMonotonic` upstream
+of this branch — non-monotonic inserts surface there with
+the boundary-ordering error, not as a misfire of this
+auto-emit.
+
+The LIST equivalent (`VALUES IN (DEFAULT)` catch-all) isn't
+covered today; it would need a parallel detector keyed on
+`InType` instead of `LessThanType` plus a different
+boundary-coverage proof.
+
 ## Plan-time validation errors
 
 These checks reject invalid desired schemas at plan time so the
@@ -283,12 +337,26 @@ the next plan reconverge.
 ### Split / merge / reorder
 
 Any other "drops AND adds both non-empty" shape where the name
-lists don't line up position-by-position. Covers:
+lists don't line up position-by-position AND the catch-all
+auto-detect (above) doesn't apply. Covers:
 
 - split / merge shapes whose add and drop names are disjoint
   (e.g. `[p0<10,p1<20,p2<30] → [p0<10,q1<40]`, where `q1`
   semantically inherits the rows from `p1` and `p2`),
-- interior inserts in front of a catch-all,
+- interior inserts where the catalog has no MAXVALUE catch-all
+  (the auto-detect requires one — without it the right SQL
+  would be `REORGANIZE p_neighbour INTO (NEW, p_neighbour)`,
+  which the diff layer can't infer from a name-only diff),
+- interior inserts where the new partition isn't directly
+  before the catch-all (the auto-detect targets only the
+  pmax-driven REORGANIZE shape; mid-prefix inserts need a
+  different REORGANIZE),
+- LIST `VALUES IN (DEFAULT)` interior inserts (the auto-
+  detect is RANGE-only),
+- compound diffs that combine a catch-all interior insert
+  with a body change on the catch-all itself or on a prefix
+  partition (the auto-detect's strict shape check
+  disqualifies these so the operator splits the change),
 - partition reorders,
 - the "retention roll-forward" pair (`[p2020,p2021] →
   [p2021,p2022]` — drops `p2020`, adds `p2022`, names disjoint).

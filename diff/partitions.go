@@ -60,11 +60,18 @@ import (
 //     p1, p2, … INTO (…)`. Covers `VALUES …` boundary tweaks
 //     plus COMMENT / MAX_ROWS / TABLESPACE / other per-partition
 //     options that round-trip through vitess's
-//     PartitionDefinition formatter. Anything else (split /
-//     merge / reorder / interior insert — i.e. the name lists
-//     don't line up) → error so the user falls back to a hand-
-//     written REORGANIZE with explicit boundaries (or a DROP+ADD
-//     pair if discarding data is intended).
+//     PartitionDefinition formatter. RANGE catch-all interior
+//     insert (catalog ends in `VALUES LESS THAN MAXVALUE` and
+//     desired slots new partitions strictly before the catch-
+//     all with both prefix and catch-all unchanged) →
+//     `REORGANIZE pmax INTO (extras…, pmax)` (so MySQL
+//     Error 1481 doesn't surface from a naive ADD). Anything
+//     else (split / merge / reorder, mid-prefix interior
+//     insert, retention roll-forward — i.e. the name lists
+//     don't line up AND the catch-all auto-detect doesn't
+//     apply) → error so the user falls back to a hand-written
+//     REORGANIZE with explicit boundaries (or a DROP+ADD pair
+//     if discarding data is intended).
 //
 // PARTITIONING.md documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {
@@ -207,14 +214,23 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//       LIST single-span, the case-only / LIST-permutation
 	//       no-op fallthroughs — lives in the comment over the
 	//       `partitionNameListEqual` branch in `diffPartitions`.
-	//     - any other shape (merge / split / interior insert /
-	//       reorder / "retention roll-forward") falls through to
-	//       error. Disjoint-name detection isn't enough to tell
-	//       merge / split / replace apart from a pure retention
-	//       discard, and split-point inference is out of scope
-	//       for v1, so the user runs the right ALTER (REORGANIZE
-	//       with explicit boundaries, or DROP+ADD if discarding
-	//       data is intended) by hand.
+	//     - the RANGE catch-all interior insert shape (catalog
+	//       ends in MAXVALUE, desired slots new partitions
+	//       strictly before the catch-all, prefix and catch-
+	//       all unchanged) is recognised by
+	//       `detectCatchAllInteriorInsert` further down and
+	//       routed to a single `REORGANIZE pmax INTO (extras…,
+	//       pmax)` so MySQL Error 1481 doesn't surface from a
+	//       naive ADD.
+	//     - any other "drops AND adds both non-empty" shape
+	//       (merge / split / mid-prefix interior insert /
+	//       reorder / "retention roll-forward") falls through
+	//       to error. Disjoint-name detection isn't enough to
+	//       tell merge / split / replace apart from a pure
+	//       retention discard, and split-point inference is
+	//       out of scope for v1, so the user runs the right
+	//       ALTER (REORGANIZE with explicit boundaries, or
+	//       DROP+ADD if discarding data is intended) by hand.
 	// "Pure per-partition definition change" path. When the
 	// catalog and desired name lists line up position-by-position
 	// (every partition stays in the same slot, every name
