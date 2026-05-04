@@ -45,6 +45,7 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `information_schema.COLUMNS` for view rows, then re-add the
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
+
 ## Low — CLI ergonomics
 
 - `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars).
