@@ -3,6 +3,7 @@ package command_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -78,6 +79,39 @@ func TestPlan_Run_DropDeniedPrintsSkippedComment(t *testing.T) {
 	got := buf.String()
 	assert.Contains(t, got, "-- skipped: DROP TABLE "+testutil.DefaultDB+".users;")
 	assert.Contains(t, got, "-- No changes")
+}
+
+func TestPlan_Run_ExecutableSQLAndSkippedDrops(t *testing.T) {
+	// When the diff produces both executable SQL AND a suppressed DROP,
+	// plan emits the executable SQL first and the `-- skipped:` lines
+	// after — pinning the DisallowedDrops branch that runs *after* the
+	// SQL fprintln (the if-r.SQL-non-empty arm).
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, `CREATE TABLE users (
+    id BIGINT NOT NULL,
+    legacy VARCHAR(64),
+    PRIMARY KEY (id)
+);`)
+
+	desired := writeDesiredFile(t, `CREATE TABLE users (
+    id BIGINT NOT NULL,
+    name VARCHAR(64),
+    PRIMARY KEY (id)
+);`) // adds `name`, leaves `legacy` to be (suppressed) dropped
+	client := newTestClient(t)
+
+	var buf bytes.Buffer
+	cmd := &command.Plan{PlanOptions: myschema.PlanOptions{
+		Files: []string{desired},
+	}}
+	require.NoError(t, cmd.Run(ctx, client, &buf))
+	got := buf.String()
+	addPos := strings.Index(got, "ADD COLUMN name")
+	skippedPos := strings.Index(got, "-- skipped: ALTER TABLE "+testutil.DefaultDB+".users DROP COLUMN legacy")
+	require.NotEqual(t, -1, addPos, "executable ADD COLUMN must be present")
+	require.NotEqual(t, -1, skippedPos, "skipped DROP comment must be present")
+	assert.Less(t, addPos, skippedPos, "executable SQL must precede the skipped-drop comment")
 }
 
 func TestPlan_Run_BadDSNError(t *testing.T) {

@@ -3,6 +3,7 @@ package command_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -95,6 +96,38 @@ func TestApply_Run_DropDeniedShowsSkippedAndNoChanges(t *testing.T) {
 		testutil.DefaultDB,
 	).Scan(&n))
 	assert.Equal(t, 1, n, "drop must have been suppressed")
+}
+
+func TestApply_Run_ExecutableSQLAndSkippedDrops(t *testing.T) {
+	// Same shape as the plan test: executable SQL + suppressed DROP.
+	// Pins the apply.go DisallowedDrops branch that runs *after*
+	// w.Write(buf.Bytes()) — i.e. the buf.Len() > 0 path.
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, `CREATE TABLE users (
+    id BIGINT NOT NULL,
+    legacy VARCHAR(64),
+    PRIMARY KEY (id)
+);`)
+
+	desired := writeDesiredFile(t, `CREATE TABLE users (
+    id BIGINT NOT NULL,
+    name VARCHAR(64),
+    PRIMARY KEY (id)
+);`)
+	client := newTestClient(t)
+
+	var buf bytes.Buffer
+	cmd := &command.Apply{ApplyOptions: myschema.ApplyOptions{
+		Files: []string{desired},
+	}}
+	require.NoError(t, cmd.Run(ctx, client, &buf))
+	got := buf.String()
+	addPos := strings.Index(got, "ADD COLUMN name")
+	skippedPos := strings.Index(got, "-- skipped: ALTER TABLE "+testutil.DefaultDB+".users DROP COLUMN legacy")
+	require.NotEqual(t, -1, addPos, "executed ADD COLUMN must be present")
+	require.NotEqual(t, -1, skippedPos, "skipped DROP comment must be present")
+	assert.Less(t, addPos, skippedPos, "executed SQL must precede the skipped-drop comment")
 }
 
 func TestApply_Run_BadDSNError(t *testing.T) {
