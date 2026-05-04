@@ -1,0 +1,31 @@
+# LIST → HASH scheme change. partitionHeaderEqual rejects
+# strategy / expression mismatches (REMOVE PARTITIONING + new
+# PARTITION BY is a future PR; v1 errors out so the user
+# runs the reshape by hand).
+#
+# Regression: round 23's LIST value-discard guard ran *before*
+# `partitionHeaderEqual`, so any LIST → non-LIST scheme change
+# would hard-error with the REORGANIZE-discard message
+# (because none of the catalog LIST constants survive on the
+# desired side once it's no longer LIST) instead of the
+# correct `partition strategy / expression differs` error.
+# Pin the strategy-error fall-through so a future move of the
+# discard check doesn't regress this path.
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p3 VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY HASH (region) PARTITIONS 4;
+
+error: 'partition strategy / expression differs'

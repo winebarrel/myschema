@@ -112,20 +112,12 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	if err := validateDesiredRangeMonotonic(fqtn, desPO.Definitions); err != nil {
 		return nil, nil, err
 	}
-	// Catalog-vs-desired LIST data-discard guard: if any catalog
-	// `VALUES IN (…)` constant is missing from desired entirely
-	// (not just moved to another partition), MySQL would
-	// silently DROP rows with that value on REORGANIZE — no
-	// apply-time error, no warning, just gone. Treat that as
-	// destructive and gate behind `--allow-drop=partition` (the
-	// same flag that authorises DROP PARTITION / COALESCE
-	// PARTITION). See CAVEATS.md "LIST value discard silently
-	// drops rows".
-	if dropped := findDiscardedListValue(curPO.Definitions, desPO.Definitions); dropped.value != "" {
-		if !dc.IsDropAllowed("partition") {
-			return nil, nil, fmt.Errorf("table %s: desired LIST partition layout discards value %s (catalog partition %s); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss", fqtn, dropped.value, dropped.owner)
-		}
-	}
+	// (Catalog-vs-desired LIST data-discard guard runs further
+	// down, inside the matched-name-list REORGANIZE branch —
+	// see comment there. Doing it here would also fire on
+	// supported LIST DROP PARTITION shapes and on LIST → other-
+	// strategy scheme changes, which the dedicated DROP /
+	// strategy-error paths already handle.)
 	// Strategy / expression / column list mismatch → scheme change,
 	// out of scope for v1.
 	if !partitionHeaderEqual(curPO, desPO) {
@@ -321,6 +313,30 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			// (temporarilySortListValues in partitionDefEqual). All
 			// no-ops at the SQL level — emit nothing.
 			return nil, nil, nil
+		}
+		// Catalog-vs-desired LIST data-discard guard: if any catalog
+		// `VALUES IN (…)` constant is missing from desired entirely
+		// (not just moved to another partition), MySQL would
+		// silently DROP rows with that value on REORGANIZE — no
+		// apply-time error, no warning, just gone. Treat that as
+		// destructive and gate behind `--allow-drop=partition`
+		// (the same flag that authorises DROP PARTITION /
+		// COALESCE PARTITION). See CAVEATS.md "LIST value discard
+		// silently drops rows".
+		//
+		// This guard sits *inside* the matched-name-list branch
+		// because it only matters for the REORGANIZE path. The
+		// dedicated DROP PARTITION code further down already
+		// gates on `--allow-drop=partition` and surfaces a
+		// `-- skipped: …` line for unauthorised drops, and
+		// strategy-mismatch (LIST → HASH / RANGE / KEY) is
+		// caught earlier by `partitionHeaderEqual`. Running the
+		// discard check ahead of those would hard-error those
+		// supported / better-handled cases.
+		if curPO.Type == sqlparser.ListType {
+			if dropped := findDiscardedListValue(curDefs, desDefs); dropped.value != "" && !dc.IsDropAllowed("partition") {
+				return nil, nil, fmt.Errorf("table %s: desired LIST partition layout discards value %s (catalog partition %s); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss", fqtn, dropped.value, dropped.owner)
+			}
 		}
 		var stmts []string
 		switch curPO.Type {
