@@ -14,8 +14,12 @@ import (
 // side and information_schema.VIEWS.VIEW_DEFINITION compare equal after
 // NormalizeViewDefinition runs the same pipeline over both.
 func parseCreateView(s *sqlparser.CreateView, defaultDB string) (*model.View, error) {
+	db, err := resolveStmtDB(s.ViewName.Qualifier.String(), defaultDB, "CREATE VIEW", s.ViewName.Name.String())
+	if err != nil {
+		return nil, err
+	}
 	v := &model.View{
-		Database: dbName(s.ViewName.Qualifier.String(), defaultDB),
+		Database: db,
 		Name:     s.ViewName.Name.String(),
 	}
 	if len(s.Columns) > 0 {

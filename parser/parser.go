@@ -352,9 +352,30 @@ func dbName(schema, defaultDB string) string {
 	return defaultDB
 }
 
+// resolveStmtDB returns the database the statement targets, erroring
+// when a desired-side qualifier disagrees with the invocation database.
+// myschema emits unqualified DDL (CLAUDE.md "Operational rules") and
+// runs against exactly one database per invocation, so a desired-side
+// `CREATE TABLE other_db.users (...)` would silently apply to the
+// connected database, not other_db. Reject upfront with a message that
+// names both databases so the user can either drop the qualifier or
+// re-point the DSN. defaultDB is empty only in narrow test paths that
+// pre-date the constraint; the validation is skipped there to keep
+// existing fixtures working.
+func resolveStmtDB(qualifier, defaultDB, kind, name string) (string, error) {
+	if qualifier == "" || defaultDB == "" || qualifier == defaultDB {
+		return dbName(qualifier, defaultDB), nil
+	}
+	return "", fmt.Errorf("%s %s.%s: cross-database reference not supported (myschema operates on database %q only — remove the qualifier or run myschema against %q)", kind, qualifier, name, defaultDB, qualifier)
+}
+
 func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table, error) {
+	db, err := resolveStmtDB(s.Table.Qualifier.String(), defaultDB, "CREATE TABLE", s.Table.Name.String())
+	if err != nil {
+		return nil, err
+	}
 	t := &model.Table{
-		Database:    dbName(s.Table.Qualifier.String(), defaultDB),
+		Database:    db,
 		Name:        s.Table.Name.String(),
 		Columns:     orderedmap.New[string, *model.Column](),
 		Constraints: orderedmap.New[string, *model.Constraint](),
@@ -806,7 +827,11 @@ func normalizeDefaultExpr(s string) string {
 // Other ALTER subcommands are out of scope for v1: callers express the
 // desired state via CREATE TABLE only.
 func applyAlterTable(tables *orderedmap.Map[string, *model.Table], s *sqlparser.AlterTable, defaultDB string) error {
-	fqtn := model.Ident(dbName(s.Table.Qualifier.String(), defaultDB), s.Table.Name.String())
+	db, err := resolveStmtDB(s.Table.Qualifier.String(), defaultDB, "ALTER TABLE", s.Table.Name.String())
+	if err != nil {
+		return err
+	}
+	fqtn := model.Ident(db, s.Table.Name.String())
 	t, ok := tables.GetOk(fqtn)
 	if !ok {
 		return fmt.Errorf("ALTER TABLE on unknown table %s", fqtn)
