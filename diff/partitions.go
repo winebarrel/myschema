@@ -94,6 +94,18 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	if err != nil {
 		return nil, nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", fqtn, err)
 	}
+	// Desired-side LIST validity: MySQL forbids the same `VALUES IN`
+	// constant in more than one partition (Error 1495 "Multiple
+	// definition of same constant in list partitioning"). Catch it
+	// at plan time so the operator gets a clear, actionable message
+	// before any ALTER is emitted — otherwise the per-run REORGANIZE
+	// gate (`partitionListChangedSlotsAreSuperset`) would happily
+	// emit `REORGANIZE p_changed INTO (… IN (V, …))` while an
+	// unchanged sibling partition still owns V, and apply would fail
+	// with the same Error 1495 deeper in the pipeline.
+	if dup, slotA, slotB := findDuplicateListValue(desPO.Definitions); dup != "" {
+		return nil, nil, fmt.Errorf("table %s: desired LIST partition definitions assign value %s to both partition %s and partition %s — MySQL requires LIST values to be disjoint across partitions (Error 1495 \"Multiple definition of same constant in list partitioning\"). Remove the duplicate from one of the partitions", fqtn, dup, slotA, slotB)
+	}
 	// Strategy / expression / column list mismatch → scheme change,
 	// out of scope for v1.
 	if !partitionHeaderEqual(curPO, desPO) {
@@ -577,6 +589,37 @@ func partitionListChangedSlotsAreSuperset(curDefs, desDefs []*sqlparser.Partitio
 		}
 	}
 	return true
+}
+
+// findDuplicateListValue scans a `*PartitionDefinition` slice
+// for any `VALUES IN (…)` constant that appears in more than
+// one partition. Returns the offending value (formatted) and
+// both partition names; returns ("", "", "") when every
+// LIST constant is uniquely owned. Non-LIST partitions
+// (`LessThanType`) are skipped — RANGE values are bounded
+// per-slot by neighbours' boundaries, not by uniqueness, so
+// the check is meaningless there.
+//
+// Comparison keys go through `sqlparser.String`, the same
+// keying used by `partitionValueListIsSuperset` and
+// `temporarilySortListValues`, so the helper is tuple-safe
+// for LIST COLUMNS.
+func findDuplicateListValue(defs []*sqlparser.PartitionDefinition) (value, slotA, slotB string) {
+	owner := make(map[string]string)
+	for _, def := range defs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.InType {
+			continue
+		}
+		for _, v := range def.Options.ValueRange.Range {
+			key := sqlparser.String(v)
+			if existing, ok := owner[key]; ok {
+				return key, existing, def.Name.String()
+			}
+			owner[key] = def.Name.String()
+		}
+	}
+	return "", "", ""
 }
 
 func partitionValueListIsSuperset(superset, subset *sqlparser.PartitionDefinition) bool {
