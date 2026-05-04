@@ -26,7 +26,7 @@ CREATE VIEW active_users AS SELECT id, name FROM users;
 	views, err := cat.Views(ctx)
 	require.NoError(t, err)
 
-	v, ok := views.GetOk("myschema_test.active_users")
+	v, ok := views.GetOk(testutil.DefaultDB + ".active_users")
 	require.True(t, ok)
 	assert.Equal(t, "active_users", v.Name)
 	assert.Contains(t, v.Definition, "select")

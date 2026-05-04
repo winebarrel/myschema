@@ -18,7 +18,7 @@ the catalog side is read with `database/sql` +
 ```sh
 make build           # go build ./cmd/myschema (outputs ./myschema)
 make vet             # go vet ./...
-make test            # go test -p 1 -v ./... (requires a reachable MySQL)
+make test            # go test -p 1 -v -coverpkg=./... ./... (requires a reachable MySQL)
 make lint            # golangci-lint run
 make fix             # golangci-lint run --fix
 make test-scenario   # bash test/scenario/run.sh (CLI scenario suite)
