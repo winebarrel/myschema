@@ -709,6 +709,9 @@ func indexEqual(a, b *model.Index) bool {
 	if a.Invisible != b.Invisible {
 		return false
 	}
+	if !ptrEq(a.Comment, b.Comment) {
+		return false
+	}
 	return true
 }
 

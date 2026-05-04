@@ -556,12 +556,21 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 
 	indexType := ""
 	invisible := false
+	var comment *string
 	for _, opt := range idx.Options {
 		switch strings.ToLower(opt.Name) {
 		case "using":
 			indexType = strings.ToUpper(opt.String)
 		case "invisible":
 			invisible = true
+		case "comment":
+			// vitess parks the unquoted comment value in
+			// opt.Value.Val (a *Literal); opt.String holds
+			// `using`'s payload but is empty here.
+			if opt.Value != nil {
+				v := opt.Value.Val
+				comment = &v
+			}
 		}
 	}
 
@@ -594,6 +603,7 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 			Name: name, Database: t.Database, Table: t.Name,
 			KeyType: model.IndexUnique, Parts: parts,
 			IndexType: indexType, Invisible: invisible,
+			Comment: comment,
 		}
 		if _, dup := t.Indexes.GetOk(name); dup {
 			return fmt.Errorf("duplicate index: %s on %s", name, t.FQTN())
@@ -609,6 +619,7 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 		t.Indexes.Set(name, &model.Index{
 			Name: name, Database: t.Database, Table: t.Name,
 			KeyType: model.IndexFulltext, Parts: parts, Invisible: invisible,
+			Comment: comment,
 		})
 		return nil
 
@@ -620,6 +631,7 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 		t.Indexes.Set(name, &model.Index{
 			Name: name, Database: t.Database, Table: t.Name,
 			KeyType: model.IndexSpatial, Parts: parts, Invisible: invisible,
+			Comment: comment,
 		})
 		return nil
 
@@ -631,6 +643,7 @@ func addIndex(t *model.Table, idx *sqlparser.IndexDefinition) error {
 		i := &model.Index{
 			Name: name, Database: t.Database, Table: t.Name,
 			Parts: parts, IndexType: indexType, Invisible: invisible,
+			Comment: comment,
 		}
 		if _, dup := t.Indexes.GetOk(name); dup {
 			return fmt.Errorf("duplicate index: %s on %s", name, t.FQTN())
