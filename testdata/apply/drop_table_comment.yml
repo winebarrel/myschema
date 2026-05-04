@@ -1,0 +1,21 @@
+# Symmetric to change_table_comment.yml: dropping the COMMENT clause
+# from desired SQL must emit `ALTER TABLE … COMMENT=''`, the MySQL
+# idiom for "remove the table comment". Catalog stores an empty string
+# (not NULL) once cleared, which round-trips back to `Comment = nil`
+# on the parser side via the catalog's empty-string normalisation.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='to be removed';
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE t COMMENT='';
+
+verify_no_drift: true

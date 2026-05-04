@@ -1,0 +1,21 @@
+# Regression: a desired-side `COMMENT=''` against catalog-side
+# nil (i.e. no comment) used to fire `ALTER TABLE t COMMENT=''`
+# on every plan because the parser stored `&""` while the catalog
+# reader normalises empty TABLE_COMMENT to nil — `ptrEq(&"", nil)`
+# returned false. canonicalComment folds both shapes to nil so
+# they compare equal and the plan reports No changes.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='';
+
+applied: ""
+
+verify_no_drift: true

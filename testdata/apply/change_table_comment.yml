@@ -1,0 +1,22 @@
+# Regression for TODO "Table-level `COMMENT='…'` changes are silent":
+# desired-side `COMMENT='new'` against catalog-side `COMMENT='old'` must
+# emit a single `ALTER TABLE … COMMENT='new'`. Pre-fix, the diff layer
+# explicitly skipped Comment alongside Engine ("intentionally not
+# diffed here yet"), so this case round-tripped to `No changes` and
+# the live table comment never updated.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='old comment';
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='new comment';
+
+applied: |
+  ALTER TABLE t COMMENT='new comment';
+
+verify_no_drift: true

@@ -1,0 +1,20 @@
+# Single-quote escaping in COMMENT — `model.QuoteLiteral` doubles
+# embedded quotes. Pre-fix this never triggered because the diff
+# never emitted COMMENT at all; pin the escape so a future
+# QuoteLiteral regression doesn't slip back in.
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='before';
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='it''s a quoted comment';
+
+applied: |
+  ALTER TABLE t COMMENT='it''s a quoted comment';
+
+verify_no_drift: true

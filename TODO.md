@@ -49,17 +49,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `information_schema.COLUMNS` for view rows, then re-add the
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
-- **Table-level `COMMENT='…'` changes are silent.** `model.Table.Comment`
-  and the catalog's `TABLE_COMMENT` read into it are already wired
-  up; the gap is in the diff layer — `diff/tables.go` (around the
-  table-level CHARACTER SET / COLLATE branch) explicitly notes
-  "Engine and Comment are intentionally not diffed here yet — out
-  of scope for the charset gap", so changing the table comment in
-  desired SQL produces no diff at all. Fix: add a Comment-diff
-  branch that emits `ALTER TABLE … COMMENT='…'`. Surfaced while
-  writing the regression-coverage fixtures (PR #58). Implement or
-  document as out-of-scope in CAVEATS.md.
-
 ## Low — CLI ergonomics
 
 - `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars).
