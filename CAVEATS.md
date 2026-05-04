@@ -301,8 +301,23 @@ patterns:
       COLUMNS for free.
 
   In both cases MySQL redistributes existing rows into the
-  new boundaries (row-preserving). No `--allow-drop` gating
-  because every dropped name is reused on the add side.
+  new boundaries — *row-preserving when every catalog value
+  still has a home in the new layout*. The narrow exception
+  is a LIST diff that removes a constant from `VALUES IN (…)`
+  without re-assigning it to another partition: MySQL
+  silently drops any existing rows for that value on
+  REORGANIZE (no apply-time error, no warning). The diff
+  layer detects this catalog-vs-desired discard at plan time
+  and refuses to emit the REORGANIZE unless
+  `--allow-drop=partition` is set — same gate that authorises
+  DROP PARTITION / COALESCE PARTITION, which are the other
+  partition-level destructive operations. The error reads
+  `desired LIST partition layout discards value V (catalog
+  partition pX); MySQL silently drops any matching rows on
+  REORGANIZE`. With `--allow-drop=partition` the discard goes
+  through as the operator's explicit choice. Otherwise no
+  partition op needs that gate, because every dropped
+  partition name is reused on the add side.
   **Operationally** REORGANIZE PARTITION is data-moving —
   every row in the named partitions is read, redistributed
   according to the new boundaries, and rewritten in place.
@@ -400,6 +415,20 @@ patterns:
   is tuple-safe for `LIST COLUMNS` (the constant is the whole
   tuple). Workaround: remove the duplicate from one of the
   partitions in the desired SQL.
+- *RANGE `VALUES LESS THAN` not strictly increasing* — MySQL
+  rejects schemas like `p0 LESS THAN (25), p1 LESS THAN (20)`
+  with "VALUES less than value must be strictly increasing",
+  but vitess's parser doesn't enforce the rule, so the diff
+  layer would otherwise emit a REORGANIZE that can never
+  apply. myschema catches the non-monotonic ordering at plan
+  time. Integer-literal boundaries are compared numerically;
+  MAXVALUE is treated as +∞ (allowed at most once and only
+  as the final partition). Non-integer / non-literal
+  boundaries (function calls, RANGE COLUMNS tuples) only
+  surface here on consecutive bytewise duplicates — deeper
+  ordering for those falls back to MySQL's own error at
+  apply time. Workaround: fix the boundary order in the
+  desired SQL.
 - `SUBPARTITION BY …` is out of scope for v1. A desired-side
   `CREATE TABLE` that declares SUBPARTITION fails at parse
   time; a catalog-side table with SUBPARTITION is rejected

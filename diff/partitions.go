@@ -3,6 +3,7 @@ package diff
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
@@ -107,6 +108,23 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// new partitioned tables get the same plan-time guard.
 	if err := validateDesiredListValuesAreDisjoint(fqtn, desPO.Definitions); err != nil {
 		return nil, nil, err
+	}
+	if err := validateDesiredRangeMonotonic(fqtn, desPO.Definitions); err != nil {
+		return nil, nil, err
+	}
+	// Catalog-vs-desired LIST data-discard guard: if any catalog
+	// `VALUES IN (…)` constant is missing from desired entirely
+	// (not just moved to another partition), MySQL would
+	// silently DROP rows with that value on REORGANIZE — no
+	// apply-time error, no warning, just gone. Treat that as
+	// destructive and gate behind `--allow-drop=partition` (the
+	// same flag that authorises DROP PARTITION / COALESCE
+	// PARTITION). See CAVEATS.md "LIST value discard silently
+	// drops rows".
+	if dropped := findDiscardedListValue(curPO.Definitions, desPO.Definitions); dropped.value != "" {
+		if !dc.IsDropAllowed("partition") {
+			return nil, nil, fmt.Errorf("table %s: desired LIST partition layout discards value %s (catalog partition %s); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss", fqtn, dropped.value, dropped.owner)
+		}
 	}
 	// Strategy / expression / column list mismatch → scheme change,
 	// out of scope for v1.
@@ -593,6 +611,94 @@ func partitionListChangedSlotsAreSuperset(curDefs, desDefs []*sqlparser.Partitio
 	return true
 }
 
+// validateDesiredRangeMonotonic reports a plan-time error
+// when the desired-side RANGE partitions don't have strictly
+// increasing `VALUES LESS THAN` boundaries. MySQL itself
+// rejects such schemas at CREATE TABLE / ALTER TABLE time
+// with "VALUES less than value must be strictly increasing",
+// but vitess's parser doesn't enforce the rule — without
+// this guard the diff layer would happily emit a REORGANIZE
+// that can never apply.
+//
+// Comparison strategy:
+//   - MAXVALUE is treated as +∞: it must appear at most once
+//     and only as the final partition.
+//   - Integer-literal boundaries are compared numerically.
+//   - Non-integer / non-literal expressions (functions like
+//     `TO_DAYS(d)`, RANGE COLUMNS tuples, etc.) fall back to
+//     bytewise equality on `sqlparser.String` — only
+//     consecutive duplicates surface here; deeper ordering
+//     is left to MySQL because the diff layer doesn't have a
+//     general expression evaluator.
+func validateDesiredRangeMonotonic(fqtn string, defs []*sqlparser.PartitionDefinition) error {
+	var prevName, prevForm string
+	var prevMax, hasPrev bool
+	var prevInt int64
+	var prevIsInt bool
+	for _, def := range defs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.LessThanType {
+			continue
+		}
+		curName := def.Name.String()
+		curRange := def.Options.ValueRange
+		if curRange.Maxvalue {
+			if prevMax {
+				return fmt.Errorf("table %s: desired RANGE partitions %s and %s both use VALUES LESS THAN MAXVALUE — only one MAXVALUE partition is allowed and it must be the final partition", fqtn, prevName, curName)
+			}
+			prevName = curName
+			prevForm = "MAXVALUE"
+			prevMax = true
+			prevIsInt = false
+			hasPrev = true
+			continue
+		}
+		if prevMax {
+			return fmt.Errorf("table %s: desired RANGE partition %s comes after the MAXVALUE partition %s — MAXVALUE must be the final partition (every concrete LESS THAN value sorts below MAXVALUE)", fqtn, curName, prevName)
+		}
+		curForm := sqlparser.String(curRange)
+		curInt, curIsInt := rangeBoundaryAsInt64(curRange)
+		if hasPrev {
+			if prevIsInt && curIsInt {
+				if curInt <= prevInt {
+					return fmt.Errorf("table %s: desired RANGE partition %s VALUES LESS THAN %d is not strictly greater than partition %s VALUES LESS THAN %d — MySQL requires VALUES LESS THAN to be strictly increasing", fqtn, curName, curInt, prevName, prevInt)
+				}
+			} else if curForm == prevForm {
+				return fmt.Errorf("table %s: desired RANGE partitions %s and %s both use the same boundary %s — MySQL requires VALUES LESS THAN to be strictly increasing", fqtn, prevName, curName, curForm)
+			}
+		}
+		prevName = curName
+		prevForm = curForm
+		prevMax = false
+		prevInt = curInt
+		prevIsInt = curIsInt
+		hasPrev = true
+	}
+	return nil
+}
+
+// rangeBoundaryAsInt64 returns the integer value of a single
+// `VALUES LESS THAN (n)` boundary when it parses as a non-
+// negative int64 literal, plus a true flag. Returns
+// (0, false) for tuple boundaries (RANGE COLUMNS),
+// expressions, or values that don't fit in int64. The
+// strictly-increasing comparator falls back to bytewise
+// equality in those cases.
+func rangeBoundaryAsInt64(r *sqlparser.PartitionValueRange) (int64, bool) {
+	if len(r.Range) != 1 {
+		return 0, false
+	}
+	lit, ok := r.Range[0].(*sqlparser.Literal)
+	if !ok || lit.Type != sqlparser.IntVal {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(lit.Val, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 // validateDesiredListValuesAreDisjoint reports a plan-time
 // error when the desired-side partition definitions assign
 // the same `VALUES IN (…)` constant to more than one
@@ -609,6 +715,58 @@ func validateDesiredListValuesAreDisjoint(fqtn string, defs []*sqlparser.Partiti
 		return nil
 	}
 	return fmt.Errorf("table %s: desired LIST partition definitions assign value %s to both partition %s and partition %s — MySQL requires LIST values to be disjoint across partitions (Error 1495 %q). Remove the duplicate from one of the partitions", fqtn, dup, slotA, slotB, "Multiple definition of same constant in list partitioning")
+}
+
+type discardedListValue struct {
+	value string // formatted via sqlparser.String
+	owner string // catalog-side partition name that owned the value
+}
+
+// findDiscardedListValue returns the first LIST `VALUES IN (…)`
+// constant present in the catalog but missing from desired.
+// Used by the catalog-vs-desired discard guard: when the
+// desired schema removes a value entirely (rather than
+// reassigning it to another partition), MySQL silently drops
+// any rows for that value during REORGANIZE — no apply-time
+// error, no warning, just lost data. Surfacing the first
+// discard is enough for the operator to act; subsequent
+// discards in the same partition layout would emit the same
+// error after the first is fixed.
+//
+// Returns the zero `discardedListValue` (empty value /
+// owner) when every catalog LIST constant still has a home
+// in desired. Non-LIST partitions (`LessThanType`) are
+// skipped on both sides — RANGE row redistribution is bounded
+// by per-slot value ranges, not by per-value owners.
+func findDiscardedListValue(curDefs, desDefs []*sqlparser.PartitionDefinition) discardedListValue {
+	desValues := collectListValues(desDefs)
+	for _, def := range curDefs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.InType {
+			continue
+		}
+		for _, v := range def.Options.ValueRange.Range {
+			key := sqlparser.String(v)
+			if _, kept := desValues[key]; !kept {
+				return discardedListValue{value: key, owner: def.Name.String()}
+			}
+		}
+	}
+	return discardedListValue{}
+}
+
+func collectListValues(defs []*sqlparser.PartitionDefinition) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, def := range defs {
+		if def.Options == nil || def.Options.ValueRange == nil ||
+			def.Options.ValueRange.Type != sqlparser.InType {
+			continue
+		}
+		for _, v := range def.Options.ValueRange.Range {
+			out[sqlparser.String(v)] = struct{}{}
+		}
+	}
+	return out
 }
 
 // findDuplicateListValue scans a `*PartitionDefinition` slice

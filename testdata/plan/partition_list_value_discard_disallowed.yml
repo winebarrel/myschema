@@ -1,0 +1,29 @@
+# Pin that the diff layer rejects a desired LIST partition
+# layout that *discards* a value the catalog still has, when
+# --allow-drop=partition isn't set. Without this guard MySQL
+# silently DROPs any rows whose LIST value was removed from
+# the partition's `VALUES IN (…)` set on REORGANIZE — that's
+# uncaught data loss, not even an apply-time error. Pin it
+# to the same `--allow-drop=partition` gate that DROP
+# PARTITION uses (both are user-visible data discards).
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p3 VALUES IN (4, 5)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1),
+      PARTITION p3 VALUES IN (5)
+  );
+
+error: 'desired LIST partition layout discards value 4 (catalog partition p3); MySQL silently drops any matching rows on REORGANIZE'

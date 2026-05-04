@@ -1,0 +1,30 @@
+# Pin that desired-side RANGE partitions whose VALUES LESS
+# THAN sequence is non-monotonic are rejected at plan time.
+# MySQL itself rejects such schemas at CREATE TABLE / ALTER
+# TABLE time with "VALUES less than value must be strictly
+# increasing", but vitess's parser doesn't enforce the rule —
+# so without this guard the diff layer would emit a
+# REORGANIZE that can never apply. Catch it at plan time so
+# the operator sees an actionable message instead of a
+# generic MySQL parse error during apply.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p0 VALUES LESS THAN (10),
+      PARTITION p1 VALUES LESS THAN (20)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p0 VALUES LESS THAN (25),
+      PARTITION p1 VALUES LESS THAN (20)
+  );
+
+error: 'desired RANGE partition p1 VALUES LESS THAN 20 is not strictly greater than partition p0 VALUES LESS THAN 25'
