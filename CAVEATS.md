@@ -5,6 +5,27 @@ myschema. None of these are bugs — they are deliberate design choices
 that prefer "be explicit, fail loudly" over implicit catalog-side
 inference.
 
+## What myschema deliberately doesn't manage
+
+Two object families are **out of scope**, with different reasons.
+Neither is a TODO item — they are intentionally not on the
+roadmap.
+
+- **Triggers, stored procedures / functions, events.** Imperative,
+  version-tagged code rather than declarative schema. The catalog
+  representation is a single text body that's hard to diff
+  meaningfully (a function with a one-line body change has the same
+  shape as one with an algorithmic rewrite). Manage them out of band
+  with hand-written DDL, or use the `-- myschema:execute` directive
+  (see "`-- myschema:execute` is the only escape hatch for unmodelled
+  objects" below) when you want myschema to run a guarded one-shot
+  for you.
+- **Sequences.** MySQL has no sequence object — `AUTO_INCREMENT` is
+  the closest thing and is already first-class on `model.Column`.
+  TiDB *does* ship a `CREATE SEQUENCE`, but myschema is targeted at
+  MySQL specifically (vitess parser, go-sql-driver/mysql), so a TiDB
+  profile would be a separate effort and isn't planned.
+
 ## Foreign keys must declare a covering index
 
 **Rule.** Every `FOREIGN KEY` in your desired SQL must be paired with
