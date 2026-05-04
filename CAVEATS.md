@@ -206,14 +206,19 @@ very different runtime cost and safety:
 **Workarounds.**
 
 - For appends, pass `--alter-algorithm=INSTANT`. Caveat: this flag
-  is plan-wide — myschema appends `, ALGORITHM=INSTANT` to **every**
-  generated `ALTER TABLE` and `CREATE INDEX` (see `appendAlterHints`),
-  so any non-INSTANT-eligible operation in the same plan (e.g. an
-  index add that needs `INPLACE` / `COPY`) will fail at apply time.
-  Either run the ENUM-append apply on its own (split your desired
-  SQL or use `--include` / `--exclude` to scope the plan to the one
-  table) or accept that the rest of the plan also needs to be
-  INSTANT-eligible.
+  is plan-wide — myschema injects the `ALGORITHM=INSTANT` hint into
+  **every** generated `ALTER TABLE` and `CREATE INDEX` (see
+  `appendAlterHints`), with statement-specific syntax: `ALTER TABLE`
+  takes a leading-comma clause (`…, ALGORITHM=INSTANT`) appended
+  before the trailing `;` (or spliced before the keyword for
+  partition operations whose grammar rejects the trailing-comma
+  position), while `CREATE INDEX` takes a space-separated trailing
+  clause (`… ALGORITHM=INSTANT`). Either way, any non-INSTANT-eligible
+  operation in the same plan (e.g. an index add that needs `INPLACE`
+  / `COPY`) will fail at apply time. Either run the ENUM-append apply
+  on its own (split your desired SQL or use `--include` / `--exclude`
+  to scope the plan to the one table) or accept that the rest of
+  the plan also needs to be INSTANT-eligible.
 - For reorders / removes / renames, treat the desired-side change
   as destructive. Inspect plan output, take a backup, and consider
   staging the change (add the new value first, migrate data, then
