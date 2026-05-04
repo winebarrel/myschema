@@ -7,12 +7,12 @@ init: |
   CREATE VIEW active_users AS SELECT id, name FROM users;
 
 dump: |
-  -- myschema_test.users
-  CREATE TABLE myschema_test.users (
+  -- users
+  CREATE TABLE users (
       id bigint NOT NULL,
       name varchar(64),
       PRIMARY KEY (id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-  -- myschema_test.active_users
-  CREATE OR REPLACE VIEW myschema_test.active_users AS select `myschema_test`.`users`.`id` AS `id`,`myschema_test`.`users`.`name` AS `name` from `myschema_test`.`users`;
+  -- active_users
+  CREATE OR REPLACE VIEW active_users AS select `myschema_test`.`users`.`id` AS `id`,`myschema_test`.`users`.`name` AS `name` from `myschema_test`.`users`;

@@ -22,6 +22,6 @@ desired: |
   );
 
 applied: |
-  CREATE INDEX idx_score_desc ON myschema_test.t (score DESC);
+  CREATE INDEX idx_score_desc ON t (score DESC);
 
 verify_no_drift: true

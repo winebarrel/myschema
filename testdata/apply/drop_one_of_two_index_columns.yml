@@ -31,6 +31,6 @@ allow_drop:
   - all
 
 applied: |
-  ALTER TABLE myschema_test.users DROP COLUMN a;
-  ALTER TABLE myschema_test.users DROP INDEX i_combined;
-  CREATE INDEX i_combined ON myschema_test.users (b);
+  ALTER TABLE users DROP COLUMN a;
+  ALTER TABLE users DROP INDEX i_combined;
+  CREATE INDEX i_combined ON users (b);

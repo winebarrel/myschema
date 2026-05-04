@@ -18,6 +18,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.users RENAME COLUMN old_name TO name;
+  ALTER TABLE users RENAME COLUMN old_name TO name;
 
 verify_no_drift: true

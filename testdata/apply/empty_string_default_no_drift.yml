@@ -20,7 +20,7 @@ desired: |
   );
 
 applied: |
-  CREATE TABLE myschema_test.empty_defs (
+  CREATE TABLE empty_defs (
       id bigint NOT NULL AUTO_INCREMENT,
       s_var varchar(64) NOT NULL DEFAULT '',
       s_char char(8) NOT NULL DEFAULT '',

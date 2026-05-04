@@ -27,6 +27,6 @@ desired: |
   CREATE VIEW v_users AS SELECT id, name FROM users WHERE active = 1;
 
 applied: |
-  CREATE OR REPLACE VIEW myschema_test.v_users AS select id, `name` from users where active = 1;
+  CREATE OR REPLACE VIEW v_users AS select id, `name` from users where active = 1;
 
 verify_no_drift: true

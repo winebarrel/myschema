@@ -19,6 +19,6 @@ allow_drop:
   - partition
 
 applied: |
-  ALTER TABLE myschema_test.events COALESCE PARTITION 4;
+  ALTER TABLE events COALESCE PARTITION 4;
 
 verify_no_drift: true

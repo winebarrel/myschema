@@ -16,4 +16,4 @@ desired: |
 # allow_drop omitted → DROP CHECK suppressed.
 plan: ""
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.products DROP CHECK chk;
+  -- skipped: ALTER TABLE products DROP CHECK chk;

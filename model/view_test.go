@@ -16,7 +16,7 @@ func TestViewCreateSQL(t *testing.T) {
 			CheckOption: "NONE",
 		}
 		assert.Equal(t,
-			"CREATE OR REPLACE VIEW shop.active_users AS select id from users;",
+			"CREATE OR REPLACE VIEW active_users AS select id from users;",
 			v.CreateSQL())
 	})
 
@@ -50,7 +50,7 @@ func TestViewCreateSQL(t *testing.T) {
 
 func TestViewDropSQL(t *testing.T) {
 	v := &model.View{Database: "shop", Name: "v"}
-	assert.Equal(t, "DROP VIEW shop.v;", v.DropSQL())
+	assert.Equal(t, "DROP VIEW v;", v.DropSQL())
 }
 
 func TestViewFQVN(t *testing.T) {

@@ -20,5 +20,5 @@ desired: |
 # the FK as a same-named secondary index, hence the second comment).
 plan: ""
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.posts DROP INDEX fk;
-  -- skipped: ALTER TABLE myschema_test.posts DROP FOREIGN KEY fk;
+  -- skipped: ALTER TABLE posts DROP INDEX fk;
+  -- skipped: ALTER TABLE posts DROP FOREIGN KEY fk;

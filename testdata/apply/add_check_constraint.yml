@@ -14,4 +14,4 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.products ADD CONSTRAINT chk CHECK (price > 0);
+  ALTER TABLE products ADD CONSTRAINT chk CHECK (price > 0);

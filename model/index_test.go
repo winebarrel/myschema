@@ -16,7 +16,7 @@ func TestIndexSQL(t *testing.T) {
 			IndexType: "BTREE",
 		}
 		assert.Equal(t,
-			"CREATE INDEX idx_email ON shop.users (email) USING BTREE;",
+			"CREATE INDEX idx_email ON users (email) USING BTREE;",
 			idx.SQL())
 	})
 
@@ -31,7 +31,7 @@ func TestIndexSQL(t *testing.T) {
 			},
 		}
 		assert.Equal(t,
-			"CREATE UNIQUE INDEX uq_pair ON shop.users (email, tenant_id);",
+			"CREATE UNIQUE INDEX uq_pair ON users (email, tenant_id);",
 			idx.SQL())
 	})
 

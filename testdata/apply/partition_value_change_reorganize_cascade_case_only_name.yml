@@ -33,7 +33,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.events REORGANIZE PARTITION pA, pB INTO (
+  ALTER TABLE events REORGANIZE PARTITION pA, pB INTO (
     partition pA values less than (12),
     partition pB values less than (20)
   );

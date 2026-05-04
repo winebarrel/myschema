@@ -38,4 +38,4 @@ desired: |
 # allow_drop omitted → DROP INDEX surfaced as -- skipped:
 plan: ""
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.posts DROP INDEX fk_posts_user;
+  -- skipped: ALTER TABLE posts DROP INDEX fk_posts_user;

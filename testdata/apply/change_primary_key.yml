@@ -20,7 +20,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.t DROP PRIMARY KEY;
-  ALTER TABLE myschema_test.t ADD PRIMARY KEY (tenant_id, id);
+  ALTER TABLE t DROP PRIMARY KEY;
+  ALTER TABLE t ADD PRIMARY KEY (tenant_id, id);
 
 verify_no_drift: true

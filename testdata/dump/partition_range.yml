@@ -11,8 +11,8 @@ init: |
   );
 
 dump: |
-  -- myschema_test.events
-  CREATE TABLE myschema_test.events (
+  -- events
+  CREATE TABLE events (
       id bigint NOT NULL,
       dt date NOT NULL,
       PRIMARY KEY (id, dt)

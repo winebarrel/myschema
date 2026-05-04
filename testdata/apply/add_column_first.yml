@@ -15,6 +15,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.users ADD COLUMN id bigint NOT NULL FIRST;
+  ALTER TABLE users ADD COLUMN id bigint NOT NULL FIRST;
 
 verify_no_drift: true

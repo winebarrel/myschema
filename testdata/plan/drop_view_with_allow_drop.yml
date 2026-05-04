@@ -9,4 +9,4 @@ allow_drop:
   - view
 
 plan: |
-  DROP VIEW myschema_test.legacy_view;
+  DROP VIEW legacy_view;

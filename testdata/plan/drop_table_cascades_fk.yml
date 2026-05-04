@@ -22,6 +22,6 @@ allow_drop:
   - table
 
 plan: |
-  ALTER TABLE myschema_test.posts DROP FOREIGN KEY fk;
-  DROP TABLE myschema_test.posts;
-  DROP TABLE myschema_test.users;
+  ALTER TABLE posts DROP FOREIGN KEY fk;
+  DROP TABLE posts;
+  DROP TABLE users;

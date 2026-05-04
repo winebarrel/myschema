@@ -27,7 +27,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.events REORGANIZE PARTITION p1, p2 INTO (
+  ALTER TABLE events REORGANIZE PARTITION p1, p2 INTO (
     partition p1 values less than (25),
     partition p2 values less than (30)
   );

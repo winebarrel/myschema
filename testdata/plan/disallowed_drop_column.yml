@@ -15,4 +15,4 @@ desired: |
 # DisallowedDrops, not Plan.
 plan: ""
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.users DROP COLUMN legacy;
+  -- skipped: ALTER TABLE users DROP COLUMN legacy;

@@ -62,6 +62,10 @@ type Index struct {
 
 // SQL emits a standalone CREATE INDEX (or for PRIMARY KEY a constraint ALTER).
 // Primary keys are emitted via Constraint, never via this method.
+//
+// The emitted table name is unqualified — myschema operates on one
+// database per invocation (carried by the DSN), so the qualifier is
+// noise.
 func (i *Index) SQL() string {
 	var b strings.Builder
 	b.WriteString("CREATE ")
@@ -72,7 +76,7 @@ func (i *Index) SQL() string {
 	b.WriteString("INDEX ")
 	b.WriteString(Ident(i.Name))
 	b.WriteString(" ON ")
-	b.WriteString(Ident(i.Database, i.Table))
+	b.WriteString(Ident(i.Table))
 	b.WriteString(" (")
 	for k, p := range i.Parts {
 		if k > 0 {

@@ -28,10 +28,18 @@ func (v *View) FQVN() string {
 // CreateSQL renders a CREATE OR REPLACE VIEW statement. We always use OR
 // REPLACE so the diff doesn't have to track create-vs-replace separately —
 // MySQL applies the new definition atomically either way.
+//
+// The emitted view name is unqualified — same rationale as
+// `(*Table).SQL()`. The view *body* (Definition) is left as-is,
+// which keeps MySQL's fully-qualified `db.table.col` references
+// from `information_schema.VIEWS.VIEW_DEFINITION` intact; the
+// comparison side runs both definitions through
+// `parser.NormalizeViewDefinition` so the diff doesn't fire on
+// that asymmetry.
 func (v *View) CreateSQL() string {
 	var b strings.Builder
 	b.WriteString("CREATE OR REPLACE VIEW ")
-	b.WriteString(v.FQVN())
+	b.WriteString(Ident(v.Name))
 	if len(v.Cols) > 0 {
 		b.WriteString(" (")
 		for i, c := range v.Cols {
@@ -55,12 +63,12 @@ func (v *View) CreateSQL() string {
 
 // DropSQL renders the corresponding DROP VIEW statement.
 func (v *View) DropSQL() string {
-	return "DROP VIEW " + v.FQVN() + ";"
+	return "DROP VIEW " + Ident(v.Name) + ";"
 }
 
 // ViewToSQL is the dump representation of a single view.
 func ViewToSQL(v *View) string {
-	return "-- " + v.FQVN() + "\n" + v.CreateSQL()
+	return "-- " + Ident(v.Name) + "\n" + v.CreateSQL()
 }
 
 // ViewsToSQL renders all views in order, separated by blank lines.

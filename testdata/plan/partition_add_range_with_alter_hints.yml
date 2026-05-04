@@ -35,6 +35,6 @@ alter_algorithm: INPLACE
 alter_lock: NONE
 
 plan: |
-  ALTER TABLE myschema_test.events ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (
+  ALTER TABLE events ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (
     partition p2021 values less than (2022)
   );

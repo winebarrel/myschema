@@ -13,18 +13,18 @@ init: |
   );
 
 dump: |
-  -- myschema_test.posts
-  CREATE TABLE myschema_test.posts (
+  -- posts
+  CREATE TABLE posts (
       id bigint NOT NULL,
       user_id bigint NOT NULL,
       title varchar(128) NOT NULL,
       PRIMARY KEY (id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  CREATE INDEX idx_posts_user_id ON myschema_test.posts (user_id) USING BTREE;
-  ALTER TABLE myschema_test.posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES myschema_test.users(id) ON DELETE CASCADE;
+  CREATE INDEX idx_posts_user_id ON posts (user_id) USING BTREE;
+  ALTER TABLE posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
-  -- myschema_test.users
-  CREATE TABLE myschema_test.users (
+  -- users
+  CREATE TABLE users (
       id bigint NOT NULL,
       PRIMARY KEY (id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -20,6 +20,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.posts RENAME INDEX old_idx TO idx_user;
+  ALTER TABLE posts RENAME INDEX old_idx TO idx_user;
 
 verify_no_drift: true

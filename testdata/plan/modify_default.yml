@@ -13,4 +13,4 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.users MODIFY COLUMN status varchar(16) NOT NULL DEFAULT 'active';
+  ALTER TABLE users MODIFY COLUMN status varchar(16) NOT NULL DEFAULT 'active';

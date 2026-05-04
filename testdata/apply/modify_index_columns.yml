@@ -23,7 +23,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.t DROP INDEX idx_ab;
-  CREATE INDEX idx_ab ON myschema_test.t (a, b);
+  ALTER TABLE t DROP INDEX idx_ab;
+  CREATE INDEX idx_ab ON t (a, b);
 
 verify_no_drift: true

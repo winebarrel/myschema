@@ -17,5 +17,5 @@ desired: |
   CREATE VIEW base    AS SELECT id, name FROM users;
 
 applied: |
-  CREATE OR REPLACE VIEW myschema_test.base AS select id, `name` from users;
-  CREATE OR REPLACE VIEW myschema_test.display AS select id, `name` from base;
+  CREATE OR REPLACE VIEW base AS select id, `name` from users;
+  CREATE OR REPLACE VIEW display AS select id, `name` from base;

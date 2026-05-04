@@ -32,7 +32,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.accts REORGANIZE PARTITION pAB INTO (
+  ALTER TABLE accts REORGANIZE PARTITION pAB INTO (
     partition PAB values in (1, 2, 7)
   );
 

@@ -141,19 +141,23 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		if _, ok := desired.GetOk(k); ok {
 			continue
 		}
+		// Map key `k` is the FQTN ("db.name") — unqualify for SQL
+		// emission. (FQTN itself stays db-qualified for map keys
+		// and error context elsewhere.)
+		fqtn := model.Ident(ct.Name)
 		if !tableAllowed {
 			for name := range ct.ForeignKeys.Keys() {
 				res.DisallowedDropStmts = append(res.DisallowedDropStmts,
-					"-- skipped: ALTER TABLE "+k+" DROP FOREIGN KEY "+model.Ident(name)+";")
+					"-- skipped: ALTER TABLE "+fqtn+" DROP FOREIGN KEY "+model.Ident(name)+";")
 			}
-			res.DisallowedDropStmts = append(res.DisallowedDropStmts, "-- skipped: DROP TABLE "+k+";")
+			res.DisallowedDropStmts = append(res.DisallowedDropStmts, "-- skipped: DROP TABLE "+fqtn+";")
 			continue
 		}
 		for name := range ct.ForeignKeys.Keys() {
 			res.FKDropStmts = append(res.FKDropStmts,
-				"ALTER TABLE "+k+" DROP FOREIGN KEY "+model.Ident(name)+";")
+				"ALTER TABLE "+fqtn+" DROP FOREIGN KEY "+model.Ident(name)+";")
 		}
-		res.DropStmts = append(res.DropStmts, "DROP TABLE "+k+";")
+		res.DropStmts = append(res.DropStmts, "DROP TABLE "+fqtn+";")
 	}
 
 	return res, nil
@@ -168,7 +172,11 @@ type tableDiffResult struct {
 
 func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult, error) {
 	res := &tableDiffResult{}
-	fqtn := desired.FQTN()
+	// Unqualified for SQL emission (myschema operates on one DB per
+	// invocation; the qualifier would be noise on every ALTER TABLE).
+	// FQTN itself stays db-qualified — it's still used for map keys
+	// and error context.
+	fqtn := model.Ident(desired.Name)
 
 	// Column rename pass first, so the index-rename pass below and the
 	// regular column / index / FK diffs see the renamed objects under

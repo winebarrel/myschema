@@ -60,7 +60,10 @@ func applyTableRenames(current, desired *orderedmap.Map[string, *model.Table]) (
 		if _, dup := current.GetOk(newKey); dup && oldKey != newKey {
 			return nil, fmt.Errorf("renamed-from: cannot rename %s to %s — destination already exists", oldKey, newKey)
 		}
-		stmts = append(stmts, "ALTER TABLE "+oldKey+" RENAME TO "+newKey+";")
+		// Unqualify the names for SQL emission (myschema runs against
+		// one DB at a time; oldKey / newKey carry the db prefix because
+		// they're map keys).
+		stmts = append(stmts, "ALTER TABLE "+model.Ident(*dt.RenameFrom)+" RENAME TO "+model.Ident(dt.Name)+";")
 		current.DeleteOk(oldKey)
 		ct.Database = dt.Database
 		ct.Name = dt.Name

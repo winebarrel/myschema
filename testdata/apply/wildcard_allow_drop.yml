@@ -22,6 +22,6 @@ allow_drop:
   - all
 
 applied: |
-  DROP VIEW myschema_test.legacy_view;
-  ALTER TABLE myschema_test.keep DROP CHECK chk;
-  DROP TABLE myschema_test.legacy_table;
+  DROP VIEW legacy_view;
+  ALTER TABLE keep DROP CHECK chk;
+  DROP TABLE legacy_table;

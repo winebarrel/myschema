@@ -30,4 +30,4 @@ allow_drop:
   - partition
 
 plan: |
-  ALTER TABLE myschema_test.events DROP PARTITION p2021;
+  ALTER TABLE events DROP PARTITION p2021;

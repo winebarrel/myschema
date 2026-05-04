@@ -21,6 +21,6 @@ desired: |
   );
 
 applied: |
-  CREATE INDEX idx_score_invisible ON myschema_test.t (score) INVISIBLE;
+  CREATE INDEX idx_score_invisible ON t (score) INVISIBLE;
 
 verify_no_drift: true

@@ -30,7 +30,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.events REORGANIZE PARTITION p2020 INTO (
+  ALTER TABLE events REORGANIZE PARTITION p2020 INTO (
     partition p2020 values less than (2021) comment 'new'
   );
 

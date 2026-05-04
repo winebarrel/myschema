@@ -22,4 +22,4 @@ desired: |
   ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 plan: |
-  ALTER TABLE myschema_test.t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  ALTER TABLE t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

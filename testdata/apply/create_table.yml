@@ -9,9 +9,9 @@ desired: |
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 applied: |
-  CREATE TABLE myschema_test.users (
+  CREATE TABLE users (
       id bigint NOT NULL AUTO_INCREMENT,
       email varchar(255) NOT NULL,
       PRIMARY KEY (id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  CREATE UNIQUE INDEX users_email_key ON myschema_test.users (email);
+  CREATE UNIQUE INDEX users_email_key ON users (email);

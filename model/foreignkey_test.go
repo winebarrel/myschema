@@ -17,7 +17,7 @@ func TestForeignKeySQL(t *testing.T) {
 			RefCols: []string{"id"},
 		}
 		assert.Equal(t,
-			"ALTER TABLE shop.posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES shop.users(id);",
+			"ALTER TABLE posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id);",
 			fk.SQL())
 	})
 
@@ -46,7 +46,7 @@ func TestForeignKeySQL(t *testing.T) {
 		}
 		s := fk.SQL()
 		assert.Contains(t, s, "FOREIGN KEY (a, b)")
-		assert.Contains(t, s, "REFERENCES shop.src(x, y)")
+		assert.Contains(t, s, "REFERENCES src(x, y)")
 	})
 
 	t.Run("MATCH FULL", func(t *testing.T) {
@@ -59,5 +59,21 @@ func TestForeignKeySQL(t *testing.T) {
 			MatchType: "FULL",
 		}
 		assert.Contains(t, fk.SQL(), "MATCH FULL")
+	})
+
+	t.Run("cross-database REFERENCES keeps the qualifier", func(t *testing.T) {
+		// myschema doesn't fully manage cross-database FKs (see
+		// TODO.md), but emission must not silently re-target one
+		// the user spelled out by hand: dropping the `other_db.`
+		// prefix would point the FK at a same-named table in the
+		// current DB.
+		fk := &model.ForeignKey{
+			Name:     "fk_external",
+			Database: "shop", Table: "posts",
+			Columns: []string{"user_id"},
+			RefDB:   "other_db", RefTable: "users",
+			RefCols: []string{"id"},
+		}
+		assert.Contains(t, fk.SQL(), "REFERENCES other_db.users(id)")
 	})
 }

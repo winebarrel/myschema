@@ -15,6 +15,6 @@ desired: |
   ) PARTITION BY HASH (id) PARTITIONS 8;
 
 applied: |
-  ALTER TABLE myschema_test.events ADD PARTITION PARTITIONS 4;
+  ALTER TABLE events ADD PARTITION PARTITIONS 4;
 
 verify_no_drift: true

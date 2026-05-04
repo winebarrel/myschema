@@ -21,4 +21,4 @@ desired: |
   ) DEFAULT CHARSET=utf8mb4;
 
 plan: |
-  ALTER TABLE myschema_test.t DEFAULT CHARSET=utf8mb4;
+  ALTER TABLE t DEFAULT CHARSET=utf8mb4;

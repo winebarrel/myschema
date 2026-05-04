@@ -20,8 +20,17 @@ type ForeignKey struct {
 }
 
 // SQL builds the standalone ALTER TABLE ... ADD CONSTRAINT statement.
+//
+// The owning table name is always emitted unqualified — myschema
+// operates on one database per invocation. The REFERENCES target is
+// emitted unqualified *only when it lives in the same database*; a
+// cross-database FK (`REFERENCES other_db.parent (id)`) keeps its
+// `other_db.` prefix so dropping it doesn't silently re-target the
+// FK at a same-named table in the current database. (Cross-database
+// FK *management* is out of scope per TODO.md, but emission must not
+// silently reinterpret one the user wrote by hand.)
 func (fk *ForeignKey) SQL() string {
-	sql := "ALTER TABLE " + Ident(fk.Database, fk.Table) +
+	sql := "ALTER TABLE " + Ident(fk.Table) +
 		" ADD CONSTRAINT " + Ident(fk.Name) +
 		" FOREIGN KEY ("
 	for i, c := range fk.Columns {
@@ -30,7 +39,11 @@ func (fk *ForeignKey) SQL() string {
 		}
 		sql += Ident(c)
 	}
-	sql += ") REFERENCES " + Ident(fk.RefDB, fk.RefTable) + "("
+	ref := Ident(fk.RefTable)
+	if fk.RefDB != "" && fk.RefDB != fk.Database {
+		ref = Ident(fk.RefDB, fk.RefTable)
+	}
+	sql += ") REFERENCES " + ref + "("
 	for i, c := range fk.RefCols {
 		if i > 0 {
 			sql += ", "

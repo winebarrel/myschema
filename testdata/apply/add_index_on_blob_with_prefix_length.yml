@@ -23,6 +23,6 @@ desired: |
   );
 
 applied: |
-  CREATE INDEX idx_payload ON myschema_test.t (payload(100));
+  CREATE INDEX idx_payload ON t (payload(100));
 
 verify_no_drift: true

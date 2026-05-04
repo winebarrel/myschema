@@ -31,7 +31,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.accts REORGANIZE PARTITION pAB INTO (
+  ALTER TABLE accts REORGANIZE PARTITION pAB INTO (
     partition pAB values in (1, 2) comment 'new'
   );
 

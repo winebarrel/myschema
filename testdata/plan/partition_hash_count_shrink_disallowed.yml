@@ -18,4 +18,4 @@ desired: |
 plan: ""
 
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.events COALESCE PARTITION 4;
+  -- skipped: ALTER TABLE events COALESCE PARTITION 4;

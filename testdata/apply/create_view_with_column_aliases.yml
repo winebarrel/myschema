@@ -21,6 +21,6 @@ desired: |
   CREATE VIEW v_users (uid, uname) AS SELECT id, name FROM users;
 
 applied: |
-  CREATE OR REPLACE VIEW myschema_test.v_users (uid, uname) AS select id, `name` from users;
+  CREATE OR REPLACE VIEW v_users (uid, uname) AS select id, `name` from users;
 
 verify_no_drift: true

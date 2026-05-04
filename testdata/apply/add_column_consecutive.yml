@@ -26,7 +26,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.t ADD COLUMN a varchar(64) AFTER id;
-  ALTER TABLE myschema_test.t ADD COLUMN b varchar(64) AFTER a;
+  ALTER TABLE t ADD COLUMN a varchar(64) AFTER id;
+  ALTER TABLE t ADD COLUMN b varchar(64) AFTER a;
 
 verify_no_drift: true

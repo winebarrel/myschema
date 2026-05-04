@@ -32,6 +32,6 @@ desired: |
 alter_algorithm: INSTANT
 
 applied: |
-  ALTER TABLE myschema_test.t ADD COLUMN flag tinyint(1) NOT NULL DEFAULT 0 AFTER id, ALGORITHM=INSTANT;
+  ALTER TABLE t ADD COLUMN flag tinyint(1) NOT NULL DEFAULT 0 AFTER id, ALGORITHM=INSTANT;
 
 verify_no_drift: true

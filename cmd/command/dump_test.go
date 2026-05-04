@@ -27,7 +27,7 @@ func TestDump_Run(t *testing.T) {
 	require.NoError(t, cmd.Run(ctx, client, &buf))
 	got := buf.String()
 	assert.Contains(t, got, "-- Dump of database "+testutil.DefaultDB)
-	assert.Contains(t, got, "CREATE TABLE "+testutil.DefaultDB+".users")
+	assert.Contains(t, got, "CREATE TABLE "+"users")
 }
 
 func TestDump_Run_EmptyDatabase(t *testing.T) {
