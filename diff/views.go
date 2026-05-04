@@ -2,7 +2,7 @@ package diff
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/myschema/parser"
@@ -91,7 +91,7 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 	for k := range views.All() {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	dep := make(map[string][]string, len(keys))
 	rev := make(map[string][]string, len(keys))
@@ -137,7 +137,7 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 				next = append(next, m)
 			}
 		}
-		sort.Strings(next)
+		slices.Sort(next)
 		queue = append(queue, next...)
 	}
 

@@ -2,11 +2,13 @@ package myschema_test
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/winebarrel/myschema"
 	"github.com/winebarrel/myschema/internal/testutil"
 )
@@ -16,6 +18,7 @@ type applyTestCase struct {
 	Init           string   `yaml:"init"`              // SQL to seed the test DB
 	Desired        string   `yaml:"desired"`           // SQL passed to apply
 	Applied        string   `yaml:"applied,omitempty"` // expected SQL written to apply's writer
+	Error          string   `yaml:"error,omitempty"`   // substring expected in apply error (mutually exclusive with Applied / VerifyNoDrift)
 	AllowDrop      []string `yaml:"allow_drop,omitempty"`
 	Include        []string `yaml:"include,omitempty"`
 	Exclude        []string `yaml:"exclude,omitempty"`
@@ -48,6 +51,20 @@ func TestApplyYAML(t *testing.T) {
 				AlterLock:      tc.AlterLock,
 			},
 		}, &buf)
+
+		if tc.Error != "" {
+			// Enforce the documented mutually-exclusive contract so a
+			// malformed fixture (Error set alongside Applied or
+			// VerifyNoDrift) can't silently skip the success-path
+			// assertions below.
+			require.Empty(t, tc.Applied,
+				"applyTestCase.Error and Applied are mutually exclusive")
+			require.Nil(t, tc.VerifyNoDrift,
+				"applyTestCase.Error makes VerifyNoDrift moot — leave it unset")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.Error)
+			return
+		}
 		require.NoError(t, err)
 
 		assert.Equal(t,
@@ -82,4 +99,25 @@ func TestApplyYAML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, strings.TrimSpace(plan.SQL), "drift after apply")
 	})
+}
+
+func TestApply_BadDSNError(t *testing.T) {
+	// Pins the apply.go error-wrap path through Database() failing on a
+	// malformed DSN.
+	c := myschema.NewClient(&myschema.Options{DSN: "garbage"})
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{}, nil)
+	require.Error(t, err)
+}
+
+func TestApply_DSNNonexistentDatabase(t *testing.T) {
+	// Pins the apply.go connect() error path: DSN parses fine but the
+	// referenced database doesn't exist, so the underlying driver
+	// rejects the connection at first use. Surfaces from connect() →
+	// Apply returns the wrapped error.
+	//
+	// Built off MYSCHEMA_TEST_DSN so the MySQL 9.x CI leg (port 3307)
+	// hits the right server.
+	c := newClientWithDB(t, "no_such_db_for_myschema_tests_xyz")
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{}, nil)
+	require.Error(t, err)
 }

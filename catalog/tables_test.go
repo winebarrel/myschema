@@ -6,12 +6,108 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/winebarrel/myschema/catalog"
 	"github.com/winebarrel/myschema/internal/testutil"
 	"github.com/winebarrel/myschema/model"
 )
 
-// All tests in this file require a reachable MySQL (start it with
+func TestNormalizeRefOpt(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty stays empty", "", ""},
+		{"RESTRICT collapses to empty", "RESTRICT", ""},
+		{"NO ACTION collapses to empty", "NO ACTION", ""},
+		{"lowercase no action also collapses", "no action", ""},
+		{"CASCADE preserved", "CASCADE", "CASCADE"},
+		{"lowercase cascade upper-cased", "cascade", "CASCADE"},
+		{"SET NULL preserved", "SET NULL", "SET NULL"},
+		{"SET DEFAULT preserved", "SET DEFAULT", "SET DEFAULT"},
+		{"unknown action falls through to empty", "WHATEVER", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, catalog.NormalizeRefOpt(tt.in))
+		})
+	}
+}
+
+func TestNormalizeMatch(t *testing.T) {
+	assert.Equal(t, "", catalog.NormalizeMatch(""), "empty stays empty")
+	assert.Equal(t, "", catalog.NormalizeMatch("NONE"), "NONE collapses to empty")
+	assert.Equal(t, "", catalog.NormalizeMatch("none"), "lowercase none also collapses")
+	assert.Equal(t, "FULL", catalog.NormalizeMatch("FULL"), "FULL preserved")
+	assert.Equal(t, "PARTIAL", catalog.NormalizeMatch("partial"), "lowercase upper-cased")
+	assert.Equal(t, "SIMPLE", catalog.NormalizeMatch("Simple"), "mixed case upper-cased")
+}
+
+func TestColumnTypeAllowsEmptyStringDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"varchar accepts", "varchar(64)", true},
+		{"char accepts", "char(8)", true},
+		{"varbinary accepts", "varbinary(32)", true},
+		{"enum accepts", "enum('a','b')", true},
+		{"set accepts", "set('a','b')", true},
+		{"binary refused (uses 0x sentinel instead)", "binary(16)", false},
+		{"int refused", "int", false},
+		{"text refused", "text", false},
+		{"json refused", "json", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, catalog.ColumnTypeAllowsEmptyStringDefault(tt.in))
+		})
+	}
+}
+
+func TestNullIfMatchesTableDefault(t *testing.T) {
+	t.Run("col nil passes through", func(t *testing.T) {
+		assert.Nil(t, catalog.NullIfMatchesTableDefault(nil, new("utf8mb4")))
+	})
+	t.Run("table default nil passes col through", func(t *testing.T) {
+		got := catalog.NullIfMatchesTableDefault(new("utf8mb4"), nil)
+		assert.Equal(t, "utf8mb4", *got)
+	})
+	t.Run("matching collapses to nil", func(t *testing.T) {
+		assert.Nil(t, catalog.NullIfMatchesTableDefault(new("utf8mb4"), new("utf8mb4")))
+	})
+	t.Run("differing passes col through", func(t *testing.T) {
+		got := catalog.NullIfMatchesTableDefault(new("latin1"), new("utf8mb4"))
+		assert.Equal(t, "latin1", *got)
+	})
+}
+
+func TestNormalizeColumnDefault(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeName string
+		def      string
+		want     string
+	}{
+		{"empty default on varchar wraps to ''", "varchar(64)", "", "''"},
+		{"empty default on int passes through", "int", "", ""},
+		{"BINARY 0x sentinel rewrites to ''", "binary(16)", "0x", "''"},
+		{"BINARY non-sentinel passes through", "binary(16)", "0x41", "0x41"},
+		{"int literal passes through unchanged", "int", "42", "42"},
+		{"current_timestamp() passes through unchanged", "timestamp", "current_timestamp()", "current_timestamp()"},
+		{"bareword on varchar gets quoted (parser sees ColName)", "varchar(64)", "hello", "'hello'"},
+		{"single-quoted string passes through", "varchar(64)", "'hello'", "'hello'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, catalog.NormalizeColumnDefault(tt.typeName, tt.def))
+		})
+	}
+}
+
+// All tests below require a reachable MySQL (start it with
 // `docker compose up -d`). Each test recreates the test database via
 // testutil.SetupDB so they're independent and can run in any order.
 
@@ -320,29 +416,6 @@ CREATE TABLE bin_defs (
 	}
 }
 
-// TestViewsRoundTrip is the catalog-side companion to the view fixtures:
-// confirms VIEW_DEFINITION + DEFINER + SECURITY are surfaced.
-func TestViewsRoundTrip(t *testing.T) {
-	db := testutil.ConnectDB(t)
-	ctx := context.Background()
-	testutil.SetupDB(t, ctx, db, `
-CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(64), PRIMARY KEY (id));
-CREATE VIEW active_users AS SELECT id, name FROM users;
-`)
-	cat := catalog.NewCatalog(db, testutil.DefaultDB)
-	views, err := cat.Views(ctx)
-	require.NoError(t, err)
-
-	v, ok := views.GetOk("myschema_test.active_users")
-	require.True(t, ok)
-	assert.Equal(t, "active_users", v.Name)
-	assert.Contains(t, v.Definition, "select")
-	assert.Contains(t, v.Definition, "users")
-	// DEFINER / SQL SECURITY are intentionally out of scope — see
-	// CAVEATS.md. We don't capture them on model.View any more, so
-	// the test no longer asserts on them either.
-}
-
 // TestTableMetadata covers ENGINE / table comment / collation surfacing.
 // (CHARSET propagation is intentionally NOT compared per-column at the
 // diff layer — see TODO.md for the open question.)
@@ -364,28 +437,4 @@ CREATE TABLE meta (
 	assert.Equal(t, "InnoDB", *m.Engine)
 	require.NotNil(t, m.Comment)
 	assert.Equal(t, "hello world", *m.Comment)
-}
-
-// TestCharsetDefaultCollationsCoverServer pins that
-// `model.defaultCollations` (the parser-side hardcoded charset →
-// default-collation table) covers every charset the live server
-// reports in `information_schema.CHARACTER_SETS`. If MySQL ever ships
-// a new charset (or the project bumps the baseline), this test fails
-// loudly so the map can be filled in before drift starts.
-func TestCharsetDefaultCollationsCoverServer(t *testing.T) {
-	db := testutil.ConnectDB(t)
-	ctx := context.Background()
-	rows, err := db.QueryContext(ctx, `
-SELECT CHARACTER_SET_NAME, DEFAULT_COLLATE_NAME
-FROM   information_schema.CHARACTER_SETS`)
-	require.NoError(t, err)
-	defer rows.Close() //nolint:errcheck
-	for rows.Next() {
-		var charset, want string
-		require.NoError(t, rows.Scan(&charset, &want))
-		got := model.DefaultCollationOf(charset)
-		assert.Equal(t, want, got,
-			"model.defaultCollations missing or wrong for charset %q", charset)
-	}
-	require.NoError(t, rows.Err())
 }

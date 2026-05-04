@@ -18,8 +18,7 @@ the catalog side is read with `database/sql` +
 ```sh
 make build           # go build ./cmd/myschema (outputs ./myschema)
 make vet             # go vet ./...
-make test            # go test -p 1 -v ./... (requires a reachable MySQL)
-make test-unit       # parser + diff + model only, no network
+make test            # go test -p 1 -v -coverpkg=./... ./... (requires a reachable MySQL)
 make lint            # golangci-lint run
 make fix             # golangci-lint run --fix
 make test-scenario   # bash test/scenario/run.sh (CLI scenario suite)
@@ -52,9 +51,11 @@ make test
 ```
 
 `make test` runs with `-p 1` (sequential packages) because integration tests
-share a single MySQL instance.
-
-`make test-unit` is the safe fallback when no MySQL is running.
+share a single MySQL instance. Every test in the suite assumes MySQL is
+reachable — there is no MySQL-free `test-unit` lane any more (model-level
+unit tests still don't open a connection themselves, but they're run as
+part of the same `go test ./...` invocation, so MySQL has to be up
+either way).
 
 For forward-compat testing against MySQL 9.x, `compose.yaml` defines a
 second `mysql9` service on port 3307. `docker compose up -d` brings

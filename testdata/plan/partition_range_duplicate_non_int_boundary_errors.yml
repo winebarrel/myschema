@@ -1,0 +1,29 @@
+# `validateDesiredRangeMonotonic` rejects desired SQL whose
+# RANGE partition list contains two consecutive partitions
+# with the same NON-integer boundary (here: the same
+# TO_DAYS(...) expression literal). For integer boundaries the
+# stricter `int strictly increasing` check fires first; this
+# fixture pins the textual-equality fallback used when at
+# least one boundary doesn't parse back as an int64.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      d DATE NOT NULL,
+      PRIMARY KEY (id, d)
+  ) PARTITION BY RANGE (TO_DAYS(d)) (
+      PARTITION p1 VALUES LESS THAN (TO_DAYS('2026-01-01')),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      d DATE NOT NULL,
+      PRIMARY KEY (id, d)
+  ) PARTITION BY RANGE (TO_DAYS(d)) (
+      PARTITION p1 VALUES LESS THAN (TO_DAYS('2026-01-01')),
+      PARTITION p2 VALUES LESS THAN (TO_DAYS('2026-01-01')),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: 'both use the same boundary'

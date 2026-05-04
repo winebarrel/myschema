@@ -55,3 +55,57 @@ func TestViewReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeViewDefinition(t *testing.T) {
+	tests := []struct {
+		name      string
+		def       string
+		defaultDB string
+		want      string
+	}{
+		{
+			name: "empty stays empty",
+			def:  "",
+			want: "",
+		},
+		{
+			name:      "lowercases keywords",
+			def:       "SELECT id FROM users",
+			defaultDB: "app",
+			want:      "select id from users",
+		},
+		{
+			name:      "strips db.table.col qualifiers from columns",
+			def:       "SELECT `app`.`users`.`id` FROM `app`.`users`",
+			defaultDB: "app",
+			want:      "select id from users",
+		},
+		{
+			name:      "strips AS alias (redundant on round-trip)",
+			def:       "SELECT id AS id FROM users",
+			defaultDB: "app",
+			want:      "select id from users",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parser.NormalizeViewDefinition(tt.def, tt.defaultDB)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNormalizeViewDefinitionParseError(t *testing.T) {
+	_, err := parser.NormalizeViewDefinition("not valid sql at all", "app")
+	require.Error(t, err)
+}
+
+func TestRestoreSelectLower(t *testing.T) {
+	t.Run("nil node returns empty", func(t *testing.T) {
+		got, err := parser.RestoreSelectLower(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "", got)
+	})
+}

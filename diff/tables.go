@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/winebarrel/myschema/model"
@@ -691,13 +692,8 @@ func indexEqual(a, b *model.Index) bool {
 	if a.KeyType != b.KeyType {
 		return false
 	}
-	if len(a.Parts) != len(b.Parts) {
+	if !slices.Equal(a.Parts, b.Parts) {
 		return false
-	}
-	for i := range a.Parts {
-		if a.Parts[i] != b.Parts[i] {
-			return false
-		}
 	}
 	if normalizeIndexType(a.IndexType) != normalizeIndexType(b.IndexType) {
 		return false
@@ -746,7 +742,7 @@ func diffForeignKeys(fqtn string, current, desired *orderedmap.Map[string, *mode
 }
 
 func fkEqual(a, b *model.ForeignKey) bool {
-	if !sliceEq(a.Columns, b.Columns) || !sliceEq(a.RefCols, b.RefCols) {
+	if !slices.Equal(a.Columns, b.Columns) || !slices.Equal(a.RefCols, b.RefCols) {
 		return false
 	}
 	if a.RefDB != b.RefDB || a.RefTable != b.RefTable {
@@ -757,18 +753,6 @@ func fkEqual(a, b *model.ForeignKey) bool {
 	}
 	if a.MatchType != b.MatchType {
 		return false
-	}
-	return true
-}
-
-func sliceEq[T comparable](a, b []T) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
 	}
 	return true
 }

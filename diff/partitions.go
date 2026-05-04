@@ -1,8 +1,9 @@
 package diff
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -496,7 +497,7 @@ func partitionHeaderEqual(a, b *sqlparser.PartitionOption) bool {
 	if a.Type != b.Type || a.IsLinear != b.IsLinear || a.KeyAlgorithm != b.KeyAlgorithm {
 		return false
 	}
-	if !stringSliceEqual(colListNames(a.ColList), colListNames(b.ColList)) {
+	if !slices.Equal(colListNames(a.ColList), colListNames(b.ColList)) {
 		return false
 	}
 	// Compare expressions through vitess's formatter directly. Both
@@ -527,18 +528,6 @@ func formatExpr(e sqlparser.Expr) string {
 	return sqlparser.String(e)
 }
 
-func stringSliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // partitionNameListEqual reports whether the two definition slices
 // have the same partition names in the same order. Used by the
 // REORGANIZE branch to confirm "pure per-partition definition
@@ -553,15 +542,9 @@ func stringSliceEqual(a, b []string) bool {
 // would slip past this check and tip the diff into the
 // disjoint-name "split / merge / reorder" error branch.
 func partitionNameListEqual(a, b []*sqlparser.PartitionDefinition) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if !strings.EqualFold(a[i].Name.String(), b[i].Name.String()) {
-			return false
-		}
-	}
-	return true
+	return slices.EqualFunc(a, b, func(x, y *sqlparser.PartitionDefinition) bool {
+		return strings.EqualFold(x.Name.String(), y.Name.String())
+	})
 }
 
 // partitionByNameOrderPreserving walks `cur` once, matching each
@@ -1112,7 +1095,7 @@ func temporarilySortListValues(a, b *sqlparser.PartitionDefinition) func() {
 }
 
 func sortValTupleByFormattedString(vs sqlparser.ValTuple) {
-	sort.Slice(vs, func(i, j int) bool {
-		return sqlparser.String(vs[i]) < sqlparser.String(vs[j])
+	slices.SortFunc(vs, func(a, b sqlparser.Expr) int {
+		return cmp.Compare(sqlparser.String(a), sqlparser.String(b))
 	})
 }

@@ -1,11 +1,13 @@
 package myschema_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/winebarrel/myschema"
 	"github.com/winebarrel/myschema/internal/testutil"
 )
@@ -64,4 +66,23 @@ func TestPlanYAML(t *testing.T) {
 			"disallowed-drops mismatch",
 		)
 	})
+}
+
+func TestPlan_BadDSNError(t *testing.T) {
+	c := myschema.NewClient(&myschema.Options{DSN: "garbage"})
+	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
+	require.Error(t, err)
+}
+
+func TestPlan_DSNNonexistentDatabase(t *testing.T) {
+	// DSN parses fine but the named database doesn't exist — Database()
+	// succeeds (it just splits the DSN), then connect() reaches the
+	// driver and the server rejects the access. Plan returns the
+	// wrapped connect error.
+	//
+	// Built off MYSCHEMA_TEST_DSN so the MySQL 9.x CI leg (port 3307)
+	// hits the right server.
+	c := newClientWithDB(t, "no_such_db_for_myschema_tests_xyz")
+	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
+	require.Error(t, err)
 }
