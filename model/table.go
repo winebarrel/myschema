@@ -179,8 +179,14 @@ func constraintInlineSQL(con *Constraint) string {
 	case CheckConstraint:
 		// con.Definition is already `CHECK (<expr>)` — see parser
 		// addTableConstraint and catalog loadCheckConstraints. Don't
-		// prepend another CHECK keyword.
-		return "CONSTRAINT " + Ident(con.Name) + " " + con.Definition
+		// prepend another CHECK keyword. The optional `NOT ENFORCED`
+		// suffix is appended here based on Enforced (parser stores
+		// d.Enforced, catalog reads tc.ENFORCED).
+		body := con.Definition
+		if !con.Enforced {
+			body += " NOT ENFORCED"
+		}
+		return "CONSTRAINT " + Ident(con.Name) + " " + body
 	}
 	return con.Definition
 }

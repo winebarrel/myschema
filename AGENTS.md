@@ -13,6 +13,24 @@ The desired side is parsed with `vitess.io/vitess/go/vt/sqlparser`;
 the catalog side is read with `database/sql` +
 `github.com/go-sql-driver/mysql`.
 
+## Requirements
+
+**MySQL 8.0+ is required.** myschema's catalog reader assumes
+features that don't exist on 5.7:
+
+- `information_schema.CHECK_CONSTRAINTS` (8.0.16+) — without it,
+  CHECK constraints round-trip empty.
+- `information_schema.STATISTICS.IS_VISIBLE` (8.0+) — the catalog
+  query references this column unconditionally; on 5.7 the index
+  load fails.
+- `ALTER TABLE … RENAME COLUMN` (8.0+) — emitted for the
+  `-- myschema:renamed-from` directive on columns; rejected on 5.7.
+
+CI runs against MySQL 8.0 (default) and MySQL 9.4 (forward-compat,
+see `make test-mysql9`). Older versions are not tested; some
+schemas may happen to work, but features that touch the gaps above
+will fail.
+
 ## Build & test
 
 ```sh

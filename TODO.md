@@ -7,21 +7,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Medium — silent diffs / fidelity gaps
 
-- **CHECK constraint `NOT ENFORCED` not preserved.** The
-  `Enforced` flag is already plumbed end-to-end on the desired side
-  (`model.Constraint.Enforced`, `diff.constraintEqual` compares it),
-  but `catalog.loadCheckConstraints` hard-codes `Enforced: true`
-  instead of selecting `information_schema.TABLE_CONSTRAINTS.ENFORCED`
-  (which the catalog query already joins to `CHECK_CONSTRAINTS` for
-  the table-name lookup). Result: a desired-side `CHECK (...) NOT
-  ENFORCED` applies once, then every subsequent plan emits `DROP
-  CHECK chk + ADD CONSTRAINT chk CHECK (...) NOT ENFORCED` —
-  perpetual drift loop. Fix: select `tc.ENFORCED` and feed it into
-  `model.Constraint.Enforced`; verify `addConstraintSQL` emits the
-  suffix when `Enforced=false`. Surfaced while writing the
-  regression-coverage fixtures (PR #58); fixture withheld until the
-  catalog reader learns the flag or CAVEATS.md documents the
-  limitation explicitly.
 - **`TIMESTAMP NULL DEFAULT NULL` round-trip drifts.** Same shape:
   `verify_no_drift` fails because re-plan repeatedly emits
   `MODIFY COLUMN ts timestamp DEFAULT null` even though the

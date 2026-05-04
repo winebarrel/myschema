@@ -649,7 +649,11 @@ func addConstraintSQL(tableIdent string, c *model.Constraint) string {
 	case model.PrimaryKeyConstraint:
 		return "ALTER TABLE " + tableIdent + " ADD PRIMARY KEY " + c.Definition + ";"
 	case model.CheckConstraint:
-		return "ALTER TABLE " + tableIdent + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + c.Definition + ";"
+		body := c.Definition
+		if !c.Enforced {
+			body += " NOT ENFORCED"
+		}
+		return "ALTER TABLE " + tableIdent + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + body + ";"
 	}
 	return "ALTER TABLE " + tableIdent + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + c.Definition + ";"
 }
