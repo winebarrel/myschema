@@ -52,14 +52,18 @@ import (
 //     current) → DROP PARTITION — head, middle, and tail
 //     removals are all generated, since `ALTER TABLE … DROP
 //     PARTITION p1, p2` accepts a discontinuous name list.
-//     Pure value-change of existing partitions (drops + adds
-//     both non-empty AND the full catalog / desired name lists
-//     line up position-by-position with identical names) →
-//     `REORGANIZE PARTITION p1, p2, … INTO (…)`. Anything else
-//     (split / merge / reorder / interior insert — i.e. the
-//     name lists don't line up) → error so the user falls back
-//     to a hand-written REORGANIZE with explicit boundaries
-//     (or a DROP+ADD pair if discarding data is intended).
+//     Per-partition definition change of existing partitions
+//     (drops + adds both non-empty AND the full catalog /
+//     desired name lists line up position-by-position with the
+//     same names case-insensitively) → `REORGANIZE PARTITION
+//     p1, p2, … INTO (…)`. Covers `VALUES …` boundary tweaks
+//     plus COMMENT / MAX_ROWS / TABLESPACE / other per-partition
+//     options that round-trip through vitess's
+//     PartitionDefinition formatter. Anything else (split /
+//     merge / reorder / interior insert — i.e. the name lists
+//     don't line up) → error so the user falls back to a hand-
+//     written REORGANIZE with explicit boundaries (or a DROP+ADD
+//     pair if discarding data is intended).
 //
 // CAVEATS.md "Partitioning" documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {
@@ -222,9 +226,15 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			}
 		}
 		if first < 0 {
-			// Every position byte-equal already — only reachable
-			// when the raw-string fast path missed a formatting
-			// drift the formatter can resolve.
+			// Every position compares equal under partitionDefEqual,
+			// even though the raw-string fast path didn't catch it.
+			// Reachable for: formatter-resolved formatting drift
+			// (whitespace, identifier casing inside the partition
+			// expression), case-only partition-name diffs like
+			// `pAB → PAB` (EqualFold in partitionDefEqual), and LIST
+			// `VALUES IN (…)` permutations like `(1,2) → (2,1)`
+			// (temporarilySortListValues in partitionDefEqual). All
+			// no-ops at the SQL level — emit nothing.
 			return nil, nil, nil
 		}
 		if curPO.Type == sqlparser.RangeType && last < len(curDefs)-1 &&

@@ -1,0 +1,39 @@
+# Per-partition MAX_ROWS-only diff goes through the same
+# REORGANIZE branch as the COMMENT-only fixture, but MAX_ROWS
+# is a different field on `*PartitionDefinitionOptions` and
+# SHOW CREATE TABLE renders it independently
+# (`max_rows 1000`, no `=`), so it can drift independently
+# from COMMENT round-trip. Pin a second per-partition option
+# end-to-end so the broader "any per-partition option that
+# round-trips through vitess's PartitionDefinition formatter"
+# claim isn't only backed by the COMMENT path. (TABLESPACE
+# would round out the trio but InnoDB rejects partitioned
+# tables in shared tablespaces — Error 1478 — and per-test
+# CREATE TABLESPACE setup is out of proportion for one
+# fixture.)
+init: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pAB VALUES IN (1, 2) MAX_ROWS=1000,
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION pAB VALUES IN (1, 2) MAX_ROWS=2000,
+      PARTITION pCD VALUES IN (3, 4)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.accts REORGANIZE PARTITION pAB INTO (
+    partition pAB values in (1, 2) max_rows 2000
+  );
+
+verify_no_drift: true
