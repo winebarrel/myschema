@@ -180,8 +180,14 @@ very different runtime cost and safety:
   does **not** require `--allow-drop=column` for this — the
   policy applies to whole-column drops, not enum-value drops —
   so the removal slips through with the same `MODIFY COLUMN`.
-- **Rename** (e.g. `paid` → `settled`): equivalent to remove + add
-  from MySQL's perspective; rows with the old value are truncated.
+- **Rename in place** (e.g. position 2 `'paid'` → `'settled'`,
+  positions 1 and 3 unchanged): same risk profile as reorder, not
+  truncation. ENUM is stored as a 1-based integer index and SET as
+  a bit position; renaming a label without shifting its position
+  leaves the stored integers as-is and silently relabels them, so
+  rows that previously displayed `'paid'` now display `'settled'`
+  with no warning. (A "rename" that also moves the value to a
+  different position collapses back into the reorder case above.)
 
 **Workarounds.**
 
