@@ -210,10 +210,12 @@ fires when the shape is unambiguous:
   no compound diffs (body changes on prefix partitions
   disqualify so the operator splits the change rather than
   bundling it);
-- extras' names don't reuse any name already present in
-  catalog (rules out reorder / dup-name desired SQL — vitess
-  accepts duplicate partition names in CREATE TABLE so this
-  guard is real).
+- extras' names are unique — both vs catalog names (rules
+  out reorder / rename-and-insert) AND within the extras
+  slice itself (rules out copy-paste typos in desired SQL
+  that vitess accepts but MySQL would reject at apply with
+  a duplicate-partition-name error). Comparison is case-
+  insensitive (MySQL identifier rule).
 
 Anything outside the trigger envelope falls through to the
 existing "Split / merge / reorder" error so the operator

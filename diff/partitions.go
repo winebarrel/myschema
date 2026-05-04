@@ -64,7 +64,7 @@ import (
 //     insert (catalog ends in `VALUES LESS THAN MAXVALUE` and
 //     desired slots new partitions strictly before the catch-
 //     all with both prefix and catch-all unchanged) →
-//     `REORGANIZE pmax INTO (extras…, pmax)` (so MySQL
+//     `REORGANIZE PARTITION pmax INTO (extras…, pmax)` (so MySQL
 //     Error 1481 doesn't surface from a naive ADD). Anything
 //     else (split / merge / reorder, mid-prefix interior
 //     insert, retention roll-forward — i.e. the name lists
@@ -219,7 +219,7 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//       strictly before the catch-all, prefix and catch-
 	//       all unchanged) is recognised by
 	//       `detectCatchAllInteriorInsert` further down and
-	//       routed to a single `REORGANIZE pmax INTO (extras…,
+	//       routed to a single `REORGANIZE PARTITION pmax INTO (extras…,
 	//       pmax)` so MySQL Error 1481 doesn't surface from a
 	//       naive ADD.
 	//     - any other "drops AND adds both non-empty" shape
@@ -687,7 +687,7 @@ func detectCatchAllInteriorInsert(curPO *sqlparser.PartitionOption, curDefs, des
 	// partition twice). vitess accepts duplicate partition
 	// names in CREATE TABLE and validateDesiredRangeMonotonic
 	// only checks boundary values, so without the second arm of
-	// the check we'd happily emit a `REORGANIZE pmax INTO
+	// the check we'd happily emit a `REORGANIZE PARTITION pmax INTO
 	// (p_new …, p_new …, pmax …)` that MySQL would reject with
 	// a duplicate-partition-name error at apply time.
 	seenNames := make(map[string]struct{}, n+m)
