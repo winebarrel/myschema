@@ -290,9 +290,6 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	return res, nil
 }
 
-// droppedColumns returns the names of columns present in current but
-// absent from desired — i.e. columns the diff is about to remove from
-// the table — in current's iteration order.
 // uniqueKeyPartitionCoverGap reports the first unique key on the
 // desired-side table whose columns don't cover every entry in
 // `required`. Returns "" when all unique keys (PRIMARY KEY plus
@@ -332,6 +329,9 @@ func uniqueKeyPartitionCoverGap(t *model.Table, required []string) string {
 	return ""
 }
 
+// droppedColumns returns the names of columns present in current but
+// absent from desired — i.e. columns the diff is about to remove from
+// the table — in current's iteration order.
 func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) []string {
 	var out []string
 	for name := range current.Keys() {
