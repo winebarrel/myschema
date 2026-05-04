@@ -1,0 +1,30 @@
+# Catch-all body changes (COMMENT added) AND a partition is
+# inserted in front of it. Auto-detect must NOT fire because
+# the catch-all is no longer `partitionDefEqual` between
+# catalog and desired (T4 fails — the catch-all body diverges).
+# The strict spec keeps this case out of auto-handle so the
+# operator's intent stays explicit; they can either run the
+# manual REORGANIZE that combines both or split the change
+# into two PRs.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION pmax VALUES LESS THAN MAXVALUE COMMENT 'archive'
+  );
+
+error: 'split / merge / reorder'

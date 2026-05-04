@@ -1,0 +1,39 @@
+# RANGE catch-all interior insert where the catch-all itself
+# has a case-only name diff between catalog and desired
+# (`pmax` vs `PMAX`). The auto-detect's catch-all match goes
+# through `partitionDefEqual` which folds names case-
+# insensitively (round 5 fix from PR #53), so this still
+# triggers the auto-emit. The OLD-name list of the generated
+# REORGANIZE uses catalog's casing (`pmax`) so MySQL's
+# identifier resolution doesn't depend on case. Pin the
+# behaviour so a regression of `partitionDefEqual` doesn't
+# silently route this into the split / merge / reorder error
+# path.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION PMAX VALUES LESS THAN MAXVALUE
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION pmax INTO (
+    partition p2022 values less than (2023),
+    partition pmax values less than maxvalue
+  );
+
+verify_no_drift: true

@@ -1,0 +1,29 @@
+# Prefix partition body changes (`p2020` COMMENT added) AND a
+# new partition is inserted before the catch-all. Auto-detect
+# must NOT fire because catalog's prefix `p2020` is no longer
+# `partitionDefEqual` to desired's `p2020` (T5 fails — the
+# prefix-equal check rejects the shape). Strict spec: the
+# operator either splits the change or runs a manual
+# REORGANIZE combining the prefix tweak with the insert.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021) COMMENT 'pre-2021',
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: 'split / merge / reorder'

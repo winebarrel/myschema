@@ -1,0 +1,30 @@
+# Catalog has MAXVALUE catch-all; desired drops it AND adds a
+# replacement concrete-bound partition. Auto-detect must NOT
+# fire because desired's last partition isn't a catch-all (T4
+# fails). This is also fundamentally a narrowing of the total
+# range: trying `REORGANIZE pmax INTO (PARTITION p2030 VALUES
+# LESS THAN (2030))` would be rejected by MySQL with Error
+# 1520 ("Reorganize of range partitions cannot change total
+# ranges …") regardless. Pin the split / merge / reorder
+# fall-through.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2030 VALUES LESS THAN (2030)
+  );
+
+error: 'split / merge / reorder'
