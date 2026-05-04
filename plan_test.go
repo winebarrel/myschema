@@ -73,3 +73,15 @@ func TestPlan_BadDSNError(t *testing.T) {
 	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
 	require.Error(t, err)
 }
+
+func TestPlan_DSNNonexistentDatabase(t *testing.T) {
+	// DSN parses fine but the named database doesn't exist — Database()
+	// succeeds (it just splits the DSN), then connect() reaches the
+	// driver and the server rejects the access. Plan returns the
+	// wrapped connect error.
+	c := myschema.NewClient(&myschema.Options{
+		DSN: "root@tcp(127.0.0.1:3306)/no_such_db_for_myschema_tests_xyz",
+	})
+	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
+	require.Error(t, err)
+}

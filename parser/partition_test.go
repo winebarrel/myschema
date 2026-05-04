@@ -159,6 +159,38 @@ SUBPARTITION BY HASH (id) SUBPARTITIONS 2 (
 	assert.Contains(t, err.Error(), "out of scope")
 }
 
+func TestExtractPartitionFromShowCreateMalformed(t *testing.T) {
+	// `/*!` without a closing `*/` is malformed — the catalog reader
+	// surfaces the error rather than silently treating the table as
+	// unpartitioned.
+	_, err := parser.ExtractPartitionFromShowCreate("CREATE TABLE t (id INT)\n/*!50100 PARTITION BY RANGE (id)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed SHOW CREATE TABLE")
+}
+
+func TestExtractPartitionFromShowCreateTrailingNonPartitionBlock(t *testing.T) {
+	// A trailing /*! block whose body isn't `PARTITION BY …` (e.g. an
+	// extension that appends its own versioned comment) is treated as
+	// "not partitioned" — the table is unmanaged for partitioning.
+	got, err := parser.ExtractPartitionFromShowCreate(
+		"CREATE TABLE t (id INT)\n/*!50100 SOME_EXTENSION_DIRECTIVE */",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
+}
+
+func TestExtractPartitionFromShowCreateBodyMissingPartitionOption(t *testing.T) {
+	// The body starts with "PARTITION BY" so the prefix check passes,
+	// but vitess swallows the inner syntax error and returns no
+	// PartitionOption — surface the no-PartitionOption error so the
+	// catalog reader doesn't silently treat the table as unmanaged.
+	_, err := parser.ExtractPartitionFromShowCreate(
+		"CREATE TABLE t (id INT)\n/*!50100 PARTITION BY GARBAGE */",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no PartitionOption")
+}
+
 func TestParsePartitionClause(t *testing.T) {
 	t.Run("empty input returns nil with no error", func(t *testing.T) {
 		po, err := parser.ParsePartitionClause("")

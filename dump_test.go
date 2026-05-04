@@ -42,8 +42,27 @@ func TestDumpYAML(t *testing.T) {
 	})
 }
 
+func TestDumpResult_String(t *testing.T) {
+	// DumpResult satisfies fmt.Stringer (so callers can write it
+	// straight to a Writer). Pin the contract: String() returns the
+	// SQL field verbatim.
+	r := &myschema.DumpResult{SQL: "CREATE TABLE x (id INT);"}
+	assert.Equal(t, "CREATE TABLE x (id INT);", r.String())
+}
+
 func TestDump_BadDSNError(t *testing.T) {
 	c := myschema.NewClient(&myschema.Options{DSN: "garbage"})
+	_, err := c.Dump(context.Background(), &myschema.DumpOptions{})
+	require.Error(t, err)
+}
+
+func TestDump_DSNNonexistentDatabase(t *testing.T) {
+	// DSN parses fine but the named database doesn't exist — Database()
+	// succeeds (DSN-name split), then connect() reaches the driver and
+	// the server rejects the access. Dump returns the wrapped error.
+	c := myschema.NewClient(&myschema.Options{
+		DSN: "root@tcp(127.0.0.1:3306)/no_such_db_for_myschema_tests_xyz",
+	})
 	_, err := c.Dump(context.Background(), &myschema.DumpOptions{})
 	require.Error(t, err)
 }
