@@ -1,0 +1,21 @@
+# Idempotence: matching COMMENT on both sides must not fire any
+# diff. Pins the ptrEq short-circuit added to indexEqual.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT 'steady'
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT 'steady'
+  );
+
+applied: ""
+
+verify_no_drift: true

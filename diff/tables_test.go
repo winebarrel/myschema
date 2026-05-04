@@ -578,6 +578,24 @@ func TestIndexEqual(t *testing.T) {
 		b.Invisible = true
 		assert.False(t, diff.IndexEqual(a, b))
 	})
+	t.Run("comment differs", func(t *testing.T) {
+		a, b := base(), base()
+		ca, cb := "old", "new"
+		a.Comment, b.Comment = &ca, &cb
+		assert.False(t, diff.IndexEqual(a, b))
+	})
+	t.Run("comment added on one side", func(t *testing.T) {
+		a, b := base(), base()
+		c := "added"
+		a.Comment = &c // b stays nil
+		assert.False(t, diff.IndexEqual(a, b))
+	})
+	t.Run("identical comment compare equal", func(t *testing.T) {
+		a, b := base(), base()
+		ca, cb := "same", "same"
+		a.Comment, b.Comment = &ca, &cb
+		assert.True(t, diff.IndexEqual(a, b))
+	})
 }
 
 func TestFKEqual(t *testing.T) {

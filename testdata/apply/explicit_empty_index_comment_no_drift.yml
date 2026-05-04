@@ -1,0 +1,26 @@
+# Regression: a desired-side `KEY idx_a (a) COMMENT ''` against
+# catalog-side nil (i.e. no comment) used to fire DROP+CREATE on
+# every plan because the parser stored `&""` while the catalog
+# reader normalises empty INDEX_COMMENT to nil — `ptrEq(&"", nil)`
+# returned false. The parser-side fold of empty COMMENT to nil
+# matches the catalog invariant, so they compare equal and the
+# plan reports No changes.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT ''
+  );
+
+applied: ""
+
+verify_no_drift: true

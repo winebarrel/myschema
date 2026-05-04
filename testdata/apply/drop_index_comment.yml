@@ -1,0 +1,26 @@
+# Removing the COMMENT clause from an existing index. catalog
+# stores empty INDEX_COMMENT as "" then the catalog reader maps
+# "" to nil (Comment-only-when-non-empty branch in tables.go),
+# so desired-side `nil` should match catalog-side `nil` after
+# the DROP+CREATE re-applies without a COMMENT clause.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT 'to be removed'
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a)
+  );
+
+applied: |
+  ALTER TABLE t DROP INDEX idx_a;
+  CREATE INDEX idx_a ON t (a);
+
+verify_no_drift: true

@@ -1,0 +1,26 @@
+# Changing an existing index's COMMENT must fire DROP+CREATE
+# (MySQL has no ALTER INDEX … COMMENT syntax, only inline COMMENT
+# on the index definition). Pre-fix indexEqual ignored Comment
+# entirely, so the change was silently a no-op even after the
+# parser fix landed.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT 'old note'
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT 'new note'
+  );
+
+applied: |
+  ALTER TABLE t DROP INDEX idx_a;
+  CREATE INDEX idx_a ON t (a) COMMENT 'new note';
+
+verify_no_drift: true

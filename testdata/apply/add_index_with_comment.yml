@@ -1,0 +1,25 @@
+# Brand-new secondary index with a COMMENT clause. Pre-fix the
+# parser dropped the COMMENT silently, so dump → re-apply would
+# lose the user's annotation. Pin the round-trip end-to-end:
+# parser preserves Comment, (*Index).SQL emits it, MySQL stores
+# it via INDEX_COMMENT, catalog reads it back, verify_no_drift
+# confirms convergence.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_a (a) COMMENT 'business note'
+  );
+
+applied: |
+  CREATE INDEX idx_a ON t (a) COMMENT 'business note';
+
+verify_no_drift: true
