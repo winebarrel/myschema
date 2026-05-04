@@ -21,6 +21,31 @@ Open items only. Done work is in `git log` / closed PRs.
       reads / orders the tables it manages, so an FK whose target lives
       in another database is treated as a black box. Apply will fail
       if the referenced table doesn't already exist; plan can't help.
+- [ ] **CHECK constraint `NOT ENFORCED` not preserved.** The catalog
+      tracks the flag in
+      `information_schema.CHECK_CONSTRAINTS.ENFORCED`, but the catalog
+      reader / `model.Constraint` / diff layer drop it. Result: a
+      desired-side `CHECK (...) NOT ENFORCED` apply once, then every
+      subsequent plan emits `DROP CHECK chk + ADD CONSTRAINT chk
+      CHECK (...) NOT ENFORCED` — perpetual drift loop. Surfaced
+      while writing the regression-coverage fixtures (PR #58); fixture
+      withheld until either the diff layer learns the field or
+      CAVEATS.md documents the limitation explicitly.
+- [ ] **`TIMESTAMP NULL DEFAULT NULL` round-trip drifts.** Same shape:
+      `verify_no_drift` fails because re-plan repeatedly emits
+      `MODIFY COLUMN ts timestamp DEFAULT null` even though the
+      column already has that default. Likely a normalisation gap
+      between `information_schema.COLUMNS.COLUMN_DEFAULT` (which
+      returns the default in a form the parser doesn't fold back to
+      the same expression) and the desired-side AST. Surfaced
+      while writing the regression-coverage fixtures (PR #58); same
+      treatment as the `NOT ENFORCED` gap above.
+- [ ] **Table-level `COMMENT='…'` changes are silent.** Catalog has
+      `information_schema.TABLES.TABLE_COMMENT`, but `model.Table`
+      doesn't carry it through, so changing the table-level comment
+      in desired SQL produces no diff at all. Surfaced while writing
+      the regression-coverage fixtures (PR #58). Add to model + diff
+      or document as out-of-scope in CAVEATS.md.
 
 ## Low — CLI ergonomics
 
