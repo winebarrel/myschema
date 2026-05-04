@@ -1,0 +1,28 @@
+# `--alter-algorithm=INSTANT --alter-lock=NONE` on a regular
+# ADD COLUMN. AGENTS.md "In scope" lists `--alter-algorithm`
+# / `--alter-lock` flags. Existing partition-op fixtures pin
+# the leading-position splice for partition operations
+# (REORGANIZE / ADD / DROP / COALESCE PARTITION); this
+# fixture pins the trailing-comma splice for the much more
+# common column-level ALTER. MySQL 8.0+ supports INSTANT for
+# ADD COLUMN with row-format=DYNAMIC, so the apply runs
+# without rebuilding the table.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      flag TINYINT(1) NOT NULL DEFAULT 0,
+      PRIMARY KEY (id)
+  );
+
+alter_algorithm: INSTANT
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN flag tinyint(1) NOT NULL DEFAULT 0 AFTER id, ALGORITHM=INSTANT;
+
+verify_no_drift: true

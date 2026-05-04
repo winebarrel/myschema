@@ -1,0 +1,26 @@
+# `KEY (col(N))` — prefix-length index, common on long
+# VARCHAR / TEXT / BLOB columns. AGENTS.md "In scope" lists
+# prefix length explicitly. The prefix length round-trips
+# through `information_schema.STATISTICS.SUB_PART` (catalog)
+# and vitess's `IndexColumn.Length` (parser); both are `*int`
+# / nullable on each side. Pin the apply + verify_no_drift to
+# catch any drift between the two representations.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_name_prefix (name(10))
+  );
+
+applied: |
+  CREATE INDEX idx_name_prefix ON myschema_test.t (name(10));
+
+verify_no_drift: true

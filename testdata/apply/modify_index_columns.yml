@@ -1,0 +1,29 @@
+# Changing the column list of an existing secondary index.
+# Index modification has no in-place ALTER form in MySQL —
+# the diff layer must DROP and re-CREATE. Pin the ordering
+# (DROP first, CREATE second; without the right order MySQL
+# would error on duplicate key creation), and confirm
+# verify_no_drift after.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_ab (a)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_ab (a, b)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t DROP INDEX idx_ab;
+  CREATE INDEX idx_ab ON myschema_test.t (a, b);
+
+verify_no_drift: true

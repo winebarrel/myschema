@@ -1,0 +1,26 @@
+# A single plan that adds a new column AND a secondary index
+# that references that column. The diff layer must emit the
+# ADD COLUMN before the CREATE INDEX (otherwise MySQL would
+# fail with "Unknown column"). Pin the ordering so a
+# regression in the per-table statement bucket order
+# (`tableDiff.Stmts` ordering in `diff/tables.go`) surfaces
+# here.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_tenant (tenant_id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN tenant_id int NOT NULL AFTER id;
+  CREATE INDEX idx_tenant ON myschema_test.t (tenant_id);
+
+verify_no_drift: true

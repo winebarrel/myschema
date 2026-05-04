@@ -1,0 +1,41 @@
+# Multi-column foreign key. Catalog stores each FK column
+# row separately in `information_schema.KEY_COLUMN_USAGE`
+# with `ORDINAL_POSITION`; the catalog reader must reassemble
+# them in the right order. Pin the round-trip end-to-end —
+# wrong column ordering would surface as a spurious
+# DROP+ADD on every plan.
+init: |
+  CREATE TABLE parents (
+      tenant_id INT NOT NULL,
+      id INT NOT NULL,
+      PRIMARY KEY (tenant_id, id)
+  );
+
+  CREATE TABLE children (
+      tenant_id INT NOT NULL,
+      parent_id INT NOT NULL,
+      child_id INT NOT NULL,
+      PRIMARY KEY (tenant_id, child_id),
+      KEY idx_parent (tenant_id, parent_id)
+  );
+
+desired: |
+  CREATE TABLE parents (
+      tenant_id INT NOT NULL,
+      id INT NOT NULL,
+      PRIMARY KEY (tenant_id, id)
+  );
+
+  CREATE TABLE children (
+      tenant_id INT NOT NULL,
+      parent_id INT NOT NULL,
+      child_id INT NOT NULL,
+      PRIMARY KEY (tenant_id, child_id),
+      KEY idx_parent (tenant_id, parent_id),
+      CONSTRAINT fk_parent FOREIGN KEY (tenant_id, parent_id) REFERENCES parents (tenant_id, id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.children ADD CONSTRAINT fk_parent FOREIGN KEY (tenant_id, parent_id) REFERENCES myschema_test.parents(tenant_id, id);
+
+verify_no_drift: true

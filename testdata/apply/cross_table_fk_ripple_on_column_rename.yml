@@ -1,0 +1,41 @@
+# Renaming a column on a parent table that's the FK target
+# of another table. AGENTS.md "In scope" calls out
+# `parent-side cross-table FK RefCols rewrite` for the
+# renamed-from directive (`diff/tables.go` —
+# `rewriteCrossTableFKRefCols`). Without that ripple the
+# child-side FK would diff as DROP+ADD on every plan even
+# though MySQL's RENAME COLUMN updates the FK metadata
+# atomically. Pin the round-trip so the rewrite stays in.
+init: |
+  CREATE TABLE parents (
+      old_id INT NOT NULL,
+      PRIMARY KEY (old_id)
+  );
+
+  CREATE TABLE children (
+      id INT NOT NULL,
+      parent_old_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_parent (parent_old_id),
+      CONSTRAINT fk_parent FOREIGN KEY (parent_old_id) REFERENCES parents (old_id)
+  );
+
+desired: |
+  CREATE TABLE parents (
+      -- myschema:renamed-from old_id
+      new_id INT NOT NULL,
+      PRIMARY KEY (new_id)
+  );
+
+  CREATE TABLE children (
+      id INT NOT NULL,
+      parent_old_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_parent (parent_old_id),
+      CONSTRAINT fk_parent FOREIGN KEY (parent_old_id) REFERENCES parents (new_id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.parents RENAME COLUMN old_id TO new_id;
+
+verify_no_drift: true

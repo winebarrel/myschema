@@ -1,0 +1,40 @@
+# Foreign key with `ON DELETE CASCADE` (and the implicit
+# default `ON UPDATE NO ACTION`). The catalog reads the
+# action from `information_schema.REFERENTIAL_CONSTRAINTS`
+# and the parser preserves the clause in the AST. Pin both
+# the actual cascade action and the no-explicit
+# ON UPDATE round-trip — operators commonly hit the case
+# where they want CASCADE on delete but no explicit
+# ON UPDATE, so the catalog defaulting to `NO ACTION` while
+# the desired SQL omits the clause must round-trip cleanly.
+init: |
+  CREATE TABLE parents (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE children (
+      id INT NOT NULL,
+      parent_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_parent_id (parent_id)
+  );
+
+desired: |
+  CREATE TABLE parents (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE children (
+      id INT NOT NULL,
+      parent_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_parent_id (parent_id),
+      CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parents (id) ON DELETE CASCADE
+  );
+
+applied: |
+  ALTER TABLE myschema_test.children ADD CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES myschema_test.parents(id) ON DELETE CASCADE;
+
+verify_no_drift: true

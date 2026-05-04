@@ -1,0 +1,26 @@
+# FULLTEXT index. Catalog reads it from
+# `information_schema.STATISTICS.INDEX_TYPE = 'FULLTEXT'`;
+# the parser preserves the FULLTEXT keyword. Pin the round-
+# trip — the generated DDL goes through `CREATE FULLTEXT
+# INDEX … ON …`, which is one of the four CREATE INDEX
+# variants `appendAlterHints` recognises (plain, UNIQUE,
+# FULLTEXT, SPATIAL).
+init: |
+  CREATE TABLE docs (
+      id INT NOT NULL,
+      body TEXT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE docs (
+      id INT NOT NULL,
+      body TEXT NOT NULL,
+      PRIMARY KEY (id),
+      FULLTEXT KEY ft_body (body)
+  );
+
+applied: |
+  CREATE FULLTEXT INDEX ft_body ON myschema_test.docs (body);
+
+verify_no_drift: true

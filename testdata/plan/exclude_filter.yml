@@ -1,0 +1,21 @@
+# Counterpart to `include_filter.yml`: `--exclude` filters
+# the table OUT of the diff. AGENTS.md "In scope" lists
+# `--include` / `--exclude` glob filtering on table names —
+# the include path is pinned, the exclude path wasn't.
+#
+# Setup: catalog has both `users` and `audit_log`. Desired
+# drops both. With `--exclude=audit_log` the audit_log table
+# is invisible to the diff (no skipped DROP either), and
+# without `--allow-drop` the users DROP is suppressed.
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE audit_log (id BIGINT NOT NULL, PRIMARY KEY (id));
+
+desired: ""
+
+exclude:
+  - "audit_log"
+
+plan: ""
+disallowed_drops: |
+  -- skipped: DROP TABLE myschema_test.users;

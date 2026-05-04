@@ -1,0 +1,37 @@
+# Foreign key with `ON UPDATE CASCADE` (and the implicit
+# default `ON DELETE NO ACTION`). Companion to
+# `add_fk_on_delete_cascade.yml` — exercises the other
+# common cascade direction. Apply + verify_no_drift confirms
+# the catalog reads back the action correctly and the parser
+# preserves it in the AST without spurious diff on re-plan.
+init: |
+  CREATE TABLE parents (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE children (
+      id INT NOT NULL,
+      parent_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_parent_id (parent_id)
+  );
+
+desired: |
+  CREATE TABLE parents (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE children (
+      id INT NOT NULL,
+      parent_id INT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_parent_id (parent_id),
+      CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parents (id) ON UPDATE CASCADE
+  );
+
+applied: |
+  ALTER TABLE myschema_test.children ADD CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES myschema_test.parents(id) ON UPDATE CASCADE;
+
+verify_no_drift: true

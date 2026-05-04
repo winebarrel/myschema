@@ -1,0 +1,28 @@
+# Prefix-length index on a BLOB column. MySQL *requires*
+# prefix length for BLOB / TEXT indexes (since the column
+# value is variable-length and unbounded), so this exercises
+# the prefix-length path in a context where it's not just an
+# optimisation but mandatory. Pin the round-trip so a
+# regression in the catalog SUB_PART pickup or the parser
+# IndexColumn.Length restore surfaces here for the BLOB
+# case as well as the VARCHAR case
+# (`add_index_with_prefix_length.yml`).
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      payload BLOB NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      payload BLOB NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_payload (payload(100))
+  );
+
+applied: |
+  CREATE INDEX idx_payload ON myschema_test.t (payload(100));
+
+verify_no_drift: true

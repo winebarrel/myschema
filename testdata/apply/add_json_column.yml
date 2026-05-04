@@ -1,0 +1,23 @@
+# JSON column add. Sakila / employees test schemas exercise
+# this indirectly, but no fixture pins the basic JSON column
+# round-trip end-to-end. catalog stores it as `json` in
+# `information_schema.COLUMNS.DATA_TYPE`; the parser
+# preserves the type in the AST. Pin the shape so a regression
+# in either side surfaces here.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      payload JSON,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN payload json AFTER id;
+
+verify_no_drift: true

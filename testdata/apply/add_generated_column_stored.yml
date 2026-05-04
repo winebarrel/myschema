@@ -1,0 +1,28 @@
+# Generated STORED column. AGENTS.md "In scope" lists
+# generated columns. Pin the round-trip: the parser side
+# preserves the GENERATED ALWAYS AS … STORED clause, the
+# catalog reads `EXTRA` and `GENERATION_EXPRESSION` from
+# `information_schema.COLUMNS` and reassembles the same
+# shape, and verify_no_drift confirms the next plan
+# converges.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      qty INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      qty INT NOT NULL,
+      price INT NOT NULL,
+      total INT GENERATED ALWAYS AS ((qty * price)) STORED NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.t ADD COLUMN total int GENERATED ALWAYS AS (qty * price) STORED NOT NULL AFTER price;
+
+verify_no_drift: true

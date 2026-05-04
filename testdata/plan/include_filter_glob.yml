@@ -1,0 +1,25 @@
+# `--include` with a glob pattern. AGENTS.md "In scope"
+# lists `--include` / `--exclude` glob filtering — the
+# existing `include_filter.yml` only exercises an exact
+# table name. Pin that the glob (`tmp_*`) matches the
+# tables it should and only those.
+#
+# Setup: catalog has `users`, `tmp_a`, `tmp_b`. Desired
+# drops all three. `--include=tmp_*` makes only the two
+# `tmp_*` tables visible; `users` is invisible (the diff
+# doesn't even know it exists). Without `--allow-drop` the
+# two visible drops fall to the disallowed bucket.
+init: |
+  CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE tmp_a (id BIGINT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE tmp_b (id BIGINT NOT NULL, PRIMARY KEY (id));
+
+desired: ""
+
+include:
+  - "tmp_*"
+
+plan: ""
+disallowed_drops: |
+  -- skipped: DROP TABLE myschema_test.tmp_a;
+  -- skipped: DROP TABLE myschema_test.tmp_b;
