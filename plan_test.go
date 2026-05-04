@@ -79,9 +79,10 @@ func TestPlan_DSNNonexistentDatabase(t *testing.T) {
 	// succeeds (it just splits the DSN), then connect() reaches the
 	// driver and the server rejects the access. Plan returns the
 	// wrapped connect error.
-	c := myschema.NewClient(&myschema.Options{
-		DSN: "root@tcp(127.0.0.1:3306)/no_such_db_for_myschema_tests_xyz",
-	})
+	//
+	// Built off MYSCHEMA_TEST_DSN so the MySQL 9.x CI leg (port 3307)
+	// hits the right server.
+	c := newClientWithDB(t, "no_such_db_for_myschema_tests_xyz")
 	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
 	require.Error(t, err)
 }

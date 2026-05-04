@@ -114,9 +114,10 @@ func TestApply_DSNNonexistentDatabase(t *testing.T) {
 	// referenced database doesn't exist, so the underlying driver
 	// rejects the connection at first use. Surfaces from connect() →
 	// Apply returns the wrapped error.
-	c := myschema.NewClient(&myschema.Options{
-		DSN: "root@tcp(127.0.0.1:3306)/no_such_db_for_myschema_tests_xyz",
-	})
+	//
+	// Built off MYSCHEMA_TEST_DSN so the MySQL 9.x CI leg (port 3307)
+	// hits the right server.
+	c := newClientWithDB(t, "no_such_db_for_myschema_tests_xyz")
 	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{}, nil)
 	require.Error(t, err)
 }

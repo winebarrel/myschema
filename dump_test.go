@@ -60,9 +60,10 @@ func TestDump_DSNNonexistentDatabase(t *testing.T) {
 	// DSN parses fine but the named database doesn't exist — Database()
 	// succeeds (DSN-name split), then connect() reaches the driver and
 	// the server rejects the access. Dump returns the wrapped error.
-	c := myschema.NewClient(&myschema.Options{
-		DSN: "root@tcp(127.0.0.1:3306)/no_such_db_for_myschema_tests_xyz",
-	})
+	//
+	// Built off MYSCHEMA_TEST_DSN so the MySQL 9.x CI leg (port 3307)
+	// hits the right server.
+	c := newClientWithDB(t, "no_such_db_for_myschema_tests_xyz")
 	_, err := c.Dump(context.Background(), &myschema.DumpOptions{})
 	require.Error(t, err)
 }

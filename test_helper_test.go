@@ -7,10 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	mysqldrv "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
 	"github.com/winebarrel/myschema"
 	"github.com/winebarrel/myschema/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 // runYAMLCases discovers every *.yml file under dir, decodes it into a fresh
@@ -41,16 +43,27 @@ func runYAMLCases[T any](t *testing.T, dir string, body func(t *testing.T, name 
 // the DSN itself to carry the database name.
 func newClient(t *testing.T) *myschema.Client {
 	t.Helper()
+	return newClientWithDB(t, testutil.DefaultDB)
+}
+
+// newClientWithDB is the underlying constructor: it parses MYSCHEMA_TEST_DSN
+// (or the docker-compose default) and rewrites the DBName field to dbName,
+// so callers don't have to care whether the env DSN already carried a
+// database. Used by newClient for the test-DB happy path and by error-path
+// tests that need to point at a guaranteed-nonexistent database on the
+// same MySQL instance the rest of the suite is using (so the MySQL 9.x CI
+// leg, which sets MYSCHEMA_TEST_DSN to port 3307, doesn't connect to 3306
+// by accident).
+func newClientWithDB(t *testing.T, dbName string) *myschema.Client {
+	t.Helper()
 	base := os.Getenv("MYSCHEMA_TEST_DSN")
 	if base == "" {
 		base = "root@tcp(127.0.0.1:3306)/"
 	}
-	if !strings.HasSuffix(base, "/") {
-		base += "/"
-	}
-	return myschema.NewClient(&myschema.Options{
-		DSN: base + testutil.DefaultDB,
-	})
+	cfg, err := mysqldrv.ParseDSN(strings.TrimSuffix(base, "/") + "/")
+	require.NoError(t, err, "parse MYSCHEMA_TEST_DSN base %q", base)
+	cfg.DBName = dbName
+	return myschema.NewClient(&myschema.Options{DSN: cfg.FormatDSN()})
 }
 
 // writeDesired writes desired-state SQL to a temp .sql file and returns its
