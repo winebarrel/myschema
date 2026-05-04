@@ -100,7 +100,7 @@ func TestTableIdxAndFkSQL(t *testing.T) {
 	})
 
 	idxSQL := tbl.IdxSQL()
-	assert.Contains(t, idxSQL, "CREATE INDEX idx_user")
+	assert.Contains(t, idxSQL, "CREATE INDEX idx_user ON ")
 	assert.NotContains(t, idxSQL, "PRIMARY", "PRIMARY KEY index excluded from IdxSQL")
 
 	fkSQL := tbl.FkSQL()
@@ -128,8 +128,8 @@ func TestTableToSQLCombined(t *testing.T) {
 	out := model.TableToSQL(tbl)
 	assert.Contains(t, out, "-- posts", "leading comment marker")
 	assert.Contains(t, out, "CREATE TABLE posts (")
-	assert.Contains(t, out, "CREATE INDEX idx_user")
-	assert.Contains(t, out, "ADD CONSTRAINT fk_user")
+	assert.Contains(t, out, "CREATE INDEX idx_user ON ")
+	assert.Contains(t, out, "ADD CONSTRAINT fk_user FOREIGN KEY")
 }
 
 func TestTablesToSQLOrderingAndSeparators(t *testing.T) {

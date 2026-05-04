@@ -770,8 +770,8 @@ func TestDiffDropPartialColumnEmitsDropIndex(t *testing.T) {
 	res, err := diff.DiffTables(current, desired, allowAll)
 	require.NoError(t, err)
 	got := strings.Join(res.Stmts, "\n")
-	assert.Contains(t, got, "DROP COLUMN a")
-	assert.Contains(t, got, "DROP INDEX ab",
+	assert.Contains(t, got, "DROP COLUMN a;")
+	assert.Contains(t, got, "DROP INDEX ab;",
 		"partial-column drop on a multi-col index must still DROP INDEX (suppression doesn't apply)")
 }
 
@@ -862,12 +862,12 @@ func TestDiffRenameTableSeparatesFromFKDropOnSameTable(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, res.RenameStmts, "table rename must land in RenameStmts bucket")
 	require.NotEmpty(t, res.FKDropStmts, "FK on renamed table must be in FKDropStmts")
-	assert.Contains(t, res.RenameStmts[0], "ALTER TABLE posts RENAME TO comments")
+	assert.Contains(t, res.RenameStmts[0], "ALTER TABLE posts RENAME TO comments;")
 	// Post-rename, current is re-keyed under the new name, so the FK
 	// drop statement targets the new table name. Apply order
 	// (RenameStmts before FKDropStmts in diff_all.go) makes that the
 	// table that exists at the moment the DROP runs.
-	assert.Contains(t, res.FKDropStmts[0], "ALTER TABLE comments DROP FOREIGN KEY fk_user")
+	assert.Contains(t, res.FKDropStmts[0], "ALTER TABLE comments DROP FOREIGN KEY fk_user;")
 }
 
 // constraint and FK rename directives -------------------------------------

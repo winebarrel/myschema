@@ -46,11 +46,11 @@ CREATE TABLE users (
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(r.Stmts), 1)
-	assert.Contains(t, r.Stmts[0], "CREATE TABLE users")
+	assert.Contains(t, r.Stmts[0], "CREATE TABLE users (")
 
 	hasIdx := false
 	for _, s := range r.Stmts {
-		if strings.Contains(s, "CREATE UNIQUE INDEX users_email_key ON users") {
+		if strings.Contains(s, "CREATE UNIQUE INDEX users_email_key ON users (") {
 			hasIdx = true
 		}
 	}
@@ -81,7 +81,7 @@ func TestDiffDropColumnSuppressed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, r.Stmts)
 	require.Len(t, r.DisallowedDropStmts, 1)
-	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE users DROP COLUMN legacy")
+	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE users DROP COLUMN legacy;")
 }
 
 func TestDiffDropColumnAllowed(t *testing.T) {
@@ -166,7 +166,7 @@ func TestDiffDropCheckConstraintSuppressed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, r.Stmts)
 	require.Len(t, r.DisallowedDropStmts, 1)
-	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE products DROP CHECK chk")
+	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE products DROP CHECK chk;")
 }
 
 func TestDiffAddIndex(t *testing.T) {
@@ -177,7 +177,7 @@ func TestDiffAddIndex(t *testing.T) {
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowAll)
 	require.NoError(t, err)
 	require.Len(t, r.Stmts, 1)
-	assert.Contains(t, r.Stmts[0], "CREATE INDEX idx_email ON users")
+	assert.Contains(t, r.Stmts[0], "CREATE INDEX idx_email ON users (email)")
 }
 
 func TestDiffDropIndexSuppressed(t *testing.T) {
@@ -189,7 +189,7 @@ func TestDiffDropIndexSuppressed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, r.Stmts)
 	require.Len(t, r.DisallowedDropStmts, 1)
-	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE users DROP INDEX idx_email")
+	assert.Contains(t, r.DisallowedDropStmts[0], "-- skipped: ALTER TABLE users DROP INDEX idx_email;")
 }
 
 func TestDiffAddForeignKey(t *testing.T) {
@@ -218,7 +218,7 @@ CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id
 	require.NoError(t, err)
 	assert.Empty(t, r.FKDropStmts)
 	require.Len(t, r.DisallowedDropStmts, 1)
-	assert.Contains(t, r.DisallowedDropStmts[0], "DROP FOREIGN KEY fk")
+	assert.Contains(t, r.DisallowedDropStmts[0], "DROP FOREIGN KEY fk;")
 }
 
 // TestDiffDropTableWithFK verifies DiffTables emits FK drops on a
@@ -237,7 +237,7 @@ CREATE TABLE posts (id BIGINT NOT NULL, user_id BIGINT NOT NULL, PRIMARY KEY (id
 		r, err := diff.DiffTables(current.Tables, desired.Tables, allowList("table"))
 		require.NoError(t, err)
 		require.Len(t, r.FKDropStmts, 1)
-		assert.Contains(t, r.FKDropStmts[0], "DROP FOREIGN KEY fk")
+		assert.Contains(t, r.FKDropStmts[0], "DROP FOREIGN KEY fk;")
 		require.Len(t, r.DropStmts, 2) // posts + users
 	})
 
@@ -264,7 +264,7 @@ func TestDropPolicyWildcard(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, r.DisallowedDropStmts)
 	require.Len(t, r.DropStmts, 1)
-	assert.Contains(t, r.DropStmts[0], "DROP TABLE legacy_table")
+	assert.Contains(t, r.DropStmts[0], "DROP TABLE legacy_table;")
 }
 
 // TestDiffDropColumnSuppressesDependentIndex: when a column with a
@@ -279,7 +279,7 @@ func TestDiffDropColumnSuppressesDependentIndex(t *testing.T) {
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("all"))
 	require.NoError(t, err)
 	body := strings.Join(r.Stmts, "\n")
-	assert.Contains(t, body, "DROP COLUMN legacy")
+	assert.Contains(t, body, "DROP COLUMN legacy;")
 	assert.NotContains(t, body, "DROP INDEX i", "explicit DROP INDEX should be suppressed")
 }
 
@@ -310,7 +310,7 @@ func TestDiffReplaceIndexSuppressesDependentDrop(t *testing.T) {
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("all"))
 	require.NoError(t, err)
 	body := strings.Join(r.Stmts, "\n")
-	assert.Contains(t, body, "DROP COLUMN a")
+	assert.Contains(t, body, "DROP COLUMN a;")
 	assert.NotContains(t, body, "DROP INDEX i", "DROP INDEX must be suppressed even on the replace path when all current parts are dropped columns")
 	assert.Contains(t, body, "CREATE INDEX i ON t (b)", "the new index shape still gets created")
 }
@@ -328,10 +328,10 @@ func TestDiffDropIndexNotSuppressedWhenColumnDropDisallowed(t *testing.T) {
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("index"))
 	require.NoError(t, err)
 	body := strings.Join(r.Stmts, "\n")
-	assert.Contains(t, body, "DROP INDEX i",
+	assert.Contains(t, body, "DROP INDEX i;",
 		"DROP INDEX must be emitted because the column drop is disallowed and won't actually run")
 	disallowed := strings.Join(r.DisallowedDropStmts, "\n")
-	assert.Contains(t, disallowed, "DROP COLUMN legacy",
+	assert.Contains(t, disallowed, "DROP COLUMN legacy;",
 		"column drop should be in DisallowedDropStmts (not allowed)")
 }
 
@@ -347,8 +347,8 @@ func TestDiffDropPartialColumnKeepsIndex(t *testing.T) {
 	r, err := diff.DiffTables(cur.Tables, des.Tables, allowList("all"))
 	require.NoError(t, err)
 	body := strings.Join(r.Stmts, "\n")
-	assert.Contains(t, body, "DROP COLUMN a")
-	assert.Contains(t, body, "DROP INDEX i", "explicit DROP INDEX needed when index would survive")
+	assert.Contains(t, body, "DROP COLUMN a;")
+	assert.Contains(t, body, "DROP INDEX i;", "explicit DROP INDEX needed when index would survive")
 }
 
 // TestDropPolicyNilFallsBackToAllowAll: passing nil to DiffTables should
