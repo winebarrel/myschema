@@ -66,7 +66,7 @@ import (
 //     written REORGANIZE with explicit boundaries (or a DROP+ADD
 //     pair if discarding data is intended).
 //
-// CAVEATS.md "Partitioning" documents the user-facing rules.
+// PARTITIONING.md documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {
 	if current == nil && desired == nil {
 		return nil, nil, nil
@@ -321,8 +321,8 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 		// apply-time error, no warning, just gone. Treat that as
 		// destructive and gate behind `--allow-drop=partition`
 		// (the same flag that authorises DROP PARTITION /
-		// COALESCE PARTITION). See CAVEATS.md "LIST value discard
-		// silently drops rows".
+		// COALESCE PARTITION). See PARTITIONING.md "LIST value
+		// discard silently drops rows on REORGANIZE".
 		//
 		// This guard sits *inside* the matched-name-list branch
 		// because it only matters for the REORGANIZE path. The

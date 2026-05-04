@@ -202,15 +202,13 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 		return nil, err
 	}
 
-	// Partition diff: v1 supports two RANGE/LIST shapes — pure
-	// suffix ADD ("roll the next month's / year's partition out")
-	// and order-preserving subset DROP (head / middle / tail
-	// removal, the retention workflow). Anything else — HASH/KEY
-	// count operations, the both-needed case (value change,
-	// reorder, interior insert), scheme change, adding or removing
-	// partitioning entirely — still errors out (CAVEATS.md
-	// "Partitioning"). Done before the column / index passes so
-	// the user sees the partition error immediately.
+	// Partition diff: see PARTITIONING.md for the supported shapes
+	// (suffix add, subset drop, HASH/KEY count change,
+	// REORGANIZE-based per-partition definition rewrite) and the
+	// shapes that still error out (split / merge / reorder,
+	// strategy / expression change, first-time PARTITION BY,
+	// REMOVE PARTITIONING, SUBPARTITION). Run before the column /
+	// index passes so the user sees the partition error immediately.
 	partStmts, partDisallowed, err := diffPartitions(fqtn, current.Partition, desired.Partition, dc)
 	if err != nil {
 		return nil, err
