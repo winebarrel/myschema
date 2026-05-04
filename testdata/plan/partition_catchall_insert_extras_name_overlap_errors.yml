@@ -1,0 +1,35 @@
+# Desired SQL has an "extra" partition that reuses a name
+# already present in catalog (likely a typo: the user meant
+# `p2030` but wrote `p2020`). vitess accepts duplicate
+# partition names in CREATE TABLE, and validateDesiredRange-
+# Monotonic only checks boundary values (not name
+# uniqueness), so without the auto-detect's T7 guard we'd
+# emit `REORGANIZE pmax INTO (p2020 VALUES LESS THAN (25),
+# pmax VALUES LESS THAN MAXVALUE)` — MySQL would reject
+# that with a duplicate-partition-name error at apply time.
+# T7 catches the name overlap at plan time and the request
+# falls through to the existing split / merge / reorder
+# error, which is generic but at least doesn't ship
+# definitely-wrong SQL.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p2020 VALUES LESS THAN (10),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p2020 VALUES LESS THAN (10),
+      PARTITION p2020 VALUES LESS THAN (25),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: 'split / merge / reorder'

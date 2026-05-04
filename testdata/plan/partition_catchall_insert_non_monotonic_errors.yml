@@ -1,0 +1,29 @@
+# Catch-all interior insert with a non-monotonic boundary.
+# `validateDesiredRangeMonotonic` runs *before* the auto-
+# detect (round 23 plan-time guard), so this fails with
+# `not strictly greater than` instead of reaching the
+# auto-detect (which would otherwise emit a REORGANIZE that
+# MySQL would reject anyway). Pin the order so the
+# monotonicity check stays in front.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p0 VALUES LESS THAN (10),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p0 VALUES LESS THAN (10),
+      PARTITION p1 VALUES LESS THAN (5),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: 'is not strictly greater than'

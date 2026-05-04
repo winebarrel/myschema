@@ -1,0 +1,47 @@
+# RANGE catch-all interior insert (canonical case 3 from
+# PARTITIONING.md "Diffs that still error → Split / merge /
+# reorder" — but now auto-handled). Catalog ends in `pmax
+# VALUES LESS THAN MAXVALUE`; desired slots a new partition
+# `p2022` between the existing `p2020` and `pmax`. The diff
+# layer detects the shape (catalog catch-all unchanged in
+# body / name, desired prefix matches catalog prefix, extras
+# all sit between prefix and catch-all) and auto-emits
+# `REORGANIZE pmax INTO (extras..., pmax)` so the new
+# partition is sliced out of pmax's range without changing
+# total coverage (MySQL Error 1520 stays clear).
+#
+# Pre-existing rows in pmax: row id=2 (dt=2025-06-01) was in
+# pmax (year 2025 ≥ 2021); after REORGANIZE, 2025 is still
+# ≥ 2023 so it stays in pmax. row id=3 (dt=2022-06-01) was
+# also in pmax (year 2022); after REORGANIZE, 2022 falls into
+# the new p2022 range. verify_no_drift confirms MySQL accepts
+# the rewrite and the next plan reports no further changes.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+  INSERT INTO events VALUES (1, '2020-06-01'), (2, '2025-06-01'), (3, '2022-06-01');
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION pmax INTO (
+    partition p2022 values less than (2023),
+    partition pmax values less than maxvalue
+  );
+
+verify_no_drift: true

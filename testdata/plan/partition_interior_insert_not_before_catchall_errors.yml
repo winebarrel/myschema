@@ -1,0 +1,32 @@
+# Catalog has a catch-all, but the new partition is inserted
+# in the *middle* of the prefix (between p1 and p2), not
+# directly before the catch-all. Auto-detect must NOT fire
+# because the prefix-equal check (T5) doesn't match — desired
+# slot 1 is `p_new` while catalog slot 1 is `p2`. The right
+# manual SQL would be `REORGANIZE p2 INTO (p_new, p2)` (slice
+# p2 to make room for p_new), not the catch-all-driven
+# REORGANIZE auto-detect emits.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p2 VALUES LESS THAN (30),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p_new VALUES LESS THAN (20),
+      PARTITION p2 VALUES LESS THAN (30),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+error: 'split / merge / reorder'

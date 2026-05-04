@@ -1,0 +1,30 @@
+# Interior insert WITHOUT a MAXVALUE catch-all in catalog →
+# auto-detect must NOT fire (T3 catch-all check fails). The
+# right SQL would be `REORGANIZE p2 INTO (NEW, p2)` (split p2
+# to make room for NEW) but the diff layer can't infer that
+# without more context, so we still error with split / merge
+# / reorder. Pin the existing error so a regression of the
+# auto-detect's catch-all check doesn't accidentally trigger
+# this case.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p2 VALUES LESS THAN (30)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p_new VALUES LESS THAN (20),
+      PARTITION p2 VALUES LESS THAN (30)
+  );
+
+error: 'split / merge / reorder'

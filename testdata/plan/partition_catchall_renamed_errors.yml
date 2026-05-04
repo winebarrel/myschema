@@ -1,0 +1,28 @@
+# Catch-all is renamed in desired (`pmax` → `pCatchAll`).
+# Auto-detect must NOT fire because catalog's `pmax` and
+# desired's `pCatchAll` aren't the same partition by name
+# (case-insensitive — different beyond just casing). The
+# "rename + insert" combination is too ambiguous to auto-
+# resolve, so fall through to split / merge / reorder.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION pCatchAll VALUES LESS THAN MAXVALUE
+  );
+
+error: 'split / merge / reorder'

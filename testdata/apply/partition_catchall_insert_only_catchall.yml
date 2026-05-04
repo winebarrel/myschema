@@ -1,0 +1,32 @@
+# Edge case for the RANGE catch-all interior insert auto-
+# detect: catalog has *only* the catch-all (no other
+# partitions yet). Desired adds a real partition before it.
+# This exercises the n=1 boundary of the prefix-match check
+# (the prefix is empty — there's nothing to match against
+# the desired prefix, just the extras and the catch-all).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION pmax INTO (
+    partition p2020 values less than (2021),
+    partition pmax values less than maxvalue
+  );
+
+verify_no_drift: true

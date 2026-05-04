@@ -60,11 +60,18 @@ import (
 //     p1, p2, … INTO (…)`. Covers `VALUES …` boundary tweaks
 //     plus COMMENT / MAX_ROWS / TABLESPACE / other per-partition
 //     options that round-trip through vitess's
-//     PartitionDefinition formatter. Anything else (split /
-//     merge / reorder / interior insert — i.e. the name lists
-//     don't line up) → error so the user falls back to a hand-
-//     written REORGANIZE with explicit boundaries (or a DROP+ADD
-//     pair if discarding data is intended).
+//     PartitionDefinition formatter. RANGE catch-all interior
+//     insert (catalog ends in `VALUES LESS THAN MAXVALUE` and
+//     desired slots new partitions strictly before the catch-
+//     all with both prefix and catch-all unchanged) →
+//     `REORGANIZE PARTITION pmax INTO (extras…, pmax)` (so MySQL
+//     Error 1481 doesn't surface from a naive ADD). Anything
+//     else (split / merge / reorder, mid-prefix interior
+//     insert, retention roll-forward — i.e. the name lists
+//     don't line up AND the catch-all auto-detect doesn't
+//     apply) → error so the user falls back to a hand-written
+//     REORGANIZE with explicit boundaries (or a DROP+ADD pair
+//     if discarding data is intended).
 //
 // PARTITIONING.md documents the user-facing rules.
 func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]string, []string, error) {
@@ -207,14 +214,23 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//       LIST single-span, the case-only / LIST-permutation
 	//       no-op fallthroughs — lives in the comment over the
 	//       `partitionNameListEqual` branch in `diffPartitions`.
-	//     - any other shape (merge / split / interior insert /
-	//       reorder / "retention roll-forward") falls through to
-	//       error. Disjoint-name detection isn't enough to tell
-	//       merge / split / replace apart from a pure retention
-	//       discard, and split-point inference is out of scope
-	//       for v1, so the user runs the right ALTER (REORGANIZE
-	//       with explicit boundaries, or DROP+ADD if discarding
-	//       data is intended) by hand.
+	//     - the RANGE catch-all interior insert shape (catalog
+	//       ends in MAXVALUE, desired slots new partitions
+	//       strictly before the catch-all, prefix and catch-
+	//       all unchanged) is recognised by
+	//       `detectCatchAllInteriorInsert` further down and
+	//       routed to a single `REORGANIZE PARTITION pmax INTO (extras…,
+	//       pmax)` so MySQL Error 1481 doesn't surface from a
+	//       naive ADD.
+	//     - any other "drops AND adds both non-empty" shape
+	//       (merge / split / mid-prefix interior insert /
+	//       reorder / "retention roll-forward") falls through
+	//       to error. Disjoint-name detection isn't enough to
+	//       tell merge / split / replace apart from a pure
+	//       retention discard, and split-point inference is
+	//       out of scope for v1, so the user runs the right
+	//       ALTER (REORGANIZE with explicit boundaries, or
+	//       DROP+ADD if discarding data is intended) by hand.
 	// "Pure per-partition definition change" path. When the
 	// catalog and desired name lists line up position-by-position
 	// (every partition stays in the same slot, every name
@@ -376,6 +392,44 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			}
 		}
 		return stmts, nil, nil
+	}
+
+	// Catch-all interior insert auto-detect (RANGE only). When
+	// catalog ends in a `VALUES LESS THAN MAXVALUE` catch-all
+	// and desired interleaves new partitions strictly between
+	// the catalog prefix and the catch-all (catch-all stays in
+	// place with the same body, prefix stays unchanged), the
+	// shape is unambiguous: the new partitions slice the catch-
+	// all's range without changing total coverage. Emit a
+	// single `REORGANIZE PARTITION <catch-all> INTO (extras...,
+	// catch-all)` so MySQL's "ADD PARTITION can only add at the
+	// tail and MAXVALUE must be the last partition" constraints
+	// (Error 1481) don't surface, and so the operator doesn't
+	// have to drop the catch-all and rebuild by hand. The
+	// monotonicity of the inserted boundaries is already
+	// validated upstream by `validateDesiredRangeMonotonic`.
+	//
+	// Restrictions kept narrow on purpose:
+	//   - scalar RANGE only — RANGE COLUMNS isn't covered (the
+	//     monotonicity check punts on tuple boundaries, and
+	//     vitess can't even round-trip `VALUES LESS THAN
+	//     (MAXVALUE, MAXVALUE)` today, so the catalog re-parse
+	//     fails before we get here);
+	//   - the catch-all body must be byte-equal between catalog
+	//     and desired (case-only name folding is allowed);
+	//   - the catalog prefix must be byte-equal to desired's
+	//     prefix (no compound diffs — the operator splits those
+	//     into separate plans or runs a manual REORGANIZE);
+	//   - extras' names must be unique — both vs the catalog
+	//     names (rules out reorder / rename-and-insert) AND
+	//     vs each other (rules out copy-paste typos that would
+	//     otherwise emit a REORGANIZE MySQL rejects with a
+	//     duplicate-partition-name error).
+	// Anything outside the trigger envelope falls through to
+	// the existing split / merge / reorder error so the
+	// operator runs the right ALTER by hand.
+	if catchAll, extras, ok := detectCatchAllInteriorInsert(curPO, curDefs, desDefs); ok {
+		return []string{formatCatchAllInteriorInsertReorganize(fqtn, catchAll, extras)}, nil, nil
 	}
 
 	drops, adds := partitionByNameOrderPreserving(curDefs, desDefs)
@@ -571,6 +625,125 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 //     case-mismatched INTO and keeps whatever case it had
 //     stored, so verify_no_drift confirms no perpetual rename
 //     loop.
+//
+// detectCatchAllInteriorInsert recognises the "RANGE catch-all
+// interior insert" shape and returns the catalog-side catch-all
+// plus the new partitions that should be sliced out of its range.
+//
+// Trigger conditions (all must hold; otherwise returns ok=false
+// and the caller falls through to the existing split / merge /
+// reorder error path):
+//
+//   - Strategy is plain RANGE — RANGE COLUMNS is excluded
+//     because the monotonicity check (`validateDesiredRangeMonotonic`)
+//     can't compare tuple boundaries beyond byte-identity, and
+//     vitess doesn't even round-trip `VALUES LESS THAN
+//     (MAXVALUE, MAXVALUE)` today.
+//   - Catalog has at least one partition and the last one is
+//     `VALUES LESS THAN MAXVALUE`.
+//   - Desired's last partition is also `VALUES LESS THAN
+//     MAXVALUE` and `partitionDefEqual` to catalog's catch-all
+//     (case-insensitive name + byte-equal body).
+//   - Desired has strictly more partitions than catalog
+//     (m > n) — at least one extra to insert.
+//   - Catalog's prefix `[0..n-2]` is `partitionDefEqual` to
+//     desired's prefix `[0..n-2]` for each pair (no compound
+//     diffs — body changes on prefix partitions disqualify).
+//   - Extras (`desired[n-1..m-2]`) have unique names — neither
+//     reusing a name already present in catalog (rules out
+//     reorder / rename-and-insert that'd otherwise look like a
+//     clean insert) nor duplicating each other (rules out
+//     copy-paste typos in desired SQL that vitess accepts but
+//     MySQL would reject at apply with a duplicate-partition-
+//     name error). Comparison is case-insensitive (MySQL
+//     identifier rule).
+func detectCatchAllInteriorInsert(curPO *sqlparser.PartitionOption, curDefs, desDefs []*sqlparser.PartitionDefinition) (catchAll *sqlparser.PartitionDefinition, extras []*sqlparser.PartitionDefinition, ok bool) {
+	if curPO.Type != sqlparser.RangeType || len(curPO.ColList) > 0 {
+		return nil, nil, false
+	}
+	n := len(curDefs)
+	m := len(desDefs)
+	if n == 0 || m <= n {
+		return nil, nil, false
+	}
+	catCatchAll := curDefs[n-1]
+	desCatchAll := desDefs[m-1]
+	if !isMaxvaluePartition(catCatchAll) || !isMaxvaluePartition(desCatchAll) {
+		return nil, nil, false
+	}
+	if !partitionDefEqual(catCatchAll, desCatchAll) {
+		return nil, nil, false
+	}
+	for i := 0; i < n-1; i++ {
+		if !partitionDefEqual(curDefs[i], desDefs[i]) {
+			return nil, nil, false
+		}
+	}
+	// Track partition names case-insensitively (MySQL identifier
+	// rule). Seed with catalog names, then walk extras: each
+	// extra must be new — both wrt catalog (typo where the
+	// "extra" reuses an existing partition name) AND wrt extras
+	// already seen (typo where the user pasted the same new
+	// partition twice). vitess accepts duplicate partition
+	// names in CREATE TABLE and validateDesiredRangeMonotonic
+	// only checks boundary values, so without the second arm of
+	// the check we'd happily emit a `REORGANIZE PARTITION pmax INTO
+	// (p_new …, p_new …, pmax …)` that MySQL would reject with
+	// a duplicate-partition-name error at apply time.
+	seenNames := make(map[string]struct{}, n+m)
+	for _, def := range curDefs {
+		seenNames[strings.ToLower(def.Name.String())] = struct{}{}
+	}
+	candidates := desDefs[n-1 : m-1]
+	for _, ex := range candidates {
+		key := strings.ToLower(ex.Name.String())
+		if _, dup := seenNames[key]; dup {
+			return nil, nil, false
+		}
+		seenNames[key] = struct{}{}
+	}
+	return catCatchAll, candidates, true
+}
+
+func isMaxvaluePartition(def *sqlparser.PartitionDefinition) bool {
+	return def.Options != nil &&
+		def.Options.ValueRange != nil &&
+		def.Options.ValueRange.Type == sqlparser.LessThanType &&
+		def.Options.ValueRange.Maxvalue
+}
+
+// formatCatchAllInteriorInsertReorganize renders the auto-emit
+// for the catch-all interior insert path:
+//
+//	ALTER TABLE <fqtn> REORGANIZE PARTITION <catch-all> INTO (
+//	    <extras formatted by FormatPartitionDefinition>...,
+//	    <catch-all formatted by FormatPartitionDefinition>
+//	);
+//
+// The OLD-name list (single entry, the catch-all) goes through
+// `model.Ident` so reserved-word names get back-ticked. The
+// catch-all in INTO is `curDefs`'s definition (catalog side) so
+// case-only renames don't leak desired-side casing into the
+// generated SQL — same rule `formatReorganizeRun` follows for
+// matched slots inside a per-run REORGANIZE.
+func formatCatchAllInteriorInsertReorganize(fqtn string, catchAll *sqlparser.PartitionDefinition, extras []*sqlparser.PartitionDefinition) string {
+	var b strings.Builder
+	b.WriteString("ALTER TABLE ")
+	b.WriteString(fqtn)
+	b.WriteString(" REORGANIZE PARTITION ")
+	b.WriteString(model.Ident(catchAll.Name.String()))
+	b.WriteString(" INTO (")
+	for _, ex := range extras {
+		b.WriteString("\n  ")
+		b.WriteString(parser.FormatPartitionDefinition(ex))
+		b.WriteString(",")
+	}
+	b.WriteString("\n  ")
+	b.WriteString(parser.FormatPartitionDefinition(catchAll))
+	b.WriteString("\n);")
+	return b.String()
+}
+
 func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int, matchedSlots []bool) string {
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")

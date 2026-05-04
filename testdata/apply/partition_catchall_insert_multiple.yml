@@ -1,0 +1,36 @@
+# RANGE catch-all interior insert with multiple new partitions
+# slotted between the catalog prefix and the catch-all. Pin
+# that the auto-detect packs all of the extras into a single
+# `REORGANIZE pmax INTO (...)` statement (preserving boundary
+# alignment with the unchanged catch-all and the unchanged
+# prefix's tail).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2022 VALUES LESS THAN (2023),
+      PARTITION p2024 VALUES LESS THAN (2025),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION pmax INTO (
+    partition p2022 values less than (2023),
+    partition p2024 values less than (2025),
+    partition pmax values less than maxvalue
+  );
+
+verify_no_drift: true
