@@ -29,3 +29,12 @@ func TestSkipIdentifier(t *testing.T) {
 		})
 	}
 }
+
+func TestAppendBeforeSemicolon(t *testing.T) {
+	// Pins the trailing-semicolon vs no-semicolon split that the
+	// partition-op splice relies on.
+	assert.Equal(t, "ALTER TABLE t , ALGORITHM=INSTANT;",
+		myschema.AppendBeforeSemicolon("ALTER TABLE t ;", ", ALGORITHM=INSTANT"))
+	assert.Equal(t, "ALTER TABLE t, ALGORITHM=INSTANT",
+		myschema.AppendBeforeSemicolon("ALTER TABLE t", ", ALGORITHM=INSTANT"))
+}

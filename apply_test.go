@@ -2,11 +2,13 @@ package myschema_test
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/winebarrel/myschema"
 	"github.com/winebarrel/myschema/internal/testutil"
 )
@@ -82,4 +84,55 @@ func TestApplyYAML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, strings.TrimSpace(plan.SQL), "drift after apply")
 	})
+}
+
+func TestApply_BadDSNError(t *testing.T) {
+	// Pins the apply.go error-wrap path through Database() failing on a
+	// malformed DSN.
+	c := myschema.NewClient(&myschema.Options{DSN: "garbage"})
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{}, nil)
+	require.Error(t, err)
+}
+
+func TestApply_DSNNonexistentDatabase(t *testing.T) {
+	// Pins the apply.go connect() error path: DSN parses fine but the
+	// referenced database doesn't exist, so the underlying driver
+	// rejects the connection at first use. Surfaces from connect() →
+	// Apply returns the wrapped error.
+	c := myschema.NewClient(&myschema.Options{
+		DSN: "root@tcp(127.0.0.1:3306)/no_such_db_for_myschema_tests_xyz",
+	})
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{}, nil)
+	require.Error(t, err)
+}
+
+func TestApply_ExecContextErrorWrapped(t *testing.T) {
+	// Pins apply.go:54-56 — when MySQL rejects a generated DDL, Apply
+	// wraps the error with `execute %q: %w`. Setup: a table with
+	// duplicate values; desired adds a UNIQUE index on the duplicated
+	// column. The diff emits a valid ADD UNIQUE, which MySQL rejects
+	// (Error 1062 duplicate entry).
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    name VARCHAR(10),
+    PRIMARY KEY (id)
+);
+INSERT INTO t (id, name) VALUES (1, 'dup'), (2, 'dup');`)
+
+	desired := writeDesired(t, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    name VARCHAR(10),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_name (name)
+);`)
+
+	c := newClient(t)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{Files: []string{desired}}, &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "execute ")
 }

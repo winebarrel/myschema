@@ -101,3 +101,11 @@ func TestNormalizeViewDefinitionParseError(t *testing.T) {
 	_, err := parser.NormalizeViewDefinition("not valid sql at all", "app")
 	require.Error(t, err)
 }
+
+func TestRestoreSelectLower(t *testing.T) {
+	t.Run("nil node returns empty", func(t *testing.T) {
+		got, err := parser.RestoreSelectLower(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "", got)
+	})
+}

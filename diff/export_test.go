@@ -17,4 +17,8 @@ var (
 	SplitCheckDef     = splitCheckDef
 	CanonicalExpr     = canonicalExpr
 	EqualExpr         = equalExpr
+	ViewDefEqual      = viewDefEqual
+	TopoSortViews     = topoSortViews
+	DropConstraintSQL = dropConstraintSQL
+	AddConstraintSQL  = addConstraintSQL
 )

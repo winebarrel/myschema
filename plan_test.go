@@ -1,11 +1,13 @@
 package myschema_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/winebarrel/myschema"
 	"github.com/winebarrel/myschema/internal/testutil"
 )
@@ -64,4 +66,10 @@ func TestPlanYAML(t *testing.T) {
 			"disallowed-drops mismatch",
 		)
 	})
+}
+
+func TestPlan_BadDSNError(t *testing.T) {
+	c := myschema.NewClient(&myschema.Options{DSN: "garbage"})
+	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
+	require.Error(t, err)
 }
