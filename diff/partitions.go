@@ -167,11 +167,15 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//       tweak, a COMMENT / MAX_ROWS / TABLESPACE change, or
 	//       any other per-partition option that round-trips
 	//       through vitess's PartitionDefinition formatter.
-	//       Generates a single `REORGANIZE PARTITION old1,
-	//       old2, … INTO (PARTITION old1 …, PARTITION old2 …,
-	//       …)` that re-defines each in place. Row-preserving
-	//       (REORGANIZE redistributes rows into the new value
-	//       boundaries when those moved).
+	//       Generates one `REORGANIZE PARTITION old_i,
+	//       old_{i+1}, … INTO (PARTITION old_i …,
+	//       PARTITION old_{i+1} …, …)` *per run of consecutive
+	//       changed slots*, each row-preserving (REORGANIZE
+	//       redistributes rows into the new value boundaries
+	//       when those moved). The detailed algorithm — runs,
+	//       RANGE cascade, the no-op fallthroughs — lives in
+	//       the comment over the `partitionNameListEqual`
+	//       branch in `diffPartitions`.
 	//     - any other shape (merge / split / interior insert /
 	//       reorder / "retention roll-forward") falls through to
 	//       error. Disjoint-name detection isn't enough to tell
@@ -410,13 +414,14 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 	return drops, adds
 }
 
-// partitionValueRangeEqual reports whether the two definitions
-// describe the same value boundary (`VALUES LESS THAN …` or
-// `VALUES IN (…)`) — i.e. whether ONLY the per-partition
-// options changed (COMMENT / MAX_ROWS / TABLESPACE / …) when
-// `partitionDefEqual` already said the full definition differs.
-// Used by the RANGE boundary cascade decision: skip the cascade
-// when the last changed slot's boundary didn't move.
+// formatReorganizeRun renders a single
+// `ALTER TABLE … REORGANIZE PARTITION old_first, …, old_last
+// INTO (PARTITION old_first …, …, PARTITION old_last …)` for
+// one run of consecutive partition slots in `[first, last]`.
+// The OLD-name list goes through `model.Ident` so reserved-word
+// or non-safe-identifier partition names get back-ticked; the
+// INTO bodies go through `parser.FormatPartitionDefinition`
+// which delegates name quoting to vitess's own formatter.
 func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int) string {
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
@@ -441,6 +446,13 @@ func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDef
 	return b.String()
 }
 
+// partitionValueRangeEqual reports whether the two definitions
+// describe the same value boundary (`VALUES LESS THAN …` or
+// `VALUES IN (…)`) — i.e. whether ONLY the per-partition
+// options changed (COMMENT / MAX_ROWS / TABLESPACE / …) when
+// `partitionDefEqual` already said the full definition differs.
+// Used by the RANGE boundary cascade decision: skip the cascade
+// when the last changed slot's boundary didn't move.
 func partitionValueRangeEqual(a, b *sqlparser.PartitionDefinition) bool {
 	var ar, br *sqlparser.PartitionValueRange
 	if a.Options != nil {

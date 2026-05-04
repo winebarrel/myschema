@@ -77,6 +77,30 @@ func TestDiffPartitionsQuotesReservedPartitionNamesOnAdd(t *testing.T) {
 		"ADD PARTITION must back-tick reserved-word names; got %q", stmts[0])
 }
 
+// regression: REORGANIZE PARTITION must back-tick reserved-word
+// partition names on BOTH sides of the statement: the OLD-name
+// list before INTO (which goes through model.Ident in
+// formatReorganizeRun) AND the new PartitionDefinition body
+// inside INTO (which relies on vitess's PartitionDefinition
+// formatter doing the quoting). ADD/DROP have their own
+// quoting pins above; this test keeps the REORGANIZE path
+// honest in case either helper changes.
+func TestDiffPartitionsQuotesReservedPartitionNamesOnReorganize(t *testing.T) {
+	cur := stringPtr("partition by list (id) (partition `select` values in (1, 2), partition p1 values in (3, 4))")
+	des := stringPtr("partition by list (id) (partition `select` values in (1, 2, 7), partition p1 values in (3, 4))")
+
+	stmts, disallowed, err := diffPartitions("db.t", cur, des, AllowAll{})
+	require.NoError(t, err)
+	require.Empty(t, disallowed)
+	require.Len(t, stmts, 1)
+	assert.True(t,
+		strings.Contains(stmts[0], "REORGANIZE PARTITION `select` INTO"),
+		"REORGANIZE PARTITION old-name list must back-tick reserved-word names; got %q", stmts[0])
+	assert.True(t,
+		strings.Contains(stmts[0], "partition `select` values in"),
+		"REORGANIZE PARTITION INTO body must back-tick reserved-word names; got %q", stmts[0])
+}
+
 // regression: KEY partitions where the catalog and desired strings
 // only differ in identifier casing (or whitespace, etc. that vitess
 // normalises away on re-parse) used to surface as the

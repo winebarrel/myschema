@@ -250,8 +250,15 @@ patterns:
   `p2020 LESS THAN (2021)` → `p2020 LESS THAN (2025)`), but
   COMMENT / MAX_ROWS / TABLESPACE and other per-partition
   options that round-trip through vitess's PartitionDefinition
-  formatter are picked up here too — anything that makes the
-  formatted definitions byte-different counts. myschema emits
+  formatter are picked up here too. Two semantic no-ops are
+  *intentionally suppressed* even though they would otherwise
+  surface as byte-different formatted definitions: case-only
+  partition-name diffs (`pAB → PAB` — MySQL identifiers are
+  case-insensitive) and LIST / LIST COLUMNS `VALUES IN (…)`
+  permutations (the value list is a set semantically, so
+  reordering literals doesn't change which rows land in which
+  partition). Both are folded by `partitionDefEqual` and emit
+  no DDL. myschema emits
   *one REORGANIZE per run of consecutive changed slots*, not
   one giant REORGANIZE that drags every matched partition in
   between through the rewrite. MySQL's Error 1519 "When

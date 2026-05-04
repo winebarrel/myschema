@@ -1,0 +1,49 @@
+# RANGE counterpart to the LIST-disjoint per-run REORGANIZE
+# pin. Two separated boundary changes in a 5-partition RANGE
+# table:
+#   - p1 (<10 → <12) and p3 (<30 → <35) move; p2, p4, p5 are
+#     unchanged.
+# Each changed slot forms its own run, and the RANGE cascade
+# gate fires *per run* — each run's last slot's boundary moved
+# AND last < len-1, so each run extends by one to keep the
+# boundary aligned with the unchanged tail. The result is two
+# separate REORGANIZE statements (not one giant
+# `REORGANIZE p1, p2, p3, p4 …`), each trivially consecutive
+# within itself, each pulling in its own cascade slot.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (10),
+      PARTITION p2 VALUES LESS THAN (20),
+      PARTITION p3 VALUES LESS THAN (30),
+      PARTITION p4 VALUES LESS THAN (40),
+      PARTITION p5 VALUES LESS THAN (50)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION p1 VALUES LESS THAN (12),
+      PARTITION p2 VALUES LESS THAN (20),
+      PARTITION p3 VALUES LESS THAN (35),
+      PARTITION p4 VALUES LESS THAN (40),
+      PARTITION p5 VALUES LESS THAN (50)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION p1, p2 INTO (
+    partition p1 values less than (12),
+    partition p2 values less than (20)
+  );
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION p3, p4 INTO (
+    partition p3 values less than (35),
+    partition p4 values less than (40)
+  );
+
+verify_no_drift: true
