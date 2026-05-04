@@ -159,6 +159,43 @@ SUBPARTITION BY HASH (id) SUBPARTITIONS 2 (
 	assert.Contains(t, err.Error(), "out of scope")
 }
 
+func TestParsePartitionClause(t *testing.T) {
+	t.Run("empty input returns nil with no error", func(t *testing.T) {
+		po, err := parser.ParsePartitionClause("")
+		require.NoError(t, err)
+		assert.Nil(t, po)
+	})
+
+	t.Run("RANGE clause round-trips through the AST", func(t *testing.T) {
+		clause := "PARTITION BY RANGE (id) (PARTITION p1 VALUES LESS THAN (10), PARTITION pmax VALUES LESS THAN MAXVALUE)"
+		po, err := parser.ParsePartitionClause(clause)
+		require.NoError(t, err)
+		require.NotNil(t, po)
+		assert.Equal(t, 2, len(po.Definitions))
+	})
+
+	t.Run("invalid SQL surfaces the parse error", func(t *testing.T) {
+		_, err := parser.ParsePartitionClause("PARTITION BY GARBAGE")
+		require.Error(t, err)
+	})
+}
+
+func TestFormatPartitionDefinition(t *testing.T) {
+	// Round-trip through ParsePartitionClause to get a real
+	// *PartitionDefinition, then verify FormatPartitionDefinition
+	// re-renders it without the per-partition `engine <name>` clause.
+	clause := "PARTITION BY RANGE (id) (PARTITION p1 VALUES LESS THAN (10) ENGINE InnoDB)"
+	po, err := parser.ParsePartitionClause(clause)
+	require.NoError(t, err)
+	require.Len(t, po.Definitions, 1)
+
+	out := parser.FormatPartitionDefinition(po.Definitions[0])
+	assert.Contains(t, out, "p1", "partition name preserved")
+	assert.Contains(t, out, "less than", "VALUES LESS THAN preserved")
+	assert.NotContains(t, out, "engine InnoDB", "engine clause stripped")
+	assert.NotContains(t, out, "engine innodb", "engine clause stripped (case)")
+}
+
 func TestExtractPartitionFromShowCreateRejectsSubpartition(t *testing.T) {
 	// Catalog-side guard: a table that already has SUBPARTITION
 	// in its SHOW CREATE TABLE output is rejected so the catalog
