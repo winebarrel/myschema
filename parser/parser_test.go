@@ -758,3 +758,86 @@ CREATE TABLE products (
 	_, ok = tbl.Constraints.GetOk("products_chk_2")
 	assert.True(t, ok, "second unnamed CHECK should be auto-named products_chk_2")
 }
+
+func TestParseSQL_TopLevelErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		sql    string
+		errSub string
+	}{
+		{
+			name:   "duplicate table",
+			sql:    "CREATE TABLE t (id INT); CREATE TABLE t (id INT);",
+			errSub: "duplicate table",
+		},
+		{
+			name:   "duplicate view",
+			sql:    "CREATE TABLE t (id INT); CREATE VIEW v AS SELECT id FROM t; CREATE VIEW v AS SELECT id FROM t;",
+			errSub: "duplicate view",
+		},
+		{
+			name:   "duplicate column inside CREATE TABLE",
+			sql:    "CREATE TABLE t (id INT, id INT);",
+			errSub: "duplicate column",
+		},
+		{
+			name:   "ALTER TABLE on unknown table",
+			sql:    "ALTER TABLE nope ADD CONSTRAINT chk CHECK (1);",
+			errSub: "ALTER TABLE on unknown table",
+		},
+		{
+			name:   "SUBPARTITION rejected",
+			sql:    "CREATE TABLE t (id INT, n INT, PRIMARY KEY (id, n)) PARTITION BY RANGE (n) SUBPARTITION BY HASH (id) (PARTITION p1 VALUES LESS THAN (10));",
+			errSub: "SUBPARTITION",
+		},
+		{
+			name:   "convert-charset on ALTER TABLE rejected",
+			sql:    "CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;\n-- myschema:convert-charset\nALTER TABLE t ADD CONSTRAINT chk CHECK (id > 0);",
+			errSub: "convert-charset",
+		},
+		{
+			name:   "rename directive on CREATE VIEW rejected",
+			sql:    "CREATE TABLE t (id INT);\n-- myschema:renamed-from old_v\nCREATE VIEW v AS SELECT id FROM t;",
+			errSub: "renamed-from",
+		},
+		{
+			name:   "rename directive on unsupported statement (CREATE DATABASE) rejected",
+			sql:    "-- myschema:renamed-from old_db\nCREATE DATABASE x;",
+			errSub: "renamed-from",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parser.ParseSQL(tt.sql, "app")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errSub)
+		})
+	}
+}
+
+func TestParseSQL_DuplicateForeignKey(t *testing.T) {
+	// addTableConstraint surfaces duplicate FK names in the same CREATE
+	// TABLE rather than letting the latter silently win.
+	_, err := parser.ParseSQL(`
+CREATE TABLE p (id INT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE c (
+    id INT NOT NULL,
+    a INT NOT NULL,
+    b INT NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT fk FOREIGN KEY (a) REFERENCES p (id),
+    CONSTRAINT fk FOREIGN KEY (b) REFERENCES p (id),
+    KEY ka (a),
+    KEY kb (b)
+);
+`, "app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate foreign key")
+}
+
+func TestParseSQL_UnparseableInputErrors(t *testing.T) {
+	// SplitStatementToPieces tolerates many shapes, but a totally
+	// malformed statement still surfaces as a parse error.
+	_, err := parser.ParseSQL("CREATE TABLE )))) garbage (", "app")
+	require.Error(t, err)
+}

@@ -985,3 +985,130 @@ CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4;`, "shop")
 	assert.Contains(t, err.Error(), "convert-charset")
 	assert.Contains(t, err.Error(), "renamed-from")
 }
+
+func TestConsumeKeywordSequence(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		prefix   string
+		wantOk   bool
+		wantRest string
+	}{
+		{"empty prefix matches everything (no-op)", "anything", "", true, "anything"},
+		{"single keyword case-insensitive", "KEY rest", "key", true, " rest"},
+		{"multi-word keyword sequence", "UNIQUE KEY rest", "UNIQUE KEY", true, " rest"},
+		{"prefix spelled with single space, line uses runs of spaces", "UNIQUE   KEY rest", "UNIQUE KEY", true, " rest"},
+		{"head doesn't match", "FOREIGN KEY rest", "UNIQUE KEY", false, "FOREIGN KEY rest"},
+		{"second word missing whitespace separator", "UNIQUEKEY rest", "UNIQUE KEY", false, "UNIQUEKEY rest"},
+		{"only the prefix on the line is rejected (no trailing whitespace)", "KEY", "KEY", false, "KEY"},
+		{"trailing tab counts as whitespace", "KEY\trest", "KEY", true, "\trest"},
+		{"line shorter than keyword", "KE", "KEY", false, "KE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rest, ok := parser.ConsumeKeywordSequence(tt.line, tt.prefix)
+			assert.Equal(t, tt.wantOk, ok)
+			assert.Equal(t, tt.wantRest, rest)
+		})
+	}
+}
+
+func TestStripUntilAfterBacktickedName(t *testing.T) {
+	tests := []struct {
+		name   string
+		line   string
+		prefix string
+		want   string
+	}{
+		{"prefix and quoted name peeled off", "CONSTRAINT `fk_x` FOREIGN KEY (id)", "CONSTRAINT", " FOREIGN KEY (id)"},
+		{"prefix doesn't match returns line unchanged", "FOREIGN KEY (id)", "CONSTRAINT", "FOREIGN KEY (id)"},
+		{"non-backtick after prefix returns line unchanged", "CONSTRAINT fk_x FOREIGN KEY (id)", "CONSTRAINT", "CONSTRAINT fk_x FOREIGN KEY (id)"},
+		{"unterminated backtick returns line unchanged", "CONSTRAINT `unterminated", "CONSTRAINT", "CONSTRAINT `unterminated"},
+		{"empty after prefix returns line unchanged", "CONSTRAINT", "CONSTRAINT", "CONSTRAINT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parser.StripUntilAfterBacktickedName(tt.line, tt.prefix))
+		})
+	}
+}
+
+func TestLeadingBacktickedIdent(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		wantName string
+		wantOk   bool
+	}{
+		{"happy path", "`weird name` VARCHAR(64)", "weird name", true},
+		{"leading whitespace tolerated", "  `name` INT", "name", true},
+		{"non-backtick start", "name INT", "", false},
+		{"unterminated backtick", "`oops INT", "", false},
+		{"empty input", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, ok := parser.LeadingBacktickedIdent(tt.line)
+			assert.Equal(t, tt.wantName, n)
+			assert.Equal(t, tt.wantOk, ok)
+		})
+	}
+}
+
+func TestTokenize(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"plain words", "KEY idx col", []string{"KEY", "idx", "col"}},
+		{"trailing comma stripped", "id INT,", []string{"id", "INT"}},
+		{"separated `(col)` token collapses to nothing", "KEY idx (col)", []string{"KEY", "idx"}},
+		{"no-space form: KEY idx(col) → drops paren", "KEY idx(col)", []string{"KEY", "idx"}},
+		{"backticked name with no-space paren preserved", "KEY `idx`(col)", []string{"KEY", "`idx`"}},
+		{"token starting with paren is dropped", "KEY (col)", []string{"KEY"}},
+		{"backticked name with whitespace inside survives split", "KEY `weird name`", []string{"KEY", "`weird", "name`"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parser.Tokenize(tt.in))
+		})
+	}
+}
+
+func TestClassifyInlineLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		wantKind int
+		wantName string
+	}{
+		{"plain column line", "id INT NOT NULL", parser.InlineKindColumn, "id"},
+		{"backticked column with whitespace", "`weird name` INT", parser.InlineKindColumn, "weird name"},
+		{"named UNIQUE KEY", "UNIQUE KEY uq_email (email)", parser.InlineKindIndex, "uq_email"},
+		{"unnamed UNIQUE KEY", "UNIQUE KEY (email)", parser.InlineKindUnknown, ""},
+		{"UNIQUE without KEY/INDEX falls through", "UNIQUE foo", parser.InlineKindUnknown, ""},
+		{"FULLTEXT KEY named", "FULLTEXT KEY ft (body)", parser.InlineKindIndex, "ft"},
+		{"SPATIAL KEY named", "SPATIAL KEY sp (location)", parser.InlineKindIndex, "sp"},
+		{"plain KEY named", "KEY idx (col)", parser.InlineKindIndex, "idx"},
+		{"plain INDEX named", "INDEX idx (col)", parser.InlineKindIndex, "idx"},
+		{"unnamed plain KEY", "KEY (col)", parser.InlineKindUnknown, ""},
+		{"PRIMARY KEY (fixed name, not renameable)", "PRIMARY KEY (id)", parser.InlineKindUnknown, ""},
+		{"anonymous FOREIGN KEY", "FOREIGN KEY (id) REFERENCES p (id)", parser.InlineKindUnknown, ""},
+		{"named CONSTRAINT … UNIQUE", "CONSTRAINT uq UNIQUE KEY (a)", parser.InlineKindIndex, "uq"},
+		{"named CONSTRAINT … CHECK", "CONSTRAINT chk CHECK (a > 0)", parser.InlineKindCheck, "chk"},
+		{"named CONSTRAINT … FOREIGN KEY", "CONSTRAINT fk FOREIGN KEY (a) REFERENCES p (id)", parser.InlineKindFK, "fk"},
+		{"CONSTRAINT … PRIMARY (name ignored by MySQL)", "CONSTRAINT n PRIMARY KEY (id)", parser.InlineKindUnknown, ""},
+		{"anonymous CHECK", "CHECK (id > 0)", parser.InlineKindUnknown, ""},
+		{"closing paren line", ");", parser.InlineKindUnknown, ""},
+		{"empty line", "", parser.InlineKindUnknown, ""},
+		{"backticked CONSTRAINT name", "CONSTRAINT `chk_x` CHECK (id > 0)", parser.InlineKindCheck, "chk_x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k, name := parser.ClassifyInlineLine(tt.line)
+			assert.Equal(t, tt.wantKind, k, "kind")
+			assert.Equal(t, tt.wantName, name, "name")
+		})
+	}
+}

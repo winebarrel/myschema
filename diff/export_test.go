@@ -4,21 +4,23 @@ package diff
 // can be pinned without polluting the public API.
 
 var (
-	PtrEq             = ptrEq[string]
-	SliceEqString     = sliceEq[string]
-	SliceEqInt        = sliceEq[int]
-	LooseEqual        = looseEqual
-	NormalizeIndexTyp = normalizeIndexType
-	ColumnEqual       = columnEqual
-	ConstraintEqual   = constraintEqual
-	IndexEqual        = indexEqual
-	FKEqual           = fkEqual
-	AllPartsDropped   = allPartsDropped
-	SplitCheckDef     = splitCheckDef
-	CanonicalExpr     = canonicalExpr
-	EqualExpr         = equalExpr
-	ViewDefEqual      = viewDefEqual
-	TopoSortViews     = topoSortViews
-	DropConstraintSQL = dropConstraintSQL
-	AddConstraintSQL  = addConstraintSQL
+	PtrEq                     = ptrEq[string]
+	SliceEqString             = sliceEq[string]
+	SliceEqInt                = sliceEq[int]
+	LooseEqual                = looseEqual
+	NormalizeIndexTyp         = normalizeIndexType
+	ColumnEqual               = columnEqual
+	ConstraintEqual           = constraintEqual
+	IndexEqual                = indexEqual
+	FKEqual                   = fkEqual
+	AllPartsDropped           = allPartsDropped
+	SplitCheckDef             = splitCheckDef
+	CanonicalExpr             = canonicalExpr
+	EqualExpr                 = equalExpr
+	ViewDefEqual              = viewDefEqual
+	TopoSortViews             = topoSortViews
+	DropConstraintSQL         = dropConstraintSQL
+	AddConstraintSQL          = addConstraintSQL
+	TemporarilySortListValues = temporarilySortListValues
+	PartitionValueRangeEqual  = partitionValueRangeEqual
 )

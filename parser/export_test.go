@@ -14,7 +14,28 @@ var (
 	EffectiveCharsetForCollation    = effectiveCharsetForCollation
 	RejectMisplacedConvertCharset   = rejectMisplacedConvertCharset
 	RejectMisplacedRenameDirectives = rejectMisplacedRenameDirectives
+	StripUntilAfterBacktickedName   = stripUntilAfterBacktickedName
+	ConsumeKeywordSequence          = consumeKeywordSequence
+	LeadingBacktickedIdent          = leadingBacktickedIdent
+	Tokenize                        = tokenize
 )
+
+// InlineKind constants (re-exported as ints so external tests can
+// assert on them without depending on the unexported enum type).
+const (
+	InlineKindUnknown = int(inlineKindUnknown)
+	InlineKindColumn  = int(inlineKindColumn)
+	InlineKindIndex   = int(inlineKindIndex)
+	InlineKindCheck   = int(inlineKindCheck)
+	InlineKindFK      = int(inlineKindFK)
+)
+
+// ClassifyInlineLine wraps classifyInlineLine and returns the kind as
+// an int so the unexported enum type doesn't leak.
+func ClassifyInlineLine(line string) (int, string) {
+	k, n := classifyInlineLine(line)
+	return int(k), n
+}
 
 func ReferenceActionString(a sqlparser.ReferenceAction) string {
 	return referenceActionString(a)
