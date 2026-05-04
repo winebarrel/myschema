@@ -422,6 +422,20 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 // or non-safe-identifier partition names get back-ticked; the
 // INTO bodies go through `parser.FormatPartitionDefinition`
 // which delegates name quoting to vitess's own formatter.
+//
+// Per-slot, the INTO body uses `desDefs[i]` for slots that
+// actually changed and `curDefs[i]` for slots that
+// `partitionDefEqual` already considers equal but were pulled
+// into the run by the RANGE boundary cascade. The cascaded
+// slot's body is canonically the same on both sides — the
+// only thing that can differ is the partition *name* (case-
+// only rename, suppressed by the EqualFold in
+// partitionDefEqual). Restating the catalog's body for the
+// cascaded slot keeps the "case-only name diff emits no DDL"
+// rule honest at the cascaded slot too — without this the
+// formatter would leak the desired-side renamed casing into
+// the generated REORGANIZE even though MySQL would ignore the
+// rename.
 func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int) string {
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
@@ -440,7 +454,11 @@ func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDef
 		} else {
 			b.WriteString("\n  ")
 		}
-		b.WriteString(parser.FormatPartitionDefinition(desDefs[i]))
+		def := desDefs[i]
+		if partitionDefEqual(curDefs[i], desDefs[i]) {
+			def = curDefs[i]
+		}
+		b.WriteString(parser.FormatPartitionDefinition(def))
 	}
 	b.WriteString("\n);")
 	return b.String()
@@ -453,6 +471,12 @@ func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDef
 // `partitionDefEqual` already said the full definition differs.
 // Used by the RANGE boundary cascade decision: skip the cascade
 // when the last changed slot's boundary didn't move.
+//
+// LIST `VALUES IN (…)` permutations are folded to equal here
+// — same set-semantics rule `partitionDefEqual` enforces — so
+// the helper is safe to reuse outside the current RANGE-only
+// cascade gate without reintroducing the spurious-REORGANIZE
+// regression that the temp-sort in `partitionDefEqual` fixed.
 func partitionValueRangeEqual(a, b *sqlparser.PartitionDefinition) bool {
 	var ar, br *sqlparser.PartitionValueRange
 	if a.Options != nil {
@@ -467,7 +491,31 @@ func partitionValueRangeEqual(a, b *sqlparser.PartitionDefinition) bool {
 	if ar == nil || br == nil {
 		return false
 	}
+	if restore := temporarilySortValueRangeListValues(ar, br); restore != nil {
+		defer restore()
+	}
 	return sqlparser.String(ar) == sqlparser.String(br)
+}
+
+// temporarilySortValueRangeListValues is the
+// `temporarilySortListValues` analogue for two
+// `*PartitionValueRange` rather than two
+// `*PartitionDefinition`. Same mechanic: temp-sort the Range
+// slices in place by formatted-string for InType comparison,
+// restore on defer so callers' subsequent formatting still
+// sees the original AST order.
+func temporarilySortValueRangeListValues(a, b *sqlparser.PartitionValueRange) func() {
+	if a.Type != sqlparser.InType || b.Type != sqlparser.InType {
+		return nil
+	}
+	savedA := append(sqlparser.ValTuple(nil), a.Range...)
+	savedB := append(sqlparser.ValTuple(nil), b.Range...)
+	sortValTupleByFormattedString(a.Range)
+	sortValTupleByFormattedString(b.Range)
+	return func() {
+		a.Range = savedA
+		b.Range = savedB
+	}
 }
 
 func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
@@ -510,19 +558,10 @@ func partitionDefEqual(a, b *sqlparser.PartitionDefinition) bool {
 
 func temporarilySortListValues(a, b *sqlparser.PartitionDefinition) func() {
 	if a.Options == nil || b.Options == nil ||
-		a.Options.ValueRange == nil || b.Options.ValueRange == nil ||
-		a.Options.ValueRange.Type != sqlparser.InType ||
-		b.Options.ValueRange.Type != sqlparser.InType {
+		a.Options.ValueRange == nil || b.Options.ValueRange == nil {
 		return nil
 	}
-	savedA := append(sqlparser.ValTuple(nil), a.Options.ValueRange.Range...)
-	savedB := append(sqlparser.ValTuple(nil), b.Options.ValueRange.Range...)
-	sortValTupleByFormattedString(a.Options.ValueRange.Range)
-	sortValTupleByFormattedString(b.Options.ValueRange.Range)
-	return func() {
-		a.Options.ValueRange.Range = savedA
-		b.Options.ValueRange.Range = savedB
-	}
+	return temporarilySortValueRangeListValues(a.Options.ValueRange, b.Options.ValueRange)
 }
 
 func sortValTupleByFormattedString(vs sqlparser.ValTuple) {

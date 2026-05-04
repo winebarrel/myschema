@@ -1,0 +1,41 @@
+# When the RANGE cascade pulls in an unchanged `last+1` slot,
+# the cascaded slot is by definition `partitionDefEqual`-equal
+# (otherwise it'd already be part of the run). If the only
+# diff at the cascaded slot is a case-only partition-name
+# change (e.g. catalog `pB` vs desired `PB`), the
+# "case-only name diff = no DDL emit" rule still applies *to
+# the cascaded slot's name*: the REORGANIZE INTO body should
+# restate the catalog's name, not silently leak the desired-
+# side renamed casing into the generated SQL. Without this
+# rule the formatter would emit `partition PB values less
+# than (20)` for the cascaded slot even though catalog already
+# has `pB` and the rename is a semantic no-op MySQL ignores.
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION pA VALUES LESS THAN (10),
+      PARTITION pB VALUES LESS THAN (20),
+      PARTITION pC VALUES LESS THAN (30)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      n INT NOT NULL,
+      PRIMARY KEY (id, n)
+  ) PARTITION BY RANGE (n) (
+      PARTITION pA VALUES LESS THAN (12),
+      PARTITION PB VALUES LESS THAN (20),
+      PARTITION pC VALUES LESS THAN (30)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.events REORGANIZE PARTITION pA, pB INTO (
+    partition pA values less than (12),
+    partition pB values less than (20)
+  );
+
+verify_no_drift: true

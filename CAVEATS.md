@@ -281,6 +281,20 @@ patterns:
   one-slot REORGANIZE. MySQL redistributes existing rows into
   the new boundaries (row-preserving). No `--allow-drop`
   gating because every dropped name is reused on the add side.
+  **Operationally** REORGANIZE PARTITION is data-moving —
+  every row in the named partitions is read, redistributed
+  according to the new boundaries, and rewritten in place.
+  Cost scales with the row count of the slots in the run (and
+  the cascaded `last+1` slot when that fires), not with how
+  much the boundary moved — even a one-byte VALUES tweak on a
+  multi-million-row partition rewrites the whole partition.
+  Same caveat as the HASH/KEY count-change section above: the
+  diff is shaped to keep the rewrite proportional to the diff
+  (per-run REORGANIZE, minimal cascade), but on large
+  partitions the resulting ALTER is still a heavy operation —
+  size your maintenance windows accordingly, or set
+  `--alter-algorithm=COPY --alter-lock=SHARED` (or equivalent)
+  to make MySQL's locking choice explicit.
 
 **Diffs that still error (manage by hand).**
 
