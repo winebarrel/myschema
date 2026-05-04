@@ -213,7 +213,7 @@ partition-level data destruction).
 The error reads:
 
 ```
-desired LIST partition layout discards value V (catalog partition pX); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss
+table <fqtn>: desired LIST partition layout discards value V (catalog partition pX); MySQL silently drops any matching rows on REORGANIZE — re-add the value to a desired partition, or pass `--allow-drop=partition` to acknowledge the data loss
 ```
 
 With the flag, the discard goes through as the operator's explicit choice.
