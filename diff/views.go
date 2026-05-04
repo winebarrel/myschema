@@ -150,9 +150,10 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 // viewEqual reports whether two views are operationally identical for
 // diff purposes. The SELECT body goes through viewDefEqual (which
 // normalises qualifiers, redundant aliases, and casing); the
-// `WITH … CHECK OPTION` clause is compared verbatim — both parser
-// and catalog populate `CheckOption` to NONE/LOCAL/CASCADED so the
-// string compare is steady-state-stable.
+// `WITH … CHECK OPTION` clause is compared after folding the empty
+// string into "NONE" so the comparison stays in step with
+// `(*View).CreateSQL()`, which treats both as "no WITH clause" and
+// suppresses the keyword.
 //
 // Cols (the optional column-alias list `CREATE VIEW v (a, b) AS …`)
 // is intentionally NOT compared here: catalog/views.go reads only
@@ -164,10 +165,22 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 // view as drifting on every plan. Cols changes therefore stay
 // silently ignored as before, tracked separately as a TODO.
 func viewEqual(a, b *model.View, database string) (bool, error) {
-	if a.CheckOption != b.CheckOption {
+	if canonicalCheckOption(a.CheckOption) != canonicalCheckOption(b.CheckOption) {
 		return false, nil
 	}
 	return viewDefEqual(a.Definition, b.Definition, database)
+}
+
+// canonicalCheckOption folds the empty string into "NONE" so a
+// hand-built `model.View{}` (where `CheckOption` is the zero value)
+// compares equal to the parser/catalog-populated `"NONE"`. Both
+// shapes mean "no WITH … CHECK OPTION clause" — `(*View).CreateSQL()`
+// already treats them identically.
+func canonicalCheckOption(s string) string {
+	if s == "" {
+		return "NONE"
+	}
+	return s
 }
 
 // viewDefEqual normalises both definitions through pingcap parser+restore

@@ -91,9 +91,27 @@ func TestDiffViews_CheckOptionChangeFiresDiff(t *testing.T) {
 	assert.Contains(t, r.CreateStmts[0], "WITH LOCAL CHECK OPTION")
 }
 
+func TestDiffViews_CheckOptionEmptyEquivalentToNone(t *testing.T) {
+	// `""` and `"NONE"` both mean "no WITH … CHECK OPTION clause" —
+	// (*View).CreateSQL() suppresses the clause for both. viewEqual
+	// must treat them as equal, otherwise a hand-built model.View{}
+	// (zero-value CheckOption) compared to a parser/catalog-built
+	// view (CheckOption="NONE") would emit a spurious CREATE OR REPLACE.
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "NONE"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users"} // empty CheckOption
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	assert.Empty(t, r.CreateStmts, `"" must compare equal to "NONE"`)
+}
+
 func TestDiffViews_AllFieldsEqualSkipped(t *testing.T) {
 	// Sanity: same Definition + same CheckOption must still skip the
-	// CREATE OR REPLACE (the fix musn't introduce false positives for
+	// CREATE OR REPLACE (the fix mustn't introduce false positives for
 	// genuinely-equal views).
 	current := orderedmap.New[string, *model.View]()
 	desired := orderedmap.New[string, *model.View]()
