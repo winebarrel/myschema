@@ -208,8 +208,8 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// removal, the retention workflow). Anything else — HASH/KEY
 	// count operations, the both-needed case (value change,
 	// reorder, interior insert), scheme change, adding or removing
-	// partitioning entirely — still errors out (CAVEATS.md
-	// "Partitioning"). Done before the column / index passes so
+	// partitioning entirely — still errors out (see
+	// PARTITIONING.md). Done before the column / index passes so
 	// the user sees the partition error immediately.
 	partStmts, partDisallowed, err := diffPartitions(fqtn, current.Partition, desired.Partition, dc)
 	if err != nil {
