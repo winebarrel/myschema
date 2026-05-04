@@ -58,10 +58,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 ## Low — CLI ergonomics
 
-- [ ] `--enable` / `--disable` flag to scope a run to specific object
-      types (`table`, `view`).
-- [ ] `--include` / `--exclude` extension to indexes / FKs (currently
-      tables and views only).
 - [ ] `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars).
 - [ ] `--split` for `dump` (one file per table / view).
 - [ ] `--omit-database` for `dump` (mirror of pistachio's `--omit-schema`).
