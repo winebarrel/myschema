@@ -112,7 +112,12 @@ func stripQualifiers(stmt sqlparser.SQLNode) {
 
 // stripRedundantAliases drops `AS col` from `SELECT col AS col` patterns.
 // MySQL adds these to information_schema.VIEWS.VIEW_DEFINITION even when
-// the user didn't write them.
+// the user didn't write them. Only redundant aliases (alias name equals
+// the underlying ColName) are dropped — aliases on function calls,
+// expressions, or columns where the user-chosen alias differs from the
+// column name are meaningful and must survive the normaliser, otherwise
+// view-body edits that rename a column-alias would silently compare
+// equal at diff time and the live view would never be replaced.
 func stripRedundantAliases(stmt sqlparser.SQLNode) {
 	_ = sqlparser.Walk(func(n sqlparser.SQLNode) (bool, error) {
 		sel, ok := n.(*sqlparser.Select)
@@ -122,6 +127,21 @@ func stripRedundantAliases(stmt sqlparser.SQLNode) {
 		for _, e := range sel.SelectExprs.Exprs {
 			ae, ok := e.(*sqlparser.AliasedExpr)
 			if !ok || ae.As.IsEmpty() {
+				continue
+			}
+			col, ok := ae.Expr.(*sqlparser.ColName)
+			if !ok {
+				// Alias on a non-column expression (COUNT(*),
+				// arithmetic, CASE, …) is always meaningful — the
+				// underlying expression has no canonical name to
+				// compare against.
+				continue
+			}
+			// stripQualifiers runs first, so col.Name is the bare
+			// column name with no qualifier. MySQL identifiers are
+			// case-insensitive; vitess' IdentifierCI.Equal handles
+			// the fold.
+			if !ae.As.Equal(col.Name) {
 				continue
 			}
 			ae.As = sqlparser.NewIdentifierCI("")
