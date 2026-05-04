@@ -2,14 +2,10 @@ coverage:
   status:
     project:
       default:
-        # Lower target while myschema is still maturing — pistachio
-        # ships at 88%/75% but myschema's coverage isn't there yet.
-        # target: 88%
-        target: 50%
+        target: 88%
     patch:
       default:
-        # target: 75%
-        target: 50%
+        target: 75%
 
 ignore:
   - "internal/testutil"

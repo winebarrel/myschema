@@ -6,7 +6,7 @@ package diff
 var (
 	PtrEq                     = ptrEq[string]
 	LooseEqual                = looseEqual
-	NormalizeIndexTyp         = normalizeIndexType
+	NormalizeIndexType        = normalizeIndexType
 	ColumnEqual               = columnEqual
 	ConstraintEqual           = constraintEqual
 	IndexEqual                = indexEqual

@@ -53,6 +53,14 @@ func TestApplyYAML(t *testing.T) {
 		}, &buf)
 
 		if tc.Error != "" {
+			// Enforce the documented mutually-exclusive contract so a
+			// malformed fixture (Error set alongside Applied or
+			// VerifyNoDrift) can't silently skip the success-path
+			// assertions below.
+			require.Empty(t, tc.Applied,
+				"applyTestCase.Error and Applied are mutually exclusive")
+			require.Nil(t, tc.VerifyNoDrift,
+				"applyTestCase.Error makes VerifyNoDrift moot — leave it unset")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.Error)
 			return

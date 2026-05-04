@@ -9,9 +9,11 @@ var (
 	PartitionOpInsertPos  = partitionOpInsertPos
 )
 
-// DSNConfigFor invokes the unexported dsnConfig method on Client.
-// Returned bool reports whether the parse succeeded; on success the
-// db-name and password are exposed for assertion.
+// DSNConfigFor invokes the unexported dsnConfig method on Client and
+// surfaces the parsed db-name and (post-override) password for
+// assertion. Returns a non-nil error when dsnConfig fails (malformed
+// DSN, missing database name, etc.); both string returns are zero
+// in that case.
 func DSNConfigFor(c *Client) (dbName, password string, err error) {
 	cfg, err := c.dsnConfig()
 	if err != nil {

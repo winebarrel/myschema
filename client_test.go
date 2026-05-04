@@ -10,7 +10,9 @@ import (
 )
 
 func TestClient_DSNConfig_PasswordOverride(t *testing.T) {
-	// MYSCHEMA_PASSWORD overrides whatever password the DSN already has.
+	// Options.Password (typically populated from MYSCHEMA_PASSWORD by
+	// kong, but we set it directly here to keep the test hermetic)
+	// overrides whatever password the DSN already has.
 	c := myschema.NewClient(&myschema.Options{
 		DSN:      "root:from_dsn@tcp(127.0.0.1:3306)/mydb",
 		Password: "from_env",
@@ -18,7 +20,7 @@ func TestClient_DSNConfig_PasswordOverride(t *testing.T) {
 	dbName, password, err := myschema.DSNConfigFor(c)
 	require.NoError(t, err)
 	assert.Equal(t, "mydb", dbName)
-	assert.Equal(t, "from_env", password, "MYSCHEMA_PASSWORD should override DSN password")
+	assert.Equal(t, "from_env", password, "Options.Password should override the DSN-embedded password")
 }
 
 func TestClient_DSNConfig_MalformedDSNError(t *testing.T) {

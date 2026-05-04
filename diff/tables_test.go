@@ -405,12 +405,12 @@ func TestLooseEqual(t *testing.T) {
 }
 
 func TestNormalizeIndexType(t *testing.T) {
-	assert.Equal(t, "", diff.NormalizeIndexTyp(""), "empty stays empty")
-	assert.Equal(t, "", diff.NormalizeIndexTyp("BTREE"), "BTREE collapses to empty (InnoDB default)")
-	assert.Equal(t, "", diff.NormalizeIndexTyp("btree"), "lowercase btree also collapses")
-	assert.Equal(t, "HASH", diff.NormalizeIndexTyp("HASH"), "HASH preserved")
-	assert.Equal(t, "FULLTEXT", diff.NormalizeIndexTyp("fulltext"), "uppercased")
-	assert.Equal(t, "SPATIAL", diff.NormalizeIndexTyp("SPATIAL"), "SPATIAL preserved")
+	assert.Equal(t, "", diff.NormalizeIndexType(""), "empty stays empty")
+	assert.Equal(t, "", diff.NormalizeIndexType("BTREE"), "BTREE collapses to empty (InnoDB default)")
+	assert.Equal(t, "", diff.NormalizeIndexType("btree"), "lowercase btree also collapses")
+	assert.Equal(t, "HASH", diff.NormalizeIndexType("HASH"), "HASH preserved")
+	assert.Equal(t, "FULLTEXT", diff.NormalizeIndexType("fulltext"), "uppercased")
+	assert.Equal(t, "SPATIAL", diff.NormalizeIndexType("SPATIAL"), "SPATIAL preserved")
 }
 
 func TestColumnEqual(t *testing.T) {
