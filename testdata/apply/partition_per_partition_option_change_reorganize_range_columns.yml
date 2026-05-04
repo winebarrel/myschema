@@ -1,0 +1,36 @@
+# RANGE COLUMNS counterpart to the plain-RANGE option-only
+# REORGANIZE pin. The cascade gate (`partitionValueRangeEqual`)
+# is only exercised by the scalar-RANGE fixture; without a
+# tuple-boundary regression a comment / TABLESPACE-only edit on
+# `RANGE COLUMNS` could silently widen the span to `last+1` and
+# turn a metadata-only edit into a tuple-boundary rewrite. This
+# fixture pins the narrower behaviour: only the slot whose
+# COMMENT actually changed shows up in the REORGANIZE, and
+# `partitionValueRangeEqual` correctly equates the unchanged
+# tuple boundaries.
+init: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (10, 100) COMMENT 'old',
+      PARTITION p1 VALUES LESS THAN (20, 200)
+  );
+
+desired: |
+  CREATE TABLE shards (
+      a INT NOT NULL,
+      b INT NOT NULL,
+      PRIMARY KEY (a, b)
+  ) PARTITION BY RANGE COLUMNS(a, b) (
+      PARTITION p0 VALUES LESS THAN (10, 100) COMMENT 'new',
+      PARTITION p1 VALUES LESS THAN (20, 200)
+  );
+
+applied: |
+  ALTER TABLE myschema_test.shards REORGANIZE PARTITION p0 INTO (
+    partition p0 values less than (10, 100) comment 'new'
+  );
+
+verify_no_drift: true
