@@ -282,7 +282,8 @@ func skipASCIIWhitespace(s string, pos int) int {
 
 // skipQualifiedIdentifier advances past one identifier or a
 // `db.table` chain. Each segment is either back-ticked (with
-// embedded “ as the standard MySQL escape) or unquoted
+// the standard MySQL escape — an embedded backtick is
+// doubled inside the back-ticked identifier) or unquoted
 // (letters / digits / `_` / `$`). Operates on raw bytes so a
 // multi-byte UTF-8 sequence inside a back-ticked identifier
 // stays intact in the returned offset.

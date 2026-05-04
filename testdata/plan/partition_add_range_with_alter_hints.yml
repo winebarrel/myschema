@@ -9,9 +9,9 @@
 # Without this fixture, a future format tweak to the ADD
 # PARTITION builder (or to appendAlterHints) could quietly
 # break the splice point and ship invalid SQL to MySQL.
-# `partition_add_range_with_alter_hints_apply` is the apply
-# counterpart that confirms MySQL actually accepts the
-# corrected form.
+# `testdata/apply/partition_add_range_with_alter_hints.yml` is
+# the apply counterpart that confirms MySQL actually accepts
+# the corrected form.
 init: |
   CREATE TABLE events (
       id BIGINT NOT NULL,
