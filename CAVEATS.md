@@ -105,7 +105,7 @@ parent side. Specifically:
   user would write by hand:
 
   ```sql
-  ALTER TABLE owner ADD CONSTRAINT fk … REFERENCES other_db.parent(id);
+  ALTER TABLE child ADD CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES other_db.parent (id);
   ```
 - Diff still detects changes on the *child* side: equality compares
   `(RefDB, RefTable)`, so renaming or re-pointing the FK fires the
