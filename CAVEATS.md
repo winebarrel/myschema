@@ -131,6 +131,102 @@ CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
 `varchar`, etc. don't trigger drift — both sides are lower-cased
 before comparison. Write whichever you find readable.
 
+## `ENUM` / `SET` element-list changes are diffed as one opaque string
+
+**Behaviour.** `model.Column.TypeName` holds the rendered type
+(`enum('new','paid','shipped')`) as a single lowercase string, and
+the column diff (`columnEqual` in `diff/tables.go`) compares it
+byte-for-byte. Any element-list change — append, reorder, remove,
+rename — surfaces as the same generic `MODIFY COLUMN`, with no hint
+about which kind it is and no `--allow-drop` accounting.
+
+```sql
+CREATE TABLE orders (
+  id     BIGINT NOT NULL,
+  status ENUM('new','paid','shipped') NOT NULL,
+  PRIMARY KEY (id)
+);
+```
+
+The four element-list shapes — each just a different `status` column
+line in your desired `CREATE TABLE` — are:
+
+- **Append**: `status ENUM('new','paid','shipped','refunded') NOT NULL`
+- **Reorder**: `status ENUM('paid','new','shipped') NOT NULL`
+- **Remove**: `status ENUM('new','paid') NOT NULL`
+- **Rename**: `status ENUM('new','settled','shipped') NOT NULL`
+
+Every shape surfaces as the same kind of statement — a single
+`MODIFY COLUMN` whose `enum(...)` body mirrors whatever the user
+wrote — so plan output looks structurally identical even though
+the rendered enum literal and the runtime impact (online-safe
+append, integer-mapping rewrite, data truncation, …) differ
+sharply per shape:
+
+```sql
+-- append
+ALTER TABLE orders MODIFY COLUMN status enum('new','paid','shipped','refunded') NOT NULL;
+-- reorder
+ALTER TABLE orders MODIFY COLUMN status enum('paid','new','shipped') NOT NULL;
+-- remove
+ALTER TABLE orders MODIFY COLUMN status enum('new','paid') NOT NULL;
+-- rename
+ALTER TABLE orders MODIFY COLUMN status enum('new','settled','shipped') NOT NULL;
+```
+
+**Why each shape matters differently.** ENUM stores values as
+1-based integers (`'new'=1, 'paid'=2, 'shipped'=3`) and SET as
+bit positions (`urgent=1, vip=2, beta=4`). The four shapes have
+very different runtime cost and safety:
+
+- **Append** (add a value at the *end* of the list): online-safe in
+  MySQL 8.0+ and qualifies for `ALGORITHM=INSTANT`. myschema does
+  not detect this and emits a plain `MODIFY COLUMN`. To run it
+  online today, pass `--alter-algorithm=INSTANT` (and let MySQL
+  reject the apply if the change isn't actually instant-eligible).
+- **Reorder**: silently rewrites the integer mapping. Existing
+  rows are reinterpreted — a row with `status='new'` becomes
+  `status='paid'` after `ENUM('paid','new',…)`. MySQL doesn't warn,
+  myschema doesn't warn, and the plan looks identical to the
+  append case.
+- **Remove**: rows holding the removed value are truncated to the
+  empty string (or rejected, depending on `sql_mode`). myschema
+  does **not** require `--allow-drop=column` for this — the
+  policy applies to whole-column drops, not enum-value drops —
+  so the removal slips through with the same `MODIFY COLUMN`.
+- **Rename in place** (e.g. position 2 `'paid'` → `'settled'`,
+  positions 1 and 3 unchanged): same risk profile as reorder, not
+  truncation. ENUM is stored as a 1-based integer index and SET as
+  a bit position; renaming a label without shifting its position
+  leaves the stored integers as-is and silently relabels them, so
+  rows that previously displayed `'paid'` now display `'settled'`
+  with no warning. (A "rename" that also moves the value to a
+  different position collapses back into the reorder case above.)
+
+**Workarounds.**
+
+- For appends, pass `--alter-algorithm=INSTANT`. Caveat: this flag
+  is plan-wide — myschema injects the `ALGORITHM=INSTANT` hint into
+  **every** generated `ALTER TABLE` and `CREATE INDEX` (see
+  `appendAlterHints`), with statement-specific syntax: `ALTER TABLE`
+  takes a leading-comma clause (`…, ALGORITHM=INSTANT`) appended
+  before the trailing `;` (or spliced before the keyword for
+  partition operations whose grammar rejects the trailing-comma
+  position), while `CREATE INDEX` takes a space-separated trailing
+  clause (`… ALGORITHM=INSTANT`). Either way, any non-INSTANT-eligible
+  operation in the same plan (e.g. an index add that needs `INPLACE`
+  / `COPY`) will fail at apply time. Either run the ENUM-append apply
+  on its own (split your desired SQL or use `--include` / `--exclude`
+  to scope the plan to the one table) or accept that the rest of
+  the plan also needs to be INSTANT-eligible.
+- For reorders / removes / renames, treat the desired-side change
+  as destructive. Inspect plan output, take a backup, and consider
+  staging the change (add the new value first, migrate data, then
+  remove the old value).
+- If you need element-level fidelity in the diff, manage the column
+  out of band (run the `ALTER TABLE` by hand) and keep the
+  desired-side type aligned with what the catalog reports.
+
 ## Changing `DEFAULT CHARSET` on a table with string columns
 
 **Behaviour.** `ALTER TABLE … DEFAULT CHARSET=…` only updates the
