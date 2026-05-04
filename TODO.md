@@ -27,7 +27,7 @@ Open items only. Done work is in `git log` / closed PRs.
       catalog query already joins `CHECK_CONSTRAINTS` to
       `TABLE_CONSTRAINTS`), but the catalog reader / `model.Constraint`
       / diff layer drop it. Result: a
-      desired-side `CHECK (...) NOT ENFORCED` apply once, then every
+      desired-side `CHECK (...) NOT ENFORCED` applies once, then every
       subsequent plan emits `DROP CHECK chk + ADD CONSTRAINT chk
       CHECK (...) NOT ENFORCED` — perpetual drift loop. Surfaced
       while writing the regression-coverage fixtures (PR #58); fixture
