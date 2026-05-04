@@ -23,8 +23,10 @@ Open items only. Done work is in `git log` / closed PRs.
       if the referenced table doesn't already exist; plan can't help.
 - [ ] **CHECK constraint `NOT ENFORCED` not preserved.** The catalog
       tracks the flag in
-      `information_schema.CHECK_CONSTRAINTS.ENFORCED`, but the catalog
-      reader / `model.Constraint` / diff layer drop it. Result: a
+      `information_schema.TABLE_CONSTRAINTS.ENFORCED` (myschema's
+      catalog query already joins `CHECK_CONSTRAINTS` to
+      `TABLE_CONSTRAINTS`), but the catalog reader / `model.Constraint`
+      / diff layer drop it. Result: a
       desired-side `CHECK (...) NOT ENFORCED` apply once, then every
       subsequent plan emits `DROP CHECK chk + ADD CONSTRAINT chk
       CHECK (...) NOT ENFORCED` — perpetual drift loop. Surfaced
