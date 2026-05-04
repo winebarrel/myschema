@@ -1,9 +1,11 @@
 # JSON column add. Sakila / employees test schemas exercise
 # this indirectly, but no fixture pins the basic JSON column
 # round-trip end-to-end. catalog stores it as `json` in
-# `information_schema.COLUMNS.DATA_TYPE`; the parser
-# preserves the type in the AST. Pin the shape so a regression
-# in either side surfaces here.
+# `information_schema.COLUMNS.COLUMN_TYPE` (myschema's
+# loadColumns reads COLUMN_TYPE, not DATA_TYPE, because it
+# includes the size suffix needed for VARCHAR/INT/etc.); the
+# parser preserves the type in the AST. Pin the shape so a
+# regression in either side surfaces here.
 init: |
   CREATE TABLE t (
       id INT NOT NULL,
