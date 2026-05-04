@@ -245,8 +245,10 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   different database (`fk.RefDB != fk.Database`): the
   cross-database qualifier is preserved so the FK doesn't silently
   re-target a same-named table in the current DB. (Cross-database
-  FK *management* is out of scope per TODO.md; emission only has
-  to not misinterpret one the user spelled out by hand.) Internal
+  FK *management* is intentionally out of scope — see CAVEATS.md
+  "Foreign keys to tables in another database are passed through,
+  not managed"; emission only has to not misinterpret one the user
+  spelled out by hand.) Internal
   state — `model.{Table,View,ForeignKey}.Database`, `RefDB`, and
   the `FQTN` / `FQVN` map keys — stays db-qualified; the omission
   is purely about emitted DDL. View bodies (the SELECT clause) are

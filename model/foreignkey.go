@@ -27,8 +27,10 @@ type ForeignKey struct {
 // cross-database FK (`REFERENCES other_db.parent (id)`) keeps its
 // `other_db.` prefix so dropping it doesn't silently re-target the
 // FK at a same-named table in the current database. (Cross-database
-// FK *management* is out of scope per TODO.md, but emission must not
-// silently reinterpret one the user wrote by hand.)
+// FK *management* is intentionally out of scope — see CAVEATS.md
+// "Foreign keys to tables in another database are passed through,
+// not managed" — but emission must not silently reinterpret one the
+// user wrote by hand.)
 func (fk *ForeignKey) SQL() string {
 	sql := "ALTER TABLE " + Ident(fk.Table) +
 		" ADD CONSTRAINT " + Ident(fk.Name) +
