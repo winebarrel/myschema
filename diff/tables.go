@@ -60,21 +60,26 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 			continue
 		}
 		// Same MySQL rules the diffTable path enforces on the
-		// modified-table side: (1) every unique key on a
+		// modified-table side: (1) LIST `VALUES IN (…)`
+		// constants must be disjoint across partitions, (2)
+		// RANGE `VALUES LESS THAN` sequences must be strictly
+		// increasing, and (3) every unique key on a
 		// partitioned table must include all columns in the
-		// partition expression, and (2) LIST `VALUES IN (…)`
-		// constants must be disjoint across partitions. Both
-		// would otherwise surface as MySQL errors at apply
-		// time (or, worse, the CREATE accepted and a follow-up
-		// rejected). Run them at plan time so the operator
-		// gets the same actionable message regardless of
-		// whether the table is brand-new or already exists.
+		// partition expression. All three would otherwise
+		// surface as MySQL errors at apply time (or, worse,
+		// the CREATE accepted and a follow-up rejected). Run
+		// them at plan time so the operator gets the same
+		// actionable message regardless of whether the table
+		// is brand-new or already exists.
 		if dt.Partition != nil {
 			desPO, err := parser.ParsePartitionClause(*dt.Partition)
 			if err != nil {
 				return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", k, err)
 			}
 			if err := validateDesiredListValuesAreDisjoint(k, desPO.Definitions); err != nil {
+				return nil, err
+			}
+			if err := validateDesiredRangeMonotonic(k, desPO.Definitions); err != nil {
 				return nil, err
 			}
 			required, err := partitionRequiredColumns(*dt.Partition)
