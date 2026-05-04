@@ -13,13 +13,15 @@ import (
 
 // applyTestCase is the authoritative shape of a testdata/apply/*.yml fixture.
 type applyTestCase struct {
-	Init          string   `yaml:"init"`              // SQL to seed the test DB
-	Desired       string   `yaml:"desired"`           // SQL passed to apply
-	Applied       string   `yaml:"applied,omitempty"` // expected SQL written to apply's writer
-	AllowDrop     []string `yaml:"allow_drop,omitempty"`
-	Include       []string `yaml:"include,omitempty"`
-	Exclude       []string `yaml:"exclude,omitempty"`
-	VerifyNoDrift *bool    `yaml:"verify_no_drift,omitempty"` // nil → true; set false to allow follow-up drift
+	Init           string   `yaml:"init"`              // SQL to seed the test DB
+	Desired        string   `yaml:"desired"`           // SQL passed to apply
+	Applied        string   `yaml:"applied,omitempty"` // expected SQL written to apply's writer
+	AllowDrop      []string `yaml:"allow_drop,omitempty"`
+	Include        []string `yaml:"include,omitempty"`
+	Exclude        []string `yaml:"exclude,omitempty"`
+	AlterAlgorithm string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
+	AlterLock      string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
+	VerifyNoDrift  *bool    `yaml:"verify_no_drift,omitempty"` // nil → true; set false to allow follow-up drift
 }
 
 func TestApplyYAML(t *testing.T) {
@@ -40,6 +42,10 @@ func TestApplyYAML(t *testing.T) {
 			FilterOptions: myschema.FilterOptions{
 				Include: tc.Include,
 				Exclude: tc.Exclude,
+			},
+			AlterOption: myschema.AlterOption{
+				AlterAlgorithm: tc.AlterAlgorithm,
+				AlterLock:      tc.AlterLock,
 			},
 		}, &buf)
 		require.NoError(t, err)
@@ -67,6 +73,10 @@ func TestApplyYAML(t *testing.T) {
 			FilterOptions: myschema.FilterOptions{
 				Include: tc.Include,
 				Exclude: tc.Exclude,
+			},
+			AlterOption: myschema.AlterOption{
+				AlterAlgorithm: tc.AlterAlgorithm,
+				AlterLock:      tc.AlterLock,
 			},
 		})
 		require.NoError(t, err)

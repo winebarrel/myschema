@@ -1,0 +1,38 @@
+# Apply counterpart to the same-named plan fixture: confirms
+# MySQL accepts the leading-hints `ADD PARTITION` shape that
+# `appendAlterHints` now produces. ADD PARTITION is one of the
+# partition-op keywords whose trailing-comma form MySQL
+# rejects (Error 1064), so the apply pin makes sure the hint
+# splice point isn't silently broken under
+# `--alter-algorithm=INPLACE --alter-lock=NONE` for the
+# growing-partition path. Companion to
+# `partition_value_change_reorganize_alter_hints.yml` (which
+# pins the same for REORGANIZE PARTITION).
+init: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021)
+  );
+
+desired: |
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      dt DATE NOT NULL,
+      PRIMARY KEY (id, dt)
+  ) PARTITION BY RANGE (YEAR(dt)) (
+      PARTITION p2020 VALUES LESS THAN (2021),
+      PARTITION p2021 VALUES LESS THAN (2022)
+  );
+
+alter_algorithm: INPLACE
+alter_lock: NONE
+
+applied: |
+  ALTER TABLE myschema_test.events ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (
+    partition p2021 values less than (2022)
+  );
+
+verify_no_drift: true

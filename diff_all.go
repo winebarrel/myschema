@@ -152,13 +152,25 @@ func executeCheckMatched(ctx context.Context, conn *sql.Conn, checkSQL string) (
 }
 
 // appendAlterHints adds the user-supplied ALGORITHM= / LOCK= clauses
-// just before the trailing `;` on every statement that begins with
-// ALTER TABLE or CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX
-// (case-insensitive, leading whitespace tolerated). The two DDLs need
-// different separators: ALTER TABLE expects a leading comma plus
-// comma-separated clauses, while CREATE INDEX wants the clauses
-// separated by spaces with no leading comma. The function picks the
-// right shape per statement; the user just supplies the values.
+// to every statement that begins with ALTER TABLE or
+// CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX (case-insensitive,
+// leading whitespace tolerated). The exact splice point depends on
+// the statement shape:
+//   - CREATE INDEX: append the clauses (space-separated, no leading
+//     comma) just before the trailing `;`.
+//   - ALTER TABLE column / index / constraint changes (ADD COLUMN,
+//     DROP INDEX, MODIFY COLUMN, …): append `, ALGORITHM=…, LOCK=…`
+//     just before the trailing `;`. MySQL parses these as
+//     comma-separated alter_specifications and tolerates the
+//     trailing position.
+//   - ALTER TABLE *partition* operations (REORGANIZE / ADD / DROP /
+//     COALESCE / TRUNCATE / EXCHANGE PARTITION): MySQL's parser
+//     rejects the trailing-comma form (Error 1064 — the comma after
+//     `INTO (…)` or after the partition list is treated as a new
+//     partition_definition). Insert hints between the table name
+//     and the partition-op keyword instead, so the output reads
+//     `ALTER TABLE t ALGORITHM=COPY, LOCK=SHARED, REORGANIZE
+//     PARTITION p1 INTO (…)`.
 //
 // CREATE TABLE is intentionally excluded — online-DDL hints don't
 // apply to fresh-table creation. DROP TABLE, DROP VIEW, CREATE [OR
@@ -176,22 +188,25 @@ func appendAlterHints(stmts []string, algorithm, lock string) []string {
 	return out
 }
 
+// partitionOpKeywords are the alter_specification keywords whose
+// MySQL grammar reject `, ALGORITHM=…, LOCK=…` appended at the
+// trailing-comma position. For these statements `appendHintsTo`
+// inserts the hints between the table name and the keyword
+// instead. Each entry includes a leading space so the substring
+// search can't match a column / index name that happens to end in
+// these letters.
+var partitionOpKeywords = []string{
+	" REORGANIZE PARTITION",
+	" ADD PARTITION",
+	" DROP PARTITION",
+	" COALESCE PARTITION",
+	" TRUNCATE PARTITION",
+	" EXCHANGE PARTITION",
+}
+
 func appendHintsTo(stmt, algorithm, lock string) string {
 	leading := strings.TrimLeft(stmt, " \t\n")
 	upper := strings.ToUpper(leading)
-
-	var sep, clauseSep string
-	switch {
-	case strings.HasPrefix(upper, "ALTER TABLE "):
-		sep, clauseSep = ", ", ", "
-	case strings.HasPrefix(upper, "CREATE INDEX "),
-		strings.HasPrefix(upper, "CREATE UNIQUE INDEX "),
-		strings.HasPrefix(upper, "CREATE FULLTEXT INDEX "),
-		strings.HasPrefix(upper, "CREATE SPATIAL INDEX "):
-		sep, clauseSep = " ", " "
-	default:
-		return stmt
-	}
 
 	var clauses []string
 	if algorithm != "" {
@@ -200,7 +215,43 @@ func appendHintsTo(stmt, algorithm, lock string) string {
 	if lock != "" {
 		clauses = append(clauses, "LOCK="+lock)
 	}
-	suffix := sep + strings.Join(clauses, clauseSep)
+
+	switch {
+	case strings.HasPrefix(upper, "ALTER TABLE "):
+		if pos := partitionOpInsertPos(stmt, upper); pos > 0 {
+			// Insert before the partition-op keyword.
+			return stmt[:pos] + strings.Join(clauses, ", ") + ", " + stmt[pos:]
+		}
+		// Trailing-comma position is fine for column / index /
+		// constraint alter_specifications.
+		return appendBeforeSemicolon(stmt, ", "+strings.Join(clauses, ", "))
+	case strings.HasPrefix(upper, "CREATE INDEX "),
+		strings.HasPrefix(upper, "CREATE UNIQUE INDEX "),
+		strings.HasPrefix(upper, "CREATE FULLTEXT INDEX "),
+		strings.HasPrefix(upper, "CREATE SPATIAL INDEX "):
+		return appendBeforeSemicolon(stmt, " "+strings.Join(clauses, " "))
+	}
+	return stmt
+}
+
+func partitionOpInsertPos(stmt, upper string) int {
+	best := -1
+	for _, kw := range partitionOpKeywords {
+		idx := strings.Index(upper, kw)
+		if idx < 0 {
+			continue
+		}
+		// idx points at the leading space; insert AT that space so
+		// the resulting SQL reads `ALTER TABLE t <hints>, <KEYWORD>`.
+		if best < 0 || idx < best {
+			best = idx + 1 // skip the leading space — we add our own ", "
+		}
+	}
+	_ = stmt // index is the same in stmt and upper (same length)
+	return best
+}
+
+func appendBeforeSemicolon(stmt, suffix string) string {
 	if !strings.HasSuffix(stmt, ";") {
 		return stmt + suffix
 	}

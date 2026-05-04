@@ -281,21 +281,24 @@ patterns:
       doesn't fire — a metadata-only edit stays a one-slot
       REORGANIZE.
 
-    - **LIST / LIST COLUMNS**: one single-span REORGANIZE
-      covering [first..last]. LIST values are a discrete set
-      per slot, and a value can move between any two
-      partitions regardless of position. A "p0 gains 4, p3
-      loses 4" cross-flow needs both ends of the move inside
-      a single REORGANIZE — splitting into per-run
-      REORGANIZEs would break MySQL's value-uniqueness rule
-      (Error 1495 "Multiple definition of same constant in
-      list partitioning") on the first statement while the
-      second partition still owned the value. Matched
-      partitions inside the span get re-stated unchanged
-      (MySQL no-ops them). myschema doesn't try to detect
-      whether a particular LIST diff is cross-flow-free and
-      could safely be split — the tracking overhead isn't
-      worth it for the common case.
+    - **LIST / LIST COLUMNS**: per-run when no value leaves
+      any changed slot (every changed slot's NEW
+      `VALUES IN (…)` is a *superset* of its OLD set), single
+      span otherwise. The superset check catches cross-flow
+      cases like "p0 gains 4, p3 loses 4" where splitting
+      into per-run REORGANIZEs would break MySQL's value-
+      uniqueness rule (Error 1495 "Multiple definition of
+      same constant in list partitioning") on the first
+      statement while the second partition still owned the
+      value. When the check fails myschema falls back to a
+      single span over [first..last] with the matched
+      in-betweens re-stated unchanged (MySQL no-ops them).
+      The pure-addition case ("p0 gains 9, p3 gains 10",
+      `p1`/`p2` unchanged) takes the per-run path so a tiny
+      endpoint edit doesn't drag a wide partition table
+      through a full data-moving rewrite. The check uses
+      `sqlparser.String` keying so it's tuple-safe for LIST
+      COLUMNS for free.
 
   In both cases MySQL redistributes existing rows into the
   new boundaries (row-preserving). No `--allow-drop` gating

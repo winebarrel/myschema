@@ -221,24 +221,29 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	//     one giant `REORGANIZE p1, p2, p3, p4 …` that drags
 	//     unchanged p2 into the rewrite.
 	//
-	//   - LIST / LIST COLUMNS: emit *one single-span
-	//     REORGANIZE* covering [first..last]. LIST values are
-	//     a discrete set per slot, and a value can move
-	//     between any two partitions regardless of position —
-	//     so a "p0 gains 4, p3 loses 4" cross-flow needs both
-	//     ends of the move inside a single REORGANIZE.
-	//     Splitting into per-run REORGANIZEs would break MySQL's
-	//     value-uniqueness rule (Error 1495 "Multiple
-	//     definition of same constant in list partitioning")
-	//     on the first statement while the second partition
-	//     still owned the value. We could detect cross-flow
-	//     and use per-run only for the no-cross-flow case,
-	//     but the implementation overhead (per-value owner
-	//     tracking, tuple equality for LIST COLUMNS) isn't
-	//     worth it — the matched in-between slots get
-	//     re-stated unchanged, MySQL no-ops them, and the
-	//     resulting ALTER is still proportional to the diff
-	//     in real-world usage.
+	//   - LIST / LIST COLUMNS: choose between per-run and
+	//     single-span based on whether values *leave* any
+	//     changed slot. LIST values are a discrete set per
+	//     slot and a value can move between any two
+	//     partitions regardless of position, so a cross-flow
+	//     case ("p0 gains 4, p3 loses 4") needs both ends of
+	//     the move inside one REORGANIZE — splitting it would
+	//     break MySQL's value-uniqueness rule (Error 1495
+	//     "Multiple definition of same constant in list
+	//     partitioning") on the first statement while the
+	//     second partition still owned the value. The simple
+	//     safety check: if every changed slot's NEW
+	//     `VALUES IN (…)` is a *superset* of its OLD
+	//     `VALUES IN (…)` set, no value leaves any slot, so
+	//     no cross-flow is possible — emit per-run. As soon
+	//     as one slot drops a value (whether the value moves
+	//     elsewhere or is fully discarded), fall back to
+	//     single span over [first..last]; the matched
+	//     in-between slots get re-stated unchanged. The
+	//     superset check costs O(n) per slot and uses the
+	//     same `sqlparser.String` keying as
+	//     `temporarilySortListValues`, which makes it
+	//     tuple-safe for LIST COLUMNS for free.
 	//
 	// RANGE boundary cascade *within each run*: each
 	// partition's `VALUES LESS THAN <x>` is also the implicit
@@ -258,40 +263,22 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// the next run starts at the next changed slot, which is
 	// at least one more position over.
 	if partitionNameListEqual(curDefs, desDefs) {
-		var stmts []string
-		switch curPO.Type {
-		case sqlparser.RangeType:
-			for i := 0; i < len(curDefs); i++ {
-				if partitionDefEqual(curDefs[i], desDefs[i]) {
-					continue
+		// Walk both sides once: record per-slot match/mismatch and
+		// note the first/last differing slot. A single pass also
+		// removes the round-12 redundancy where formatReorganizeRun
+		// re-invoked partitionDefEqual on every slot it formatted.
+		matchedSlots := make([]bool, len(curDefs))
+		first, last := -1, -1
+		for i := range curDefs {
+			matchedSlots[i] = partitionDefEqual(curDefs[i], desDefs[i])
+			if !matchedSlots[i] {
+				if first < 0 {
+					first = i
 				}
-				first := i
-				last := i
-				for last+1 < len(curDefs) && !partitionDefEqual(curDefs[last+1], desDefs[last+1]) {
-					last++
-				}
-				if last < len(curDefs)-1 &&
-					!partitionValueRangeEqual(curDefs[last], desDefs[last]) {
-					last++
-				}
-				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last))
-				i = last
-			}
-		default:
-			first, last := -1, -1
-			for i := range curDefs {
-				if !partitionDefEqual(curDefs[i], desDefs[i]) {
-					if first < 0 {
-						first = i
-					}
-					last = i
-				}
-			}
-			if first >= 0 {
-				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last))
+				last = i
 			}
 		}
-		if stmts == nil {
+		if first < 0 {
 			// Every position compares equal under partitionDefEqual,
 			// even though the raw-string fast path didn't catch it.
 			// Reachable for: formatter-resolved formatting drift
@@ -302,6 +289,43 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 			// (temporarilySortListValues in partitionDefEqual). All
 			// no-ops at the SQL level — emit nothing.
 			return nil, nil, nil
+		}
+		var stmts []string
+		switch curPO.Type {
+		case sqlparser.RangeType:
+			for i := 0; i < len(curDefs); i++ {
+				if matchedSlots[i] {
+					continue
+				}
+				runFirst := i
+				runLast := i
+				for runLast+1 < len(curDefs) && !matchedSlots[runLast+1] {
+					runLast++
+				}
+				if runLast < len(curDefs)-1 &&
+					!partitionValueRangeEqual(curDefs[runLast], desDefs[runLast]) {
+					runLast++
+				}
+				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, runFirst, runLast, matchedSlots))
+				i = runLast
+			}
+		default:
+			if partitionListChangedSlotsAreSuperset(curDefs, desDefs, matchedSlots) {
+				for i := 0; i < len(curDefs); i++ {
+					if matchedSlots[i] {
+						continue
+					}
+					runFirst := i
+					runLast := i
+					for runLast+1 < len(curDefs) && !matchedSlots[runLast+1] {
+						runLast++
+					}
+					stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, runFirst, runLast, matchedSlots))
+					i = runLast
+				}
+			} else {
+				stmts = append(stmts, formatReorganizeRun(fqtn, curDefs, desDefs, first, last, matchedSlots))
+			}
 		}
 		return stmts, nil, nil
 	}
@@ -475,28 +499,31 @@ func partitionByNameOrderPreserving(cur, des []*sqlparser.PartitionDefinition) (
 // `parser.FormatPartitionDefinition` which delegates name
 // quoting to vitess's own formatter.
 //
-// The INTO body is picked per-slot:
-//   - For slots `partitionDefEqual` already considers equal —
-//     i.e. the slot pulled in by the RANGE boundary cascade —
-//     emit `curDefs[i]`. The cascaded slot's body is
-//     canonically the same on both sides; the only thing that
-//     can differ is the partition *name* (case-only rename,
-//     suppressed by the EqualFold in partitionDefEqual).
-//     Restating the catalog's body keeps the "case-only name
-//     diff emits no DDL" rule honest at the cascaded slot —
-//     without this the formatter would leak the desired-side
-//     renamed casing into the generated REORGANIZE even though
-//     MySQL would ignore the rename.
-//   - For slots that actually changed, emit `desDefs[i]`. The
-//     desired side is the source of truth for the new
-//     definition (boundary, options, AND name casing). The
-//     case-only-name+body mixed case is supported here: the
-//     OLD-name list still uses the catalog's casing on the
-//     DROP side, but the INTO carries the desired casing —
-//     MySQL accepts the case-mismatched INTO and keeps
-//     whatever case it had stored, so verify_no_drift confirms
-//     no perpetual rename loop.
-func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int) string {
+// The INTO body is picked per-slot using the precomputed
+// `matchedSlots` mask (caller built it once with one
+// `partitionDefEqual` walk over the whole partition list, so
+// this function doesn't re-invoke the comparator):
+//   - For matched slots — i.e. the slot pulled in by the RANGE
+//     boundary cascade, or the matched in-betweens left over
+//     in a LIST single-span — emit `curDefs[i]`. The matched
+//     slot's body is canonically the same on both sides; the
+//     only thing that can differ is the partition *name*
+//     (case-only rename, suppressed by the EqualFold in
+//     partitionDefEqual). Restating the catalog's body keeps
+//     the "case-only name diff emits no DDL" rule honest at
+//     those slots — without this the formatter would leak the
+//     desired-side renamed casing into the generated
+//     REORGANIZE even though MySQL would ignore the rename.
+//   - For changed slots, emit `desDefs[i]`. The desired side
+//     is the source of truth for the new definition (boundary,
+//     options, AND name casing). The case-only-name+body
+//     mixed case is supported here: the OLD-name list still
+//     uses the catalog's casing on the DROP side, but the
+//     INTO carries the desired casing — MySQL accepts the
+//     case-mismatched INTO and keeps whatever case it had
+//     stored, so verify_no_drift confirms no perpetual rename
+//     loop.
+func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDefinition, first, last int, matchedSlots []bool) string {
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
 	b.WriteString(fqtn)
@@ -515,13 +542,63 @@ func formatReorganizeRun(fqtn string, curDefs, desDefs []*sqlparser.PartitionDef
 			b.WriteString("\n  ")
 		}
 		def := desDefs[i]
-		if partitionDefEqual(curDefs[i], desDefs[i]) {
+		if matchedSlots[i] {
 			def = curDefs[i]
 		}
 		b.WriteString(parser.FormatPartitionDefinition(def))
 	}
 	b.WriteString("\n);")
 	return b.String()
+}
+
+// partitionListChangedSlotsAreSuperset reports whether every
+// changed slot's NEW `VALUES IN (…)` set is a superset of its
+// OLD `VALUES IN (…)` set. When true, no value leaves any
+// changed slot, so no value can flow to a different slot —
+// the per-run REORGANIZE shape is safe (no MySQL Error 1495
+// "Multiple definition of same constant in list partitioning"
+// risk). When false, at least one value is removed from a
+// changed slot; whether it moves to another slot or is
+// discarded is left ambiguous, so the caller falls back to a
+// single-span REORGANIZE that catches both cases under one
+// statement.
+//
+// Comparison keys go through `sqlparser.String`, which makes
+// the helper tuple-safe for LIST COLUMNS for free
+// (`(1, 'A')` formats deterministically, distinct from
+// `(2, 'A')`).
+func partitionListChangedSlotsAreSuperset(curDefs, desDefs []*sqlparser.PartitionDefinition, matchedSlots []bool) bool {
+	for i := range curDefs {
+		if matchedSlots[i] {
+			continue
+		}
+		if !partitionValueListIsSuperset(desDefs[i], curDefs[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func partitionValueListIsSuperset(superset, subset *sqlparser.PartitionDefinition) bool {
+	if subset.Options == nil || subset.Options.ValueRange == nil ||
+		subset.Options.ValueRange.Type != sqlparser.InType {
+		// Non-LIST or empty subset — trivially a superset of "no values".
+		return true
+	}
+	if superset.Options == nil || superset.Options.ValueRange == nil ||
+		superset.Options.ValueRange.Type != sqlparser.InType {
+		return false
+	}
+	have := make(map[string]struct{}, len(superset.Options.ValueRange.Range))
+	for _, v := range superset.Options.ValueRange.Range {
+		have[sqlparser.String(v)] = struct{}{}
+	}
+	for _, v := range subset.Options.ValueRange.Range {
+		if _, ok := have[sqlparser.String(v)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // partitionValueRangeEqual reports whether the two definitions
