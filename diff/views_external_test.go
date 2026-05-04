@@ -100,6 +100,38 @@ func TestDiffViews_ColsAddedFiresDiff(t *testing.T) {
 	require.Len(t, r.CreateStmts, 1, "newly-added column-alias list must fire a CREATE OR REPLACE")
 }
 
+func TestDiffViews_ColsRemovedFiresDiff(t *testing.T) {
+	// Symmetric to ColsAddedFiresDiff — dropping the column-alias list
+	// must surface as a CREATE OR REPLACE, not silently compare equal.
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"alias"}}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users"}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	require.Len(t, r.CreateStmts, 1, "removed column-alias list must fire a CREATE OR REPLACE")
+	assert.NotContains(t, r.CreateStmts[0], "(alias)")
+}
+
+func TestDiffViews_ColsLengthChangeFiresDiff(t *testing.T) {
+	// `(a)` → `(a, b)` exercises the length-differs branch of
+	// slices.Equal, distinct from the per-element rename case above.
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"a"}}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"a", "b"}}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	require.Len(t, r.CreateStmts, 1, "longer column-alias list must fire a CREATE OR REPLACE")
+	assert.Contains(t, r.CreateStmts[0], "(a, b)")
+}
+
 func TestDiffViews_CheckOptionChangeFiresDiff(t *testing.T) {
 	current := orderedmap.New[string, *model.View]()
 	desired := orderedmap.New[string, *model.View]()
