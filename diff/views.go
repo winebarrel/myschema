@@ -49,7 +49,7 @@ func DiffViews(current, desired *orderedmap.Map[string, *model.View], database s
 	for _, dv := range desiredOrder {
 		cv, ok := current.GetOk(dv.FQVN())
 		if ok {
-			eq, err := viewDefEqual(cv.Definition, dv.Definition, database)
+			eq, err := viewEqual(cv, dv, database)
 			if err != nil {
 				return nil, err
 			}
@@ -145,6 +145,24 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 		return nil, fmt.Errorf("circular view dependency detected among %d views", len(keys))
 	}
 	return out, nil
+}
+
+// viewEqual reports whether two views are operationally identical for
+// diff purposes. The SELECT body goes through viewDefEqual (which
+// normalises qualifiers, redundant aliases, and casing); the optional
+// column-alias list (`CREATE VIEW v (a, b) AS …`) and the
+// `WITH … CHECK OPTION` clause are compared verbatim. Without the
+// Cols / CheckOption checks, a desired-side rename of a column-alias
+// or a flip of LOCAL ↔ NONE would silently compare equal and the
+// live view would never be replaced.
+func viewEqual(a, b *model.View, database string) (bool, error) {
+	if !slices.Equal(a.Cols, b.Cols) {
+		return false, nil
+	}
+	if a.CheckOption != b.CheckOption {
+		return false, nil
+	}
+	return viewDefEqual(a.Definition, b.Definition, database)
 }
 
 // viewDefEqual normalises both definitions through pingcap parser+restore

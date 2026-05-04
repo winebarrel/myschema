@@ -68,6 +68,68 @@ func TestDiffViews_SameDefinitionSkipped(t *testing.T) {
 	assert.Empty(t, r.DropStmts)
 }
 
+// Regressions for the "DiffViews ignores Cols and CheckOption" gap:
+// pre-fix, viewDefEqual only inspected Definition, so changing the
+// column-alias list or adding/removing WITH … CHECK OPTION would
+// silently compare equal and the live view would never be replaced.
+
+func TestDiffViews_ColsChangeFiresDiff(t *testing.T) {
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"alias_old"}}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"alias_new"}}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	require.Len(t, r.CreateStmts, 1, "column-alias rename must fire a CREATE OR REPLACE")
+	assert.Contains(t, r.CreateStmts[0], "(alias_new)")
+}
+
+func TestDiffViews_ColsAddedFiresDiff(t *testing.T) {
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"alias"}}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	require.Len(t, r.CreateStmts, 1, "newly-added column-alias list must fire a CREATE OR REPLACE")
+}
+
+func TestDiffViews_CheckOptionChangeFiresDiff(t *testing.T) {
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "NONE"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "LOCAL"}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	require.Len(t, r.CreateStmts, 1, "WITH LOCAL CHECK OPTION change must fire a CREATE OR REPLACE")
+	assert.Contains(t, r.CreateStmts[0], "WITH LOCAL CHECK OPTION")
+}
+
+func TestDiffViews_AllFieldsEqualSkipped(t *testing.T) {
+	// Sanity: same Definition + same Cols + same CheckOption must
+	// still skip the CREATE OR REPLACE (the bug fix musn't introduce
+	// false positives for genuinely-equal views).
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"alias"}, CheckOption: "LOCAL"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", Cols: []string{"alias"}, CheckOption: "LOCAL"}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	assert.Empty(t, r.CreateStmts)
+}
+
 func TestDiffViews_DesiredCircularSurfacesError(t *testing.T) {
 	// a → b → a in desired forces topoSortViews to surface a circular
 	// dependency, which DiffViews wraps as "topo-sort desired views: %w".
