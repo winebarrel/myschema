@@ -103,9 +103,9 @@ func rewriteFKRefTable(tables *orderedmap.Map[string, *model.Table], oldDB, oldN
 // features it reads (see AGENTS.md). Apply against an older server will
 // fail at execution time with a syntax error, not silently — the user
 // will see the offending RENAME COLUMN statement in the plan output.
-func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Column]) ([]string, error) {
+func applyColumnRenames(tableIdent string, current, desired *orderedmap.Map[string, *model.Column]) ([]string, error) {
 	if dup, name := duplicateColumnRenameSource(desired); dup {
-		return nil, fmt.Errorf("renamed-from: source column %s.%s is referenced by multiple columns", fqtn, name)
+		return nil, fmt.Errorf("renamed-from: source column %s.%s is referenced by multiple columns", tableIdent, name)
 	}
 	var stmts []string
 	for newName, dc := range desired.All() {
@@ -122,19 +122,19 @@ func applyColumnRenames(fqtn string, current, desired *orderedmap.Map[string, *m
 		// then diffColumns would later ADD the old column back —
 		// almost certainly unintended.
 		if _, ok := desired.GetOk(oldName); ok {
-			return nil, fmt.Errorf("renamed-from: source column %s.%s is also declared in desired schema; remove the source column or change the directive", fqtn, oldName)
+			return nil, fmt.Errorf("renamed-from: source column %s.%s is also declared in desired schema; remove the source column or change the directive", tableIdent, oldName)
 		}
 		cc, ok := current.GetOk(oldName)
 		if !ok {
 			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
 				continue
 			}
-			return nil, fmt.Errorf("renamed-from: source column %s.%s not found", fqtn, oldName)
+			return nil, fmt.Errorf("renamed-from: source column %s.%s not found", tableIdent, oldName)
 		}
 		if _, dup := current.GetOk(newName); dup && oldName != newName {
-			return nil, fmt.Errorf("renamed-from: cannot rename %s.%s to %s — destination already exists", fqtn, oldName, newName)
+			return nil, fmt.Errorf("renamed-from: cannot rename %s.%s to %s — destination already exists", tableIdent, oldName, newName)
 		}
-		stmts = append(stmts, "ALTER TABLE "+fqtn+" RENAME COLUMN "+model.Ident(oldName)+" TO "+model.Ident(newName)+";")
+		stmts = append(stmts, "ALTER TABLE "+tableIdent+" RENAME COLUMN "+model.Ident(oldName)+" TO "+model.Ident(newName)+";")
 		current.DeleteOk(oldName)
 		cc.Name = newName
 		current.Set(newName, cc)
@@ -333,9 +333,9 @@ func rewriteCrossTableFKRefCols(tables *orderedmap.Map[string, *model.Table], db
 // shape as the table/column version; the rename happens before the normal
 // index diff so an index that was *only* renamed (no part / type change)
 // produces no further DDL.
-func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Index]) ([]string, error) {
+func applyIndexRenames(tableIdent string, current, desired *orderedmap.Map[string, *model.Index]) ([]string, error) {
 	if dup, name := duplicateIndexRenameSource(desired); dup {
-		return nil, fmt.Errorf("renamed-from: source index %s.%s is referenced by multiple indexes", fqtn, name)
+		return nil, fmt.Errorf("renamed-from: source index %s.%s is referenced by multiple indexes", tableIdent, name)
 	}
 	var stmts []string
 	for newName, di := range desired.All() {
@@ -348,19 +348,19 @@ func applyIndexRenames(fqtn string, current, desired *orderedmap.Map[string, *mo
 		}
 		// Same source-also-declared guard as the table / column passes.
 		if _, ok := desired.GetOk(oldName); ok {
-			return nil, fmt.Errorf("renamed-from: source index %s.%s is also declared in desired schema; remove the source index or change the directive", fqtn, oldName)
+			return nil, fmt.Errorf("renamed-from: source index %s.%s is also declared in desired schema; remove the source index or change the directive", tableIdent, oldName)
 		}
 		ci, ok := current.GetOk(oldName)
 		if !ok {
 			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
 				continue
 			}
-			return nil, fmt.Errorf("renamed-from: source index %s.%s not found", fqtn, oldName)
+			return nil, fmt.Errorf("renamed-from: source index %s.%s not found", tableIdent, oldName)
 		}
 		if _, dup := current.GetOk(newName); dup && oldName != newName {
-			return nil, fmt.Errorf("renamed-from: cannot rename index %s.%s to %s — destination already exists", fqtn, oldName, newName)
+			return nil, fmt.Errorf("renamed-from: cannot rename index %s.%s to %s — destination already exists", tableIdent, oldName, newName)
 		}
-		stmts = append(stmts, "ALTER TABLE "+fqtn+" RENAME INDEX "+model.Ident(oldName)+" TO "+model.Ident(newName)+";")
+		stmts = append(stmts, "ALTER TABLE "+tableIdent+" RENAME INDEX "+model.Ident(oldName)+" TO "+model.Ident(newName)+";")
 		current.DeleteOk(oldName)
 		ci.Name = newName
 		current.Set(newName, ci)
@@ -417,9 +417,9 @@ func duplicateColumnRenameSource(desired *orderedmap.Map[string, *model.Column])
 // source-also-declared, destination-already-exists) are rejected too.
 // Returns no statements on success — the natural diff path produces
 // the `DROP CHECK <name>` + `ADD CONSTRAINT <name> CHECK (...)` pair.
-func validateConstraintRenames(fqtn string, current, desired *orderedmap.Map[string, *model.Constraint]) error {
+func validateConstraintRenames(tableIdent string, current, desired *orderedmap.Map[string, *model.Constraint]) error {
 	if dup, name := duplicateConstraintRenameSource(desired); dup {
-		return fmt.Errorf("renamed-from: source constraint %s.%s is referenced by multiple constraints", fqtn, name)
+		return fmt.Errorf("renamed-from: source constraint %s.%s is referenced by multiple constraints", tableIdent, name)
 	}
 	for newName, dc := range desired.All() {
 		if dc.RenameFrom == nil || *dc.RenameFrom == "" {
@@ -430,16 +430,16 @@ func validateConstraintRenames(fqtn string, current, desired *orderedmap.Map[str
 			continue // self-rename, see applyTableRenames for rationale
 		}
 		if _, ok := desired.GetOk(oldName); ok {
-			return fmt.Errorf("renamed-from: source constraint %s.%s is also declared in desired schema; remove the source constraint or change the directive", fqtn, oldName)
+			return fmt.Errorf("renamed-from: source constraint %s.%s is also declared in desired schema; remove the source constraint or change the directive", tableIdent, oldName)
 		}
 		if _, ok := current.GetOk(oldName); !ok {
 			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
 				continue
 			}
-			return fmt.Errorf("renamed-from: source constraint %s.%s not found in current schema", fqtn, oldName)
+			return fmt.Errorf("renamed-from: source constraint %s.%s not found in current schema", tableIdent, oldName)
 		}
 		if _, dup := current.GetOk(newName); dup && oldName != newName {
-			return fmt.Errorf("renamed-from: cannot rename constraint %s.%s to %s — destination already exists", fqtn, oldName, newName)
+			return fmt.Errorf("renamed-from: cannot rename constraint %s.%s to %s — destination already exists", tableIdent, oldName, newName)
 		}
 	}
 	return nil
@@ -448,9 +448,9 @@ func validateConstraintRenames(fqtn string, current, desired *orderedmap.Map[str
 // validateForeignKeyRenames is the FK counterpart of
 // validateConstraintRenames. MySQL has no in-place RENAME FOREIGN KEY
 // either, so the same typo-guard-only treatment applies.
-func validateForeignKeyRenames(fqtn string, current, desired *orderedmap.Map[string, *model.ForeignKey]) error {
+func validateForeignKeyRenames(tableIdent string, current, desired *orderedmap.Map[string, *model.ForeignKey]) error {
 	if dup, name := duplicateFKRenameSource(desired); dup {
-		return fmt.Errorf("renamed-from: source foreign key %s.%s is referenced by multiple foreign keys", fqtn, name)
+		return fmt.Errorf("renamed-from: source foreign key %s.%s is referenced by multiple foreign keys", tableIdent, name)
 	}
 	for newName, df := range desired.All() {
 		if df.RenameFrom == nil || *df.RenameFrom == "" {
@@ -461,16 +461,16 @@ func validateForeignKeyRenames(fqtn string, current, desired *orderedmap.Map[str
 			continue
 		}
 		if _, ok := desired.GetOk(oldName); ok {
-			return fmt.Errorf("renamed-from: source foreign key %s.%s is also declared in desired schema; remove the source foreign key or change the directive", fqtn, oldName)
+			return fmt.Errorf("renamed-from: source foreign key %s.%s is also declared in desired schema; remove the source foreign key or change the directive", tableIdent, oldName)
 		}
 		if _, ok := current.GetOk(oldName); !ok {
 			if _, alreadyRenamed := current.GetOk(newName); alreadyRenamed {
 				continue
 			}
-			return fmt.Errorf("renamed-from: source foreign key %s.%s not found in current schema", fqtn, oldName)
+			return fmt.Errorf("renamed-from: source foreign key %s.%s not found in current schema", tableIdent, oldName)
 		}
 		if _, dup := current.GetOk(newName); dup && oldName != newName {
-			return fmt.Errorf("renamed-from: cannot rename foreign key %s.%s to %s — destination already exists", fqtn, oldName, newName)
+			return fmt.Errorf("renamed-from: cannot rename foreign key %s.%s to %s — destination already exists", tableIdent, oldName, newName)
 		}
 	}
 	return nil
