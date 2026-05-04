@@ -102,9 +102,11 @@ func diffPartitions(fqtn string, current, desired *string, dc DropChecker) ([]st
 	// gate (`partitionListChangedSlotsAreSuperset`) would happily
 	// emit `REORGANIZE p_changed INTO (… IN (V, …))` while an
 	// unchanged sibling partition still owns V, and apply would fail
-	// with the same Error 1495 deeper in the pipeline.
-	if dup, slotA, slotB := findDuplicateListValue(desPO.Definitions); dup != "" {
-		return nil, nil, fmt.Errorf("table %s: desired LIST partition definitions assign value %s to both partition %s and partition %s — MySQL requires LIST values to be disjoint across partitions (Error 1495 \"Multiple definition of same constant in list partitioning\"). Remove the duplicate from one of the partitions", fqtn, dup, slotA, slotB)
+	// with the same Error 1495 deeper in the pipeline. The same
+	// helper also runs from the create-table path in DiffTables so
+	// new partitioned tables get the same plan-time guard.
+	if err := validateDesiredListValuesAreDisjoint(fqtn, desPO.Definitions); err != nil {
+		return nil, nil, err
 	}
 	// Strategy / expression / column list mismatch → scheme change,
 	// out of scope for v1.
@@ -589,6 +591,24 @@ func partitionListChangedSlotsAreSuperset(curDefs, desDefs []*sqlparser.Partitio
 		}
 	}
 	return true
+}
+
+// validateDesiredListValuesAreDisjoint reports a plan-time
+// error when the desired-side partition definitions assign
+// the same `VALUES IN (…)` constant to more than one
+// partition. Shared by `diffPartitions` (modified-table path)
+// and `DiffTables` (create-table path), so a CREATE TABLE
+// PARTITION BY LIST whose desired schema is internally
+// inconsistent surfaces with the same actionable message
+// instead of falling through to MySQL Error 1495 at apply
+// time. Caller is responsible for parsing the partition
+// clause; non-LIST partition strategies are no-ops here.
+func validateDesiredListValuesAreDisjoint(fqtn string, defs []*sqlparser.PartitionDefinition) error {
+	dup, slotA, slotB := findDuplicateListValue(defs)
+	if dup == "" {
+		return nil
+	}
+	return fmt.Errorf("table %s: desired LIST partition definitions assign value %s to both partition %s and partition %s — MySQL requires LIST values to be disjoint across partitions (Error 1495 %q). Remove the duplicate from one of the partitions", fqtn, dup, slotA, slotB, "Multiple definition of same constant in list partitioning")
 }
 
 // findDuplicateListValue scans a `*PartitionDefinition` slice

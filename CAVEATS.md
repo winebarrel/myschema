@@ -388,6 +388,18 @@ patterns:
   partition columns in the unique key, or drop partitioning
   first (REMOVE PARTITIONING by hand) and let the next plan
   reconverge.
+- *LIST `VALUES IN` constants overlapping across partitions*
+  — MySQL forbids the same constant in more than one LIST
+  partition (Error 1495 "Multiple definition of same constant
+  in list partitioning"). myschema catches this at plan time
+  with `desired LIST partition definitions assign value V to
+  both partition pX and partition pY` so the operator gets
+  actionable feedback before any ALTER is emitted. The check
+  runs on both the diff path (already-existing tables) and
+  the create-table path (brand-new partitioned tables), and
+  is tuple-safe for `LIST COLUMNS` (the constant is the whole
+  tuple). Workaround: remove the duplicate from one of the
+  partitions in the desired SQL.
 - `SUBPARTITION BY …` is out of scope for v1. A desired-side
   `CREATE TABLE` that declares SUBPARTITION fails at parse
   time; a catalog-side table with SUBPARTITION is rejected

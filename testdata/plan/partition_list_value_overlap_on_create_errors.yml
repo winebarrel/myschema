@@ -1,0 +1,26 @@
+# Counterpart to `partition_list_value_overlap_errors.yml`
+# (which exercises the modified-table path through
+# `diffPartitions`). New partitioned tables are emitted
+# directly by `DiffTables` from `dt.SQL()` and skip
+# `diffPartitions`, so the same desired-side LIST uniqueness
+# validation has to fire on the create-table path too. Without
+# this fixture, a `CREATE TABLE … PARTITION BY LIST …` whose
+# desired schema assigns the same constant to two partitions
+# would slip past plan and fail at apply with MySQL Error
+# 1495 "Multiple definition of same constant in list
+# partitioning" — the operator wouldn't see the cleaner
+# plan-time error.
+init: ""
+
+desired: |
+  CREATE TABLE accts (
+      id INT NOT NULL,
+      region INT NOT NULL,
+      PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) (
+      PARTITION p0 VALUES IN (1, 4),
+      PARTITION p1 VALUES IN (2),
+      PARTITION p3 VALUES IN (4)
+  );
+
+error: 'desired LIST partition definitions assign value 4 to both partition p0 and partition p3'
