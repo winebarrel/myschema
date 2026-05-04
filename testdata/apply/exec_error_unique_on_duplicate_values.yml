@@ -1,0 +1,26 @@
+# Pins apply.go's ExecContext error wrap (`execute %q: %w`).
+# Setup: a table with two rows that share the same `name`
+# value. Desired adds a UNIQUE index on `name`. The diff
+# itself is valid SQL and parses fine; MySQL rejects the
+# resulting `ADD UNIQUE` at apply time with Error 1062
+# (duplicate entry). Apply must surface that as an error
+# whose message starts with "execute" so the operator can
+# trace it back to the failed DDL rather than getting a raw
+# driver error.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      name VARCHAR(10),
+      PRIMARY KEY (id)
+  );
+  INSERT INTO t (id, name) VALUES (1, 'dup'), (2, 'dup');
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      name VARCHAR(10),
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_name (name)
+  );
+
+error: 'execute '

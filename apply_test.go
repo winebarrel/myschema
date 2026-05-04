@@ -18,6 +18,7 @@ type applyTestCase struct {
 	Init           string   `yaml:"init"`              // SQL to seed the test DB
 	Desired        string   `yaml:"desired"`           // SQL passed to apply
 	Applied        string   `yaml:"applied,omitempty"` // expected SQL written to apply's writer
+	Error          string   `yaml:"error,omitempty"`   // substring expected in apply error (mutually exclusive with Applied / VerifyNoDrift)
 	AllowDrop      []string `yaml:"allow_drop,omitempty"`
 	Include        []string `yaml:"include,omitempty"`
 	Exclude        []string `yaml:"exclude,omitempty"`
@@ -50,6 +51,12 @@ func TestApplyYAML(t *testing.T) {
 				AlterLock:      tc.AlterLock,
 			},
 		}, &buf)
+
+		if tc.Error != "" {
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.Error)
+			return
+		}
 		require.NoError(t, err)
 
 		assert.Equal(t,
@@ -104,35 +111,4 @@ func TestApply_DSNNonexistentDatabase(t *testing.T) {
 	})
 	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{}, nil)
 	require.Error(t, err)
-}
-
-func TestApply_ExecContextErrorWrapped(t *testing.T) {
-	// Pins apply.go:54-56 — when MySQL rejects a generated DDL, Apply
-	// wraps the error with `execute %q: %w`. Setup: a table with
-	// duplicate values; desired adds a UNIQUE index on the duplicated
-	// column. The diff emits a valid ADD UNIQUE, which MySQL rejects
-	// (Error 1062 duplicate entry).
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, `
-CREATE TABLE t (
-    id INT NOT NULL,
-    name VARCHAR(10),
-    PRIMARY KEY (id)
-);
-INSERT INTO t (id, name) VALUES (1, 'dup'), (2, 'dup');`)
-
-	desired := writeDesired(t, `
-CREATE TABLE t (
-    id INT NOT NULL,
-    name VARCHAR(10),
-    PRIMARY KEY (id),
-    UNIQUE KEY uq_name (name)
-);`)
-
-	c := newClient(t)
-	var buf bytes.Buffer
-	_, err := c.Apply(ctx, &myschema.ApplyOptions{Files: []string{desired}}, &buf)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "execute ")
 }
