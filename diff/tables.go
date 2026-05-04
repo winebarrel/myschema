@@ -554,17 +554,18 @@ func tableCharsetCollationSQL(tableIdent string, current, desired *model.Table) 
 // COMMENT clause when desired and current disagree. Returns "" when
 // they match. Both sides treat the absence of a clause as nil (the
 // catalog reader maps the empty TABLE_COMMENT to nil), and a
-// desired-side explicit `COMMENT=”` is folded into nil here too —
+// desired-side explicit empty-string COMMENT (the user wrote
+// `COMMENT=` with an empty literal) is folded into nil here too —
 // MySQL stores both as the empty string, the catalog hands them
 // back as nil, so without the fold the parser-side `&""` would
 // never compare equal to the catalog-side `nil` and `plan` would
-// re-emit `ALTER TABLE … COMMENT=”` every run.
+// re-emit `ALTER TABLE ... COMMENT=<empty>` every run.
 //
-// Removing a previously-set comment is emitted as `COMMENT=”` —
-// MySQL's only way to clear `TABLE_COMMENT`, since ALTER TABLE has
-// no `DROP COMMENT` syntax. Catalog round-trips that empty string
-// back to nil on the next read, so the change converges in one
-// apply.
+// Removing a previously-set comment is emitted as
+// `ALTER TABLE ... COMMENT=<empty literal>` — MySQL's only way to
+// clear `TABLE_COMMENT`, since ALTER TABLE has no `DROP COMMENT`
+// syntax. Catalog round-trips that empty string back to nil on the
+// next read, so the change converges in one apply.
 func tableCommentSQL(tableIdent string, current, desired *model.Table) string {
 	cur := canonicalComment(current.Comment)
 	des := canonicalComment(desired.Comment)
