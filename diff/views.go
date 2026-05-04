@@ -49,7 +49,7 @@ func DiffViews(current, desired *orderedmap.Map[string, *model.View], database s
 	for _, dv := range desiredOrder {
 		cv, ok := current.GetOk(dv.FQVN())
 		if ok {
-			eq, err := viewDefEqual(cv.Definition, dv.Definition, database)
+			eq, err := viewEqual(cv, dv, database)
 			if err != nil {
 				return nil, err
 			}
@@ -145,6 +145,42 @@ func topoSortViews(views *orderedmap.Map[string, *model.View], database string) 
 		return nil, fmt.Errorf("circular view dependency detected among %d views", len(keys))
 	}
 	return out, nil
+}
+
+// viewEqual reports whether two views are operationally identical for
+// diff purposes. The SELECT body goes through viewDefEqual (which
+// normalises qualifiers, redundant aliases, and casing); the
+// `WITH … CHECK OPTION` clause is compared after folding the empty
+// string into "NONE" so the comparison stays in step with
+// `(*View).CreateSQL()`, which treats both as "no WITH clause" and
+// suppresses the keyword.
+//
+// Cols (the optional column-alias list `CREATE VIEW v (a, b) AS …`)
+// is intentionally NOT compared here: catalog/views.go reads only
+// `information_schema.VIEWS`, which exposes the SELECT body but not
+// the user-supplied alias list (those live in
+// `information_schema.COLUMNS` keyed by view+column). Until the
+// catalog reader is taught to populate `model.View.Cols` from that
+// source, a direct `slices.Equal` would treat every column-alias-list
+// view as drifting on every plan. Cols changes therefore stay
+// silently ignored as before, tracked separately as a TODO.
+func viewEqual(a, b *model.View, database string) (bool, error) {
+	if canonicalCheckOption(a.CheckOption) != canonicalCheckOption(b.CheckOption) {
+		return false, nil
+	}
+	return viewDefEqual(a.Definition, b.Definition, database)
+}
+
+// canonicalCheckOption folds the empty string into "NONE" so a
+// hand-built `model.View{}` (where `CheckOption` is the zero value)
+// compares equal to the parser/catalog-populated `"NONE"`. Both
+// shapes mean "no WITH … CHECK OPTION clause" — `(*View).CreateSQL()`
+// already treats them identically.
+func canonicalCheckOption(s string) string {
+	if s == "" {
+		return "NONE"
+	}
+	return s
 }
 
 // viewDefEqual normalises both definitions through pingcap parser+restore

@@ -68,6 +68,63 @@ func TestDiffViews_SameDefinitionSkipped(t *testing.T) {
 	assert.Empty(t, r.DropStmts)
 }
 
+// Regression for the "DiffViews ignores CheckOption" gap: pre-fix,
+// viewDefEqual only inspected Definition, so adding / removing
+// `WITH … CHECK OPTION` would silently compare equal and the live
+// view would never be replaced. Cols changes have the same shape of
+// gap but can't be fixed at the diff layer alone (catalog/views.go
+// reads only `information_schema.VIEWS`, which doesn't expose the
+// user-supplied alias list); see TODO.md for the catalog-side
+// follow-up.
+
+func TestDiffViews_CheckOptionChangeFiresDiff(t *testing.T) {
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "NONE"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "LOCAL"}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	require.Len(t, r.CreateStmts, 1, "WITH LOCAL CHECK OPTION change must fire a CREATE OR REPLACE")
+	assert.Contains(t, r.CreateStmts[0], "WITH LOCAL CHECK OPTION")
+}
+
+func TestDiffViews_CheckOptionEmptyEquivalentToNone(t *testing.T) {
+	// `""` and `"NONE"` both mean "no WITH … CHECK OPTION clause" —
+	// (*View).CreateSQL() suppresses the clause for both. viewEqual
+	// must treat them as equal, otherwise a hand-built model.View{}
+	// (zero-value CheckOption) compared to a parser/catalog-built
+	// view (CheckOption="NONE") would emit a spurious CREATE OR REPLACE.
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "NONE"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users"} // empty CheckOption
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	assert.Empty(t, r.CreateStmts, `"" must compare equal to "NONE"`)
+}
+
+func TestDiffViews_AllFieldsEqualSkipped(t *testing.T) {
+	// Sanity: same Definition + same CheckOption must still skip the
+	// CREATE OR REPLACE (the fix mustn't introduce false positives for
+	// genuinely-equal views).
+	current := orderedmap.New[string, *model.View]()
+	desired := orderedmap.New[string, *model.View]()
+	cv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "LOCAL"}
+	dv := &model.View{Database: "app", Name: "v", Definition: "select id from users", CheckOption: "LOCAL"}
+	current.Set(cv.FQVN(), cv)
+	desired.Set(dv.FQVN(), dv)
+
+	r, err := diff.DiffViews(current, desired, "app", nil)
+	require.NoError(t, err)
+	assert.Empty(t, r.CreateStmts)
+}
+
 func TestDiffViews_DesiredCircularSurfacesError(t *testing.T) {
 	// a → b → a in desired forces topoSortViews to surface a circular
 	// dependency, which DiffViews wraps as "topo-sort desired views: %w".
