@@ -24,7 +24,7 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.events REORGANIZE PARTITION p2020, p2021 INTO (
+  ALTER TABLE events REORGANIZE PARTITION p2020, p2021 INTO (
     partition p2020 values less than (2025),
     partition p2021 values less than (2026)
   );

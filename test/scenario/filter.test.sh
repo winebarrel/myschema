@@ -19,11 +19,11 @@ setup_db "$DATA/init.sql"
 # absent from the plan.
 assert_not_contains "01a --include=users hides sessions" \
   "$MYSCHEMA" plan --allow-drop all -I users "$DATA/desired.sql" \
-  -- 'DROP TABLE myschema_test.sessions'
+  -- 'DROP TABLE sessions'
 
 assert_not_contains "01b --include=users hides logs" \
   "$MYSCHEMA" plan --allow-drop all -I users "$DATA/desired.sql" \
-  -- 'DROP TABLE myschema_test.logs'
+  -- 'DROP TABLE logs'
 
 # 01c: positively assert "No changes" overall — without this, an
 # unrelated ALTER on `users` could slip through alongside the
@@ -35,19 +35,19 @@ assert_contains "01c --include=users sees no diff" \
 # 02: --exclude='log*' (glob) — sessions still drops, logs is hidden.
 assert_contains "02a --exclude=log* still drops sessions" \
   "$MYSCHEMA" plan --allow-drop all -E 'log*' "$DATA/desired.sql" \
-  -- 'DROP TABLE myschema_test.sessions'
+  -- 'DROP TABLE sessions'
 
 assert_not_contains "02b --exclude=log* hides logs" \
   "$MYSCHEMA" plan --allow-drop all -E 'log*' "$DATA/desired.sql" \
-  -- 'DROP TABLE myschema_test.logs'
+  -- 'DROP TABLE logs'
 
 # 03: no filter — both tables drop.
 assert_contains "03a no filter drops sessions" \
   "$MYSCHEMA" plan --allow-drop all "$DATA/desired.sql" \
-  -- 'DROP TABLE myschema_test.sessions'
+  -- 'DROP TABLE sessions'
 
 assert_contains "03b no filter drops logs" \
   "$MYSCHEMA" plan --allow-drop all "$DATA/desired.sql" \
-  -- 'DROP TABLE myschema_test.logs'
+  -- 'DROP TABLE logs'
 
 summary

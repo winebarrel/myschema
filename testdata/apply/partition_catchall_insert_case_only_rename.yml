@@ -31,7 +31,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.events REORGANIZE PARTITION pmax INTO (
+  ALTER TABLE events REORGANIZE PARTITION pmax INTO (
     partition p2022 values less than (2023),
     partition pmax values less than maxvalue
   );

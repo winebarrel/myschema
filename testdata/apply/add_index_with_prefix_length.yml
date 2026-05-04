@@ -21,6 +21,6 @@ desired: |
   );
 
 applied: |
-  CREATE INDEX idx_name_prefix ON myschema_test.t (name(10));
+  CREATE INDEX idx_name_prefix ON t (name(10));
 
 verify_no_drift: true

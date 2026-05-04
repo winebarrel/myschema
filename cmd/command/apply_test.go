@@ -33,7 +33,7 @@ func TestApply_Run(t *testing.T) {
 	require.NoError(t, cmd.Run(ctx, client, &buf))
 	got := buf.String()
 	assert.Contains(t, got, "-- Apply to database "+testutil.DefaultDB)
-	assert.Contains(t, got, "CREATE TABLE "+testutil.DefaultDB+".users")
+	assert.Contains(t, got, "CREATE TABLE users (")
 
 	// Sanity-check that the table actually exists in the test DB.
 	var n int
@@ -86,7 +86,7 @@ func TestApply_Run_DropDeniedShowsSkippedAndNoChanges(t *testing.T) {
 	}}
 	require.NoError(t, cmd.Run(ctx, client, &buf))
 	got := buf.String()
-	assert.Contains(t, got, "-- skipped: DROP TABLE "+testutil.DefaultDB+".users;")
+	assert.Contains(t, got, "-- skipped: DROP TABLE "+"users;")
 	assert.Contains(t, got, "-- No changes")
 
 	var n int
@@ -123,8 +123,8 @@ func TestApply_Run_ExecutableSQLAndSkippedDrops(t *testing.T) {
 	}}
 	require.NoError(t, cmd.Run(ctx, client, &buf))
 	got := buf.String()
-	addPos := strings.Index(got, "ADD COLUMN name")
-	skippedPos := strings.Index(got, "-- skipped: ALTER TABLE "+testutil.DefaultDB+".users DROP COLUMN legacy")
+	addPos := strings.Index(got, "ADD COLUMN name ")
+	skippedPos := strings.Index(got, "-- skipped: ALTER TABLE users DROP COLUMN legacy;")
 	require.NotEqual(t, -1, addPos, "executed ADD COLUMN must be present")
 	require.NotEqual(t, -1, skippedPos, "skipped DROP comment must be present")
 	assert.Less(t, addPos, skippedPos, "executed SQL must precede the skipped-drop comment")

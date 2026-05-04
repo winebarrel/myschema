@@ -62,10 +62,17 @@ func (t *Table) FQTN() string {
 // SQL renders an inline CREATE TABLE that declares columns and inline
 // table-level constraints (PK/UNIQUE/CHECK). Foreign keys and secondary
 // indexes are emitted separately by IdxSQL/FkSQL so apply/diff can order them.
+//
+// The emitted statement is *unqualified* — `CREATE TABLE name`, not
+// `CREATE TABLE db.name`. myschema operates on exactly one database
+// per invocation (the DSN carries it), so the qualifier would be
+// noise in every emitted line. FQTN itself still returns the
+// db-qualified form because it's used for map keys and error
+// messages.
 func (t *Table) SQL() string {
 	var b strings.Builder
 	b.WriteString("CREATE TABLE ")
-	b.WriteString(t.FQTN())
+	b.WriteString(Ident(t.Name))
 	b.WriteString(" (\n")
 
 	first := true
@@ -202,7 +209,7 @@ func (t *Table) FkSQL() string {
 
 // TableToSQL is the dump representation of a single table.
 func TableToSQL(t *Table) string {
-	parts := []string{"-- " + t.FQTN(), t.SQL()}
+	parts := []string{"-- " + Ident(t.Name), t.SQL()}
 	if s := t.IdxSQL(); s != "" {
 		parts = append(parts, s)
 	}

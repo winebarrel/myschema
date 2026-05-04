@@ -21,6 +21,6 @@ desired: |
   );
 
 applied: |
-  CREATE FULLTEXT INDEX ft_body ON myschema_test.docs (body);
+  CREATE FULLTEXT INDEX ft_body ON docs (body);
 
 verify_no_drift: true

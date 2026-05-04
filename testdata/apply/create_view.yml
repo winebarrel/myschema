@@ -9,9 +9,9 @@ desired: |
   CREATE VIEW active_users AS SELECT id, name FROM users;
 
 applied: |
-  CREATE TABLE myschema_test.users (
+  CREATE TABLE users (
       id bigint NOT NULL,
       name varchar(64),
       PRIMARY KEY (id)
   );
-  CREATE OR REPLACE VIEW myschema_test.active_users AS select id, `name` from users;
+  CREATE OR REPLACE VIEW active_users AS select id, `name` from users;

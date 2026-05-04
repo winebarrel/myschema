@@ -23,6 +23,6 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.shards ADD PARTITION (
+  ALTER TABLE shards ADD PARTITION (
     partition p2 values less than (30, 300)
   );

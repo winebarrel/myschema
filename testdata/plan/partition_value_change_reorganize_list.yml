@@ -22,7 +22,7 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.accts REORGANIZE PARTITION pAB, pCD INTO (
+  ALTER TABLE accts REORGANIZE PARTITION pAB, pCD INTO (
     partition pAB values in (1, 2, 7),
     partition pCD values in (3, 4, 8)
   );

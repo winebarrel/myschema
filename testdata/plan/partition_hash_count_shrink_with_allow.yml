@@ -23,4 +23,4 @@ allow_drop:
   - partition
 
 plan: |
-  ALTER TABLE myschema_test.events COALESCE PARTITION 4;
+  ALTER TABLE events COALESCE PARTITION 4;

@@ -12,4 +12,4 @@ include:
 
 plan: ""
 disallowed_drops: |
-  -- skipped: DROP TABLE myschema_test.users;
+  -- skipped: DROP TABLE users;

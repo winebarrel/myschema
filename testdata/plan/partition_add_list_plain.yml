@@ -24,6 +24,6 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.accts ADD PARTITION (
+  ALTER TABLE accts ADD PARTITION (
     partition pC values in (6, 7)
   );

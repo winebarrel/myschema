@@ -17,4 +17,4 @@ allow_drop:
   - index
 
 applied: |
-  ALTER TABLE myschema_test.users DROP INDEX idx_users_email;
+  ALTER TABLE users DROP INDEX idx_users_email;

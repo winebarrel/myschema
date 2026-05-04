@@ -6,8 +6,8 @@ include:
   - "users"
 
 dump: |
-  -- myschema_test.users
-  CREATE TABLE myschema_test.users (
+  -- users
+  CREATE TABLE users (
       id bigint NOT NULL,
       PRIMARY KEY (id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

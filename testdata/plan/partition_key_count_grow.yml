@@ -15,4 +15,4 @@ desired: |
   ) PARTITION BY KEY (id) PARTITIONS 4;
 
 plan: |
-  ALTER TABLE myschema_test.shards ADD PARTITION PARTITIONS 2;
+  ALTER TABLE shards ADD PARTITION PARTITIONS 2;

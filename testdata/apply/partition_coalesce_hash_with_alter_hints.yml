@@ -29,6 +29,6 @@ alter_algorithm: COPY
 alter_lock: SHARED
 
 applied: |
-  ALTER TABLE myschema_test.events ALGORITHM=COPY, LOCK=SHARED, COALESCE PARTITION 2;
+  ALTER TABLE events ALGORITHM=COPY, LOCK=SHARED, COALESCE PARTITION 2;
 
 verify_no_drift: true

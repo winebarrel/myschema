@@ -23,6 +23,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.employees ADD CONSTRAINT fk_manager FOREIGN KEY (manager_id) REFERENCES myschema_test.employees(id) ON DELETE SET NULL;
+  ALTER TABLE employees ADD CONSTRAINT fk_manager FOREIGN KEY (manager_id) REFERENCES employees(id) ON DELETE SET NULL;
 
 verify_no_drift: true

@@ -21,4 +21,4 @@ desired: |
 allow_drop:
   - constraint
 
-error: "renamed-from: source constraint myschema_test.users.chk_age_typo not found in current schema"
+error: "renamed-from: source constraint users.chk_age_typo not found in current schema"

@@ -24,7 +24,7 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.accts ADD PARTITION (
+  ALTER TABLE accts ADD PARTITION (
     partition pEF values in ('E', 'F')
   );
 

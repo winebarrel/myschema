@@ -23,7 +23,7 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.events ADD PARTITION (
+  ALTER TABLE events ADD PARTITION (
     partition p2021 values less than (2022),
     partition p2022 values less than (2023)
   );

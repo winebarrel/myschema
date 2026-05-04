@@ -35,7 +35,7 @@ func TestTableSQLBasic(t *testing.T) {
 	})
 
 	sql := tbl.SQL()
-	assert.Contains(t, sql, "CREATE TABLE shop.users")
+	assert.Contains(t, sql, "CREATE TABLE users (")
 	assert.Contains(t, sql, "id bigint NOT NULL AUTO_INCREMENT")
 	assert.Contains(t, sql, "PRIMARY KEY (id)")
 	assert.True(t, strings.HasSuffix(sql, ";"), "should end with ;")
@@ -100,11 +100,11 @@ func TestTableIdxAndFkSQL(t *testing.T) {
 	})
 
 	idxSQL := tbl.IdxSQL()
-	assert.Contains(t, idxSQL, "CREATE INDEX idx_user")
+	assert.Contains(t, idxSQL, "CREATE INDEX idx_user ON ")
 	assert.NotContains(t, idxSQL, "PRIMARY", "PRIMARY KEY index excluded from IdxSQL")
 
 	fkSQL := tbl.FkSQL()
-	assert.Contains(t, fkSQL, "ADD CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES shop.users(id)")
+	assert.Contains(t, fkSQL, "ADD CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)")
 }
 
 func TestTableToSQLCombined(t *testing.T) {
@@ -126,10 +126,10 @@ func TestTableToSQLCombined(t *testing.T) {
 	})
 
 	out := model.TableToSQL(tbl)
-	assert.Contains(t, out, "-- shop.posts", "leading comment marker")
-	assert.Contains(t, out, "CREATE TABLE shop.posts")
-	assert.Contains(t, out, "CREATE INDEX idx_user")
-	assert.Contains(t, out, "ADD CONSTRAINT fk_user")
+	assert.Contains(t, out, "-- posts", "leading comment marker")
+	assert.Contains(t, out, "CREATE TABLE posts (")
+	assert.Contains(t, out, "CREATE INDEX idx_user ON ")
+	assert.Contains(t, out, "ADD CONSTRAINT fk_user FOREIGN KEY")
 }
 
 func TestTablesToSQLOrderingAndSeparators(t *testing.T) {
@@ -148,8 +148,11 @@ func TestTablesToSQLOrderingAndSeparators(t *testing.T) {
 	tables.Set("shop.b", b)
 
 	out := model.TablesToSQL(tables)
-	posA := strings.Index(out, "shop.a")
-	posB := strings.Index(out, "shop.b")
+	// Tables are emitted unqualified (`-- a`, `CREATE TABLE a`); pin
+	// the order on the leading comment markers so the assertion
+	// doesn't false-match a substring inside another table's body.
+	posA := strings.Index(out, "-- a")
+	posB := strings.Index(out, "-- b")
 	require.True(t, posA >= 0 && posB >= 0)
 	assert.Less(t, posA, posB, "insertion order preserved")
 	assert.Contains(t, out, "\n\n", "tables separated by blank line")

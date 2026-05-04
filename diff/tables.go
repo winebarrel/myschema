@@ -141,19 +141,23 @@ func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropC
 		if _, ok := desired.GetOk(k); ok {
 			continue
 		}
+		// Map key `k` is the FQTN ("db.name") — unqualify for SQL
+		// emission. (FQTN itself stays db-qualified for map keys
+		// and error context elsewhere.)
+		tableIdent := model.Ident(ct.Name)
 		if !tableAllowed {
 			for name := range ct.ForeignKeys.Keys() {
 				res.DisallowedDropStmts = append(res.DisallowedDropStmts,
-					"-- skipped: ALTER TABLE "+k+" DROP FOREIGN KEY "+model.Ident(name)+";")
+					"-- skipped: ALTER TABLE "+tableIdent+" DROP FOREIGN KEY "+model.Ident(name)+";")
 			}
-			res.DisallowedDropStmts = append(res.DisallowedDropStmts, "-- skipped: DROP TABLE "+k+";")
+			res.DisallowedDropStmts = append(res.DisallowedDropStmts, "-- skipped: DROP TABLE "+tableIdent+";")
 			continue
 		}
 		for name := range ct.ForeignKeys.Keys() {
 			res.FKDropStmts = append(res.FKDropStmts,
-				"ALTER TABLE "+k+" DROP FOREIGN KEY "+model.Ident(name)+";")
+				"ALTER TABLE "+tableIdent+" DROP FOREIGN KEY "+model.Ident(name)+";")
 		}
-		res.DropStmts = append(res.DropStmts, "DROP TABLE "+k+";")
+		res.DropStmts = append(res.DropStmts, "DROP TABLE "+tableIdent+";")
 	}
 
 	return res, nil
@@ -168,7 +172,11 @@ type tableDiffResult struct {
 
 func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult, error) {
 	res := &tableDiffResult{}
-	fqtn := desired.FQTN()
+	// Unqualified for SQL emission (myschema operates on one DB per
+	// invocation; the qualifier would be noise on every ALTER TABLE).
+	// FQTN itself stays db-qualified — it's still used for map keys
+	// and error context.
+	tableIdent := model.Ident(desired.Name)
 
 	// Column rename pass first, so the index-rename pass below and the
 	// regular column / index / FK diffs see the renamed objects under
@@ -177,7 +185,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// so indexEqual / fkEqual stay quiet for objects that should NOT
 	// trigger a DROP+CREATE / DROP+ADD.
 	renames := columnRenameMap(desired.Columns)
-	colRenameStmts, err := applyColumnRenames(fqtn, current.Columns, desired.Columns)
+	colRenameStmts, err := applyColumnRenames(tableIdent, current.Columns, desired.Columns)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +193,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	rewriteIndexColumnRefs(current.Indexes, renames)
 	rewriteFKColumnRefs(current.ForeignKeys, current.Database, current.Name, renames)
 	rewriteConstraintColumnRefs(current.Constraints, current.Indexes, renames)
-	idxRenameStmts, err := applyIndexRenames(fqtn, current.Indexes, desired.Indexes)
+	idxRenameStmts, err := applyIndexRenames(tableIdent, current.Indexes, desired.Indexes)
 	if err != nil {
 		return nil, err
 	}
@@ -196,10 +204,10 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// the diff still emits DROP+ADD via diffConstraints / diffForeignKeys
 	// below. Validating up front means a typo'd source name aborts the
 	// plan instead of silently dropping + adding the wrong target.
-	if err := validateConstraintRenames(fqtn, current.Constraints, desired.Constraints); err != nil {
+	if err := validateConstraintRenames(tableIdent, current.Constraints, desired.Constraints); err != nil {
 		return nil, err
 	}
-	if err := validateForeignKeyRenames(fqtn, current.ForeignKeys, desired.ForeignKeys); err != nil {
+	if err := validateForeignKeyRenames(tableIdent, current.ForeignKeys, desired.ForeignKeys); err != nil {
 		return nil, err
 	}
 
@@ -210,7 +218,7 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// strategy / expression change, first-time PARTITION BY,
 	// REMOVE PARTITIONING, SUBPARTITION). Run before the column /
 	// index passes so the user sees the partition error immediately.
-	partStmts, partDisallowed, err := diffPartitions(fqtn, current.Partition, desired.Partition, dc)
+	partStmts, partDisallowed, err := diffPartitions(tableIdent, current.Partition, desired.Partition, dc)
 	if err != nil {
 		return nil, err
 	}
@@ -226,10 +234,10 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	if desired.Partition != nil {
 		required, err := partitionRequiredColumns(*desired.Partition)
 		if err != nil {
-			return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", fqtn, err)
+			return nil, fmt.Errorf("table %s: re-parse desired partition clause: %w", tableIdent, err)
 		}
 		if missing := uniqueKeyPartitionCoverGap(desired, required); missing != "" {
-			return nil, fmt.Errorf("table %s: %s — MySQL requires every unique key (including the PRIMARY KEY) on a partitioned table to include all columns in the partition expression. Either add the missing columns to the unique key, or drop partitioning first (REMOVE PARTITIONING by hand) and let the next plan reconverge", fqtn, missing)
+			return nil, fmt.Errorf("table %s: %s — MySQL requires every unique key (including the PRIMARY KEY) on a partitioned table to include all columns in the partition expression. Either add the missing columns to the unique key, or drop partitioning first (REMOVE PARTITIONING by hand) and let the next plan reconverge", tableIdent, missing)
 		}
 	}
 	res.Stmts = append(res.Stmts, partStmts...)
@@ -242,15 +250,15 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 	// changing the table default is functionally equivalent to changing
 	// every "inherited" column). Engine and Comment are intentionally
 	// not diffed here yet — out of scope for the charset gap.
-	if charsetStmt := tableCharsetCollationSQL(fqtn, current, desired); charsetStmt != "" {
+	if charsetStmt := tableCharsetCollationSQL(tableIdent, current, desired); charsetStmt != "" {
 		res.Stmts = append(res.Stmts, charsetStmt)
 	}
 
-	colStmts, colDisallowed := diffColumns(fqtn, current.Columns, desired.Columns, dc)
+	colStmts, colDisallowed := diffColumns(tableIdent, current.Columns, desired.Columns, dc)
 	res.Stmts = append(res.Stmts, colStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, colDisallowed...)
 
-	conStmts, conDisallowed := diffConstraints(fqtn, current.Constraints, desired.Constraints, dc)
+	conStmts, conDisallowed := diffConstraints(tableIdent, current.Constraints, desired.Constraints, dc)
 	res.Stmts = append(res.Stmts, conStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, conDisallowed...)
 
@@ -270,11 +278,11 @@ func diffTable(current, desired *model.Table, dc DropChecker) (*tableDiffResult,
 			dropped[n] = true
 		}
 	}
-	idxStmts, idxDisallowed := diffIndexes(fqtn, current.Indexes, desired.Indexes, dc, dropped)
+	idxStmts, idxDisallowed := diffIndexes(tableIdent, current.Indexes, desired.Indexes, dc, dropped)
 	res.Stmts = append(res.Stmts, idxStmts...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, idxDisallowed...)
 
-	fkDrops, fkAdds, fkDisallowed := diffForeignKeys(fqtn, current.ForeignKeys, desired.ForeignKeys, dc)
+	fkDrops, fkAdds, fkDisallowed := diffForeignKeys(tableIdent, current.ForeignKeys, desired.ForeignKeys, dc)
 	res.FKDropStmts = append(res.FKDropStmts, fkDrops...)
 	res.FKAddStmts = append(res.FKAddStmts, fkAdds...)
 	res.DisallowedDropStmts = append(res.DisallowedDropStmts, fkDisallowed...)
@@ -334,7 +342,7 @@ func droppedColumns(current, desired *orderedmap.Map[string, *model.Column]) []s
 	return out
 }
 
-func diffColumns(fqtn string, current, desired *orderedmap.Map[string, *model.Column], dc DropChecker) (stmts, disallowed []string) {
+func diffColumns(tableIdent string, current, desired *orderedmap.Map[string, *model.Column], dc DropChecker) (stmts, disallowed []string) {
 	colAllowed := dc.IsDropAllowed("column")
 
 	// New / changed columns. New columns get a positional clause
@@ -353,18 +361,18 @@ func diffColumns(fqtn string, current, desired *orderedmap.Map[string, *model.Co
 	for name, dc2 := range desired.All() {
 		cc, ok := current.GetOk(name)
 		if !ok {
-			stmts = append(stmts, addColumnSQL(fqtn, dc2, anchor))
+			stmts = append(stmts, addColumnSQL(tableIdent, dc2, anchor))
 			anchor = name
 			continue
 		}
 		anchor = name
 		if !columnEqual(cc, dc2) {
-			stmts = append(stmts, modifyColumnSQL(fqtn, dc2))
+			stmts = append(stmts, modifyColumnSQL(tableIdent, dc2))
 		}
 	}
 	// Dropped columns
 	for _, name := range droppedColumns(current, desired) {
-		drop := "ALTER TABLE " + fqtn + " DROP COLUMN " + model.Ident(name) + ";"
+		drop := "ALTER TABLE " + tableIdent + " DROP COLUMN " + model.Ident(name) + ";"
 		if !colAllowed {
 			disallowed = append(disallowed, "-- skipped: "+drop)
 			continue
@@ -473,7 +481,7 @@ func ptrEq[T comparable](a, b *T) bool {
 // Per-column drift is picked up by the column diff below; the
 // catalog-side normalisation of column charset/collation against
 // the new default keeps that comparison honest.
-func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string {
+func tableCharsetCollationSQL(tableIdent string, current, desired *model.Table) string {
 	if desired.Charset == nil && desired.Collation == nil {
 		return ""
 	}
@@ -495,7 +503,7 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 	}
 	var b strings.Builder
 	b.WriteString("ALTER TABLE ")
-	b.WriteString(fqtn)
+	b.WriteString(tableIdent)
 	// `-- myschema:convert-charset` opt-in: rewrite stored bytes
 	// and per-column charset metadata in one statement so a
 	// table with pre-existing string columns converges in a
@@ -543,19 +551,19 @@ func tableCharsetCollationSQL(fqtn string, current, desired *model.Table) string
 // after, or "" for `FIRST`. Empty anchor + zero existing columns is the
 // degenerate "very first column" case and also gets FIRST — harmless on
 // MySQL.
-func addColumnSQL(fqtn string, c *model.Column, afterCol string) string {
+func addColumnSQL(tableIdent string, c *model.Column, afterCol string) string {
 	pos := " FIRST"
 	if afterCol != "" {
 		pos = " AFTER " + model.Ident(afterCol)
 	}
-	return "ALTER TABLE " + fqtn + " ADD COLUMN " + model.ColumnDefSQL(c) + pos + ";"
+	return "ALTER TABLE " + tableIdent + " ADD COLUMN " + model.ColumnDefSQL(c) + pos + ";"
 }
 
-func modifyColumnSQL(fqtn string, c *model.Column) string {
-	return "ALTER TABLE " + fqtn + " MODIFY COLUMN " + model.ColumnDefSQL(c) + ";"
+func modifyColumnSQL(tableIdent string, c *model.Column) string {
+	return "ALTER TABLE " + tableIdent + " MODIFY COLUMN " + model.ColumnDefSQL(c) + ";"
 }
 
-func diffConstraints(fqtn string, current, desired *orderedmap.Map[string, *model.Constraint], dc DropChecker) (stmts, disallowed []string) {
+func diffConstraints(tableIdent string, current, desired *orderedmap.Map[string, *model.Constraint], dc DropChecker) (stmts, disallowed []string) {
 	conAllowed := dc.IsDropAllowed("constraint")
 
 	for name, ccon := range current.All() {
@@ -564,7 +572,7 @@ func diffConstraints(fqtn string, current, desired *orderedmap.Map[string, *mode
 			continue
 		}
 		// PK uses DROP PRIMARY KEY, not DROP CONSTRAINT.
-		drop := dropConstraintSQL(fqtn, ccon)
+		drop := dropConstraintSQL(tableIdent, ccon)
 		if !ok && !conAllowed {
 			disallowed = append(disallowed, "-- skipped: "+drop)
 			continue
@@ -576,28 +584,28 @@ func diffConstraints(fqtn string, current, desired *orderedmap.Map[string, *mode
 		if ok && constraintEqual(ccon, dcon) {
 			continue
 		}
-		stmts = append(stmts, addConstraintSQL(fqtn, dcon))
+		stmts = append(stmts, addConstraintSQL(tableIdent, dcon))
 	}
 	return
 }
 
-func dropConstraintSQL(fqtn string, c *model.Constraint) string {
+func dropConstraintSQL(tableIdent string, c *model.Constraint) string {
 	switch c.Type {
 	case model.PrimaryKeyConstraint:
-		return "ALTER TABLE " + fqtn + " DROP PRIMARY KEY;"
+		return "ALTER TABLE " + tableIdent + " DROP PRIMARY KEY;"
 	default:
-		return "ALTER TABLE " + fqtn + " DROP CHECK " + model.Ident(c.Name) + ";"
+		return "ALTER TABLE " + tableIdent + " DROP CHECK " + model.Ident(c.Name) + ";"
 	}
 }
 
-func addConstraintSQL(fqtn string, c *model.Constraint) string {
+func addConstraintSQL(tableIdent string, c *model.Constraint) string {
 	switch c.Type {
 	case model.PrimaryKeyConstraint:
-		return "ALTER TABLE " + fqtn + " ADD PRIMARY KEY " + c.Definition + ";"
+		return "ALTER TABLE " + tableIdent + " ADD PRIMARY KEY " + c.Definition + ";"
 	case model.CheckConstraint:
-		return "ALTER TABLE " + fqtn + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + c.Definition + ";"
+		return "ALTER TABLE " + tableIdent + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + c.Definition + ";"
 	}
-	return "ALTER TABLE " + fqtn + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + c.Definition + ";"
+	return "ALTER TABLE " + tableIdent + " ADD CONSTRAINT " + model.Ident(c.Name) + " " + c.Definition + ";"
 }
 
 func constraintEqual(a, b *model.Constraint) bool {
@@ -631,7 +639,7 @@ func looseEqual(a, b string) bool {
 	return norm(a) == norm(b)
 }
 
-func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.Index], dc DropChecker, droppedCols map[string]bool) (stmts, disallowed []string) {
+func diffIndexes(tableIdent string, current, desired *orderedmap.Map[string, *model.Index], dc DropChecker, droppedCols map[string]bool) (stmts, disallowed []string) {
 	idxAllowed := dc.IsDropAllowed("index")
 
 	for name, ci := range current.All() {
@@ -652,7 +660,7 @@ func diffIndexes(fqtn string, current, desired *orderedmap.Map[string, *model.In
 		if allPartsDropped(ci, droppedCols) {
 			continue
 		}
-		drop := "ALTER TABLE " + fqtn + " DROP INDEX " + model.Ident(name) + ";"
+		drop := "ALTER TABLE " + tableIdent + " DROP INDEX " + model.Ident(name) + ";"
 		if !ok && !idxAllowed {
 			disallowed = append(disallowed, "-- skipped: "+drop)
 			continue
@@ -716,7 +724,7 @@ func normalizeIndexType(s string) string {
 	return up
 }
 
-func diffForeignKeys(fqtn string, current, desired *orderedmap.Map[string, *model.ForeignKey], dc DropChecker) (drops, adds, disallowed []string) {
+func diffForeignKeys(tableIdent string, current, desired *orderedmap.Map[string, *model.ForeignKey], dc DropChecker) (drops, adds, disallowed []string) {
 	fkAllowed := dc.IsDropAllowed("foreign_key")
 
 	for name, cf := range current.All() {
@@ -724,7 +732,7 @@ func diffForeignKeys(fqtn string, current, desired *orderedmap.Map[string, *mode
 		if ok && fkEqual(cf, df) {
 			continue
 		}
-		drop := "ALTER TABLE " + fqtn + " DROP FOREIGN KEY " + model.Ident(name) + ";"
+		drop := "ALTER TABLE " + tableIdent + " DROP FOREIGN KEY " + model.Ident(name) + ";"
 		if !ok && !fkAllowed {
 			disallowed = append(disallowed, "-- skipped: "+drop)
 			continue

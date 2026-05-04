@@ -57,7 +57,7 @@ func TestDiffRenameTableEmitsAlter(t *testing.T) {
 	require.NoError(t, err)
 
 	got := strings.Join(res.RenameStmts, "\n")
-	assert.Contains(t, got, "ALTER TABLE shop.old_users RENAME TO shop.users;")
+	assert.Contains(t, got, "ALTER TABLE old_users RENAME TO users;")
 	all := strings.Join(append(append([]string{}, res.Stmts...), res.DropStmts...), "\n")
 	assert.NotContains(t, all, "DROP TABLE", "rename must not surface as drop")
 	assert.NotContains(t, all, "CREATE TABLE", "rename must not surface as create")
@@ -114,7 +114,7 @@ func TestDiffRenameTableAlsoRewritesCrossTableFKRefs(t *testing.T) {
 
 	allRen := strings.Join(res.RenameStmts, "\n")
 	allFK := strings.Join(append(append([]string{}, res.FKDropStmts...), res.FKAddStmts...), "\n")
-	assert.Contains(t, allRen, "ALTER TABLE shop.users RENAME TO shop.members;")
+	assert.Contains(t, allRen, "ALTER TABLE users RENAME TO members;")
 	assert.NotContains(t, allFK, "DROP FOREIGN KEY", "FK on referencing table must not be dropped after rename")
 	assert.NotContains(t, allFK, "ADD CONSTRAINT", "FK on referencing table must not be re-added after rename")
 }
@@ -480,7 +480,7 @@ func TestDiffRenameColumnEmitsAlter(t *testing.T) {
 	require.NoError(t, err)
 
 	got := strings.Join(res.Stmts, "\n")
-	assert.Contains(t, got, "ALTER TABLE shop.users RENAME COLUMN old_name TO name;")
+	assert.Contains(t, got, "ALTER TABLE users RENAME COLUMN old_name TO name;")
 	assert.NotContains(t, got, "DROP COLUMN", "rename must not show as drop")
 	assert.NotContains(t, got, "ADD COLUMN", "rename must not show as add")
 }
@@ -557,7 +557,7 @@ func TestDiffRenameIndexEmitsAlter(t *testing.T) {
 	require.NoError(t, err)
 
 	got := strings.Join(res.Stmts, "\n")
-	assert.Contains(t, got, "ALTER TABLE shop.posts RENAME INDEX old_idx TO new_idx;")
+	assert.Contains(t, got, "ALTER TABLE posts RENAME INDEX old_idx TO new_idx;")
 	assert.NotContains(t, got, "DROP INDEX")
 	assert.NotContains(t, got, "CREATE INDEX")
 }
@@ -770,8 +770,8 @@ func TestDiffDropPartialColumnEmitsDropIndex(t *testing.T) {
 	res, err := diff.DiffTables(current, desired, allowAll)
 	require.NoError(t, err)
 	got := strings.Join(res.Stmts, "\n")
-	assert.Contains(t, got, "DROP COLUMN a")
-	assert.Contains(t, got, "DROP INDEX ab",
+	assert.Contains(t, got, "DROP COLUMN a;")
+	assert.Contains(t, got, "DROP INDEX ab;",
 		"partial-column drop on a multi-col index must still DROP INDEX (suppression doesn't apply)")
 }
 
@@ -862,12 +862,12 @@ func TestDiffRenameTableSeparatesFromFKDropOnSameTable(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, res.RenameStmts, "table rename must land in RenameStmts bucket")
 	require.NotEmpty(t, res.FKDropStmts, "FK on renamed table must be in FKDropStmts")
-	assert.Contains(t, res.RenameStmts[0], "ALTER TABLE shop.posts RENAME TO shop.comments")
+	assert.Contains(t, res.RenameStmts[0], "ALTER TABLE posts RENAME TO comments;")
 	// Post-rename, current is re-keyed under the new name, so the FK
 	// drop statement targets the new table name. Apply order
 	// (RenameStmts before FKDropStmts in diff_all.go) makes that the
 	// table that exists at the moment the DROP runs.
-	assert.Contains(t, res.FKDropStmts[0], "ALTER TABLE shop.comments DROP FOREIGN KEY fk_user")
+	assert.Contains(t, res.FKDropStmts[0], "ALTER TABLE comments DROP FOREIGN KEY fk_user;")
 }
 
 // constraint and FK rename directives -------------------------------------

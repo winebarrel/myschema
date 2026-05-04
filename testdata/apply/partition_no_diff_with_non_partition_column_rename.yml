@@ -36,6 +36,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.events RENAME COLUMN old_payload TO payload;
+  ALTER TABLE events RENAME COLUMN old_payload TO payload;
 
 verify_no_drift: true

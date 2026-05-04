@@ -23,6 +23,6 @@ desired: |
   );
 
 applied: |
-  CREATE UNIQUE INDEX uniq_tenant_slug ON myschema_test.t (tenant_id, slug);
+  CREATE UNIQUE INDEX uniq_tenant_slug ON t (tenant_id, slug);
 
 verify_no_drift: true

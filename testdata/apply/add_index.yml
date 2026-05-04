@@ -14,4 +14,4 @@ desired: |
   CREATE INDEX idx_users_email ON users (email);
 
 applied: |
-  CREATE INDEX idx_users_email ON myschema_test.users (email);
+  CREATE INDEX idx_users_email ON users (email);

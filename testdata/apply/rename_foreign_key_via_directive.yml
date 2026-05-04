@@ -28,7 +28,7 @@ allow_drop:
   - foreign_key
 
 applied: |
-  ALTER TABLE myschema_test.children DROP FOREIGN KEY fk_child_parent_old;
-  ALTER TABLE myschema_test.children ADD CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES myschema_test.parents(id);
+  ALTER TABLE children DROP FOREIGN KEY fk_child_parent_old;
+  ALTER TABLE children ADD CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parents(id);
 
 verify_no_drift: true

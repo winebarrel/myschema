@@ -25,5 +25,5 @@ allow_drop:
   - all
 
 applied: |
-  ALTER TABLE myschema_test.t DROP COLUMN a;
-  CREATE INDEX i ON myschema_test.t (b);
+  ALTER TABLE t DROP COLUMN a;
+  CREATE INDEX i ON t (b);

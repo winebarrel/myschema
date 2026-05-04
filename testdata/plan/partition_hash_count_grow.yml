@@ -18,4 +18,4 @@ desired: |
   ) PARTITION BY HASH (id) PARTITIONS 8;
 
 plan: |
-  ALTER TABLE myschema_test.events ADD PARTITION PARTITIONS 4;
+  ALTER TABLE events ADD PARTITION PARTITIONS 4;

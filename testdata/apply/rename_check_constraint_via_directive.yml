@@ -25,7 +25,7 @@ allow_drop:
   - constraint
 
 applied: |
-  ALTER TABLE myschema_test.users DROP CHECK chk_age_old;
-  ALTER TABLE myschema_test.users ADD CONSTRAINT chk_age_nonneg CHECK (age >= 0);
+  ALTER TABLE users DROP CHECK chk_age_old;
+  ALTER TABLE users ADD CONSTRAINT chk_age_nonneg CHECK (age >= 0);
 
 verify_no_drift: true

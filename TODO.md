@@ -60,7 +60,6 @@ Open items only. Done work is in `git log` / closed PRs.
 
 - [ ] `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars).
 - [ ] `--split` for `dump` (one file per table / view).
-- [ ] `--omit-database` for `dump` (mirror of pistachio's `--omit-schema`).
 - [ ] Database-name remap (`-m old=new`), the MySQL analogue of
       pistachio's `--schema-map`.
 - [ ] `dump --quote-style` (backtick vs. ANSI double-quote) for tools

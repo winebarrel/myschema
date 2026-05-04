@@ -208,7 +208,7 @@ _assert_substring() {
 # Example:
 #   assert_contains "table is filtered" \
 #     "$MYSCHEMA" plan -I 'users*' "$DATA/schema.sql" \
-#     -- 'CREATE TABLE myschema_test.users'
+#     -- 'CREATE TABLE users'
 #
 # The "--" separator is required so the helper can find the boundary
 # between cmd args and the expected substring; missing separator,

@@ -40,10 +40,10 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p0 INTO (
+  ALTER TABLE accts REORGANIZE PARTITION p0 INTO (
     partition p0 values in (1, 2, 9)
   );
-  ALTER TABLE myschema_test.accts REORGANIZE PARTITION p3 INTO (
+  ALTER TABLE accts REORGANIZE PARTITION p3 INTO (
     partition p3 values in (7, 8, 10)
   );
 

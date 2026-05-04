@@ -236,6 +236,26 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   expression of MySQL's own behaviour (`ALTER TABLE … DEFAULT
   CHARSET=…` does not rewrite per-column charset metadata). See
   CAVEATS.md for the full mechanics and one-shot workarounds.
+- Emitted DDL is **unqualified** — `CREATE TABLE name`,
+  `ALTER TABLE name …`, `CREATE OR REPLACE VIEW name AS …`,
+  `DROP TABLE name`, `CREATE INDEX i ON name`, etc. myschema
+  operates on exactly one database per invocation (the DSN carries
+  it), so the qualifier would be noise on every line. The one
+  exception is a foreign-key `REFERENCES` whose target lives in a
+  different database (`fk.RefDB != fk.Database`): the
+  cross-database qualifier is preserved so the FK doesn't silently
+  re-target a same-named table in the current DB. (Cross-database
+  FK *management* is out of scope per TODO.md; emission only has
+  to not misinterpret one the user spelled out by hand.) Internal
+  state — `model.{Table,View,ForeignKey}.Database`, `RefDB`, and
+  the `FQTN` / `FQVN` map keys — stays db-qualified; the omission
+  is purely about emitted DDL. View bodies (the SELECT clause) are
+  also left as MySQL emits them via
+  `information_schema.VIEWS.VIEW_DEFINITION`, which means
+  fully-qualified `db.table.col` references survive in the body
+  even though the view *name* in `CREATE OR REPLACE VIEW name`
+  doesn't; `parser.NormalizeViewDefinition` strips both sides
+  before diff comparison so the asymmetry doesn't fire.
 
 **Not yet implemented (intentional v1 cuts):**
 

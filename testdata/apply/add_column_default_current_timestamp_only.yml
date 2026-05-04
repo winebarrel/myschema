@@ -22,6 +22,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.t ADD COLUMN created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER id;
+  ALTER TABLE t ADD COLUMN created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER id;
 
 verify_no_drift: true

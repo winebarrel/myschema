@@ -20,6 +20,6 @@ desired: |
   );
 
 applied: |
-  ALTER TABLE myschema_test.t ADD COLUMN status enum('draft','published','archived') NOT NULL DEFAULT 'draft' AFTER id;
+  ALTER TABLE t ADD COLUMN status enum('draft','published','archived') NOT NULL DEFAULT 'draft' AFTER id;
 
 verify_no_drift: true

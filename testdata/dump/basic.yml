@@ -7,10 +7,10 @@ init: |
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 dump: |
-  -- myschema_test.users
-  CREATE TABLE myschema_test.users (
+  -- users
+  CREATE TABLE users (
       id bigint NOT NULL AUTO_INCREMENT,
       email varchar(255) NOT NULL,
       PRIMARY KEY (id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  CREATE UNIQUE INDEX users_email_key ON myschema_test.users (email) USING BTREE;
+  CREATE UNIQUE INDEX users_email_key ON users (email) USING BTREE;

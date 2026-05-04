@@ -34,4 +34,4 @@ desired: |
 plan: ""
 
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.accts DROP PARTITION p3;
+  -- skipped: ALTER TABLE accts DROP PARTITION p3;

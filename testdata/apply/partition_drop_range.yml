@@ -27,6 +27,6 @@ allow_drop:
   - partition
 
 applied: |
-  ALTER TABLE myschema_test.events DROP PARTITION p2022;
+  ALTER TABLE events DROP PARTITION p2022;
 
 verify_no_drift: true

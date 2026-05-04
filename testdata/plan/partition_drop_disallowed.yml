@@ -25,4 +25,4 @@ desired: |
 plan: ""
 
 disallowed_drops: |
-  -- skipped: ALTER TABLE myschema_test.events DROP PARTITION p2022;
+  -- skipped: ALTER TABLE events DROP PARTITION p2022;

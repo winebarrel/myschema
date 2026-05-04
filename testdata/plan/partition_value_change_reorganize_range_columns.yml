@@ -26,7 +26,7 @@ desired: |
   );
 
 plan: |
-  ALTER TABLE myschema_test.shards REORGANIZE PARTITION p0, p1 INTO (
+  ALTER TABLE shards REORGANIZE PARTITION p0, p1 INTO (
     partition p0 values less than (15, 150),
     partition p1 values less than (25, 250)
   );

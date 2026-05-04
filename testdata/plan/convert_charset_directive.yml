@@ -23,4 +23,4 @@ desired: |
   ) DEFAULT CHARSET=utf8mb4;
 
 plan: |
-  ALTER TABLE myschema_test.t CONVERT TO CHARACTER SET utf8mb4;
+  ALTER TABLE t CONVERT TO CHARACTER SET utf8mb4;
