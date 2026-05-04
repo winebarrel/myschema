@@ -18,9 +18,9 @@ import (
 // a new charset (or the project bumps the baseline), this test fails
 // loudly so the map can be filled in before drift starts.
 //
-// Lives under catalog/ rather than model/ because it requires a
-// reachable MySQL — model/* tests are pure-unit so `make test-unit`
-// (no-MySQL) stays runnable.
+// Lives under catalog/ rather than model/ because every test in
+// catalog/ already assumes a reachable MySQL — model/ files stay
+// purely about in-memory structs.
 func TestCharsetDefaultCollationsCoverServer(t *testing.T) {
 	db := testutil.ConnectDB(t)
 	ctx := context.Background()

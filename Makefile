@@ -51,10 +51,6 @@ test-mysql9:
 clean-schema-mysql9:
 	$(MAKE) clean-schema MYSQL_PORT=3307
 
-.PHONY: test-unit
-test-unit:
-	go test -v ./parser/... ./diff/... ./model/...
-
 .PHONY: lint
 lint:
 	golangci-lint run
