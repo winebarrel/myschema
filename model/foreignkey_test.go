@@ -63,10 +63,11 @@ func TestForeignKeySQL(t *testing.T) {
 
 	t.Run("cross-database REFERENCES keeps the qualifier", func(t *testing.T) {
 		// myschema doesn't fully manage cross-database FKs (see
-		// TODO.md), but emission must not silently re-target one
-		// the user spelled out by hand: dropping the `other_db.`
-		// prefix would point the FK at a same-named table in the
-		// current DB.
+		// CAVEATS.md "Foreign keys to tables in another database are
+		// passed through, not managed"), but emission must not
+		// silently re-target one the user spelled out by hand:
+		// dropping the `other_db.` prefix would point the FK at a
+		// same-named table in the current DB.
 		fk := &model.ForeignKey{
 			Name:     "fk_external",
 			Database: "shop", Table: "posts",

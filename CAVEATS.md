@@ -127,13 +127,21 @@ parent side. Specifically:
   against the parent DB's schema changes — the operator has to
   apply changes to `other_db` *before* any plan that references
   it lands.
-- **No drift detection on the parent.** If `other_db.parent` is
-  renamed, dropped, or has its FK-targeted columns removed,
-  myschema sees nothing — the live DB it manages still has the
-  same FK row. The next `apply` against the child database will
-  succeed (the FK already exists, no diff fires) until something
-  triggers MySQL to revalidate the FK, at which point the failure
-  surfaces unrelated to the plan.
+- **Limited drift detection on the parent side.** myschema reads
+  the child's FK row only; whatever MySQL writes into
+  `information_schema.KEY_COLUMN_USAGE` is what the diff sees.
+  That covers FK-metadata-level changes (a parent table rename
+  via `RENAME TABLE` or a parent column rename via `ALTER TABLE
+  RENAME COLUMN` cascades into the child's FK row, so the diff
+  fires `DROP FOREIGN KEY + ADD CONSTRAINT` to restore the
+  desired reference) but **not** structural changes that don't
+  touch the FK metadata: parent column type widening / narrowing,
+  parent unique-key reshuffles, parent collation changes, or any
+  hand-written `foreign_key_checks=0` surgery. Those silently
+  diverge until something forces MySQL to revalidate the FK
+  (a write that touches the constrained column, an integrity
+  check tool, …), at which point the failure surfaces unrelated
+  to any plan run.
 
 **Why myschema doesn't manage cross-DB FKs.** The "one database
 per invocation" contract (the DSN carries it; emitted DDL is
