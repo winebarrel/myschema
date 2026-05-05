@@ -274,8 +274,11 @@ func TestColumnDefSQLInvisible(t *testing.T) {
 // shipping wrong-order DDL. PR #84 pinned only INVISIBLE's slot;
 // extend the pin to the full chain (CHARSET → COLLATE → GENERATED →
 // NOT NULL → DEFAULT → ON UPDATE → AUTO_INCREMENT → INVISIBLE →
-// COMMENT). Mirror what MySQL emits in SHOW CREATE TABLE so the
-// catalog round-trip stays bytewise.
+// COMMENT). The constructed column intentionally combines
+// attributes MySQL would reject together (e.g. BIGINT + CHARACTER
+// SET, AUTO_INCREMENT + GENERATED) so a single column exercises
+// every formatter slot — this is a slot-ordering pin, not a
+// SHOW CREATE TABLE round-trip fixture.
 func TestColumnDefSQLFullOrdering(t *testing.T) {
 	cs := "utf8mb4"
 	coll := "utf8mb4_0900_ai_ci"
