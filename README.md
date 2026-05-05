@@ -19,13 +19,47 @@ The `dump → edit → plan → apply → re-plan empty` round-trip is
 the core workflow. See [`getting-started.md`](getting-started.md)
 for a ten-minute walkthrough.
 
-## Subcommands
+## Usage
 
-- **`plan`** — print the DDL that would converge current → desired,
-  no side effects.
-- **`apply`** — run that DDL against the database.
-- **`dump`** — serialize the live schema as SQL (round-trips with
-  `plan` reporting no changes).
+Set the DSN once via env (or pass `--dsn=…` on every command):
+
+```sh
+export MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/app'
+```
+
+### `dump` — serialize the live schema
+
+```sh
+myschema dump > current.sql                          # full database
+myschema dump --include 'user*' --exclude 'tmp_*'    # filter tables
+myschema dump --split=./schema/                      # one SQL file per table/view
+```
+
+`dump` round-trips with `plan` reporting no changes — the output
+is the canonical desired-side shape.
+
+### `plan` — preview the DDL
+
+```sh
+myschema plan desired.sql                            # current → desired diff
+myschema plan --allow-drop=column,index desired.sql  # allow specific drops
+myschema plan --alter-algorithm=INPLACE --alter-lock=NONE desired.sql
+myschema plan --bulk-alter desired.sql               # fold same-table ALTERs
+```
+
+Read-only; safe to run repeatedly. Drops blocked by the policy
+appear as `-- skipped:` lines so nothing's hidden.
+
+### `apply` — run the DDL
+
+```sh
+myschema apply desired.sql                           # safe ops only
+myschema apply --allow-drop=all desired.sql          # destructive ops too
+myschema apply --pre-sql 'SET FOREIGN_KEY_CHECKS=0;' desired.sql
+```
+
+`apply` runs whatever `plan` would print, in the same order. Use
+`plan` first; `apply` has no separate confirmation prompt.
 
 ## Features
 
