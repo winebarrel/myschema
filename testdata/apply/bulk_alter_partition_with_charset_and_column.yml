@@ -1,0 +1,56 @@
+# Pins that under --bulk-alter, a partition op (REORGANIZE
+# PARTITION) stays as its own ALTER while DEFAULT CHARSET and an
+# ADD COLUMN on the same table do fold together. The combiner
+# excludes partition-op specs because MySQL's grammar rejects the
+# trailing-comma multi-spec form for them (CAVEATS.md "Bulk-alter
+# does not combine FK operations" → partition-ops sub-bullet).
+#
+# Three changes in one diff:
+#   - DEFAULT CHARSET=latin1 (table option change)
+#   - ADD COLUMN extra (column add)
+#   - REORGANIZE PARTITION pmax INTO (p1 ..., pmax MAXVALUE) (partition op)
+#
+# Expected output under --bulk-alter:
+#   - REORGANIZE PARTITION → its own ALTER (partition op excluded)
+#   - DEFAULT CHARSET + ADD COLUMN → folded into one ALTER
+#
+# verify_no_drift: false matches change_table_charset.yml's
+# baseline — DEFAULT CHARSET + string columns converges in two
+# applies, not one.
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      ts INT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id, ts)
+  ) DEFAULT CHARSET=utf8mb4
+  PARTITION BY RANGE (ts) (
+      PARTITION p0 VALUES LESS THAN (100),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      ts INT NOT NULL,
+      name VARCHAR(64),
+      extra VARCHAR(64),
+      PRIMARY KEY (id, ts)
+  ) DEFAULT CHARSET=latin1
+  PARTITION BY RANGE (ts) (
+      PARTITION p0 VALUES LESS THAN (100),
+      PARTITION p1 VALUES LESS THAN (200),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t REORGANIZE PARTITION pmax INTO (
+    partition p1 values less than (200),
+    partition pmax values less than maxvalue
+  );
+  ALTER TABLE t DEFAULT CHARSET=latin1, ADD COLUMN extra varchar(64) AFTER name;
+
+verify_no_drift: false
