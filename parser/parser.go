@@ -481,8 +481,19 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 		c.NotNull = true
 	}
 	if opts.Default != nil {
-		v := normalizeDefaultExpr(sqlparser.String(opts.Default))
-		c.Default = &v
+		// vitess hands back *NullVal for an explicit `DEFAULT NULL`,
+		// but catalog/loadColumns leaves Default=nil for SQL-NULL
+		// COLUMN_DEFAULT (which is what MySQL stores for any nullable
+		// column, with or without an explicit DEFAULT NULL clause).
+		// Without this skip, parser-side `&"null"` would never compare
+		// equal to catalog-side `nil` and `MODIFY COLUMN ts timestamp
+		// DEFAULT null` would re-fire on every plan — the canonical
+		// `TIMESTAMP NULL DEFAULT NULL` idiom (Rails/Laravel/Django
+		// soft-delete columns) would drift forever.
+		if _, isNull := opts.Default.(*sqlparser.NullVal); !isNull {
+			v := normalizeDefaultExpr(sqlparser.String(opts.Default))
+			c.Default = &v
+		}
 	}
 	if opts.OnUpdate != nil {
 		v := normalizeDefaultExpr(sqlparser.String(opts.OnUpdate))

@@ -1,0 +1,29 @@
+# Regression for TODO "TIMESTAMP NULL DEFAULT NULL round-trip drifts":
+# pre-fix, parser stored Default=&"null" (vitess returns *NullVal for
+# the literal NULL), but catalog stored Default=nil (COLUMN_DEFAULT
+# came back as SQL NULL → scan into *string is nil). Diff saw the
+# nil-vs-non-nil asymmetry and re-emitted
+# `MODIFY COLUMN ts timestamp DEFAULT null` on every plan, never
+# converging.
+#
+# This shape is the canonical workaround for the MySQL TIMESTAMP
+# implicit-NOT-NULL rule (`explicit_defaults_for_timestamp=OFF`),
+# so it shows up in basically every Rails / Laravel / Django schema
+# that uses soft-delete or optional event timestamps.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      ts TIMESTAMP NULL DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      ts TIMESTAMP NULL DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: ""
+
+verify_no_drift: true
