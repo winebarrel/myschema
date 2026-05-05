@@ -199,9 +199,17 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   `SET explicit_defaults_for_timestamp=ON`). Multi-statement input
   is split via vitess' SplitStatementToPieces so a chain of SETs
   can live in a single `--pre-sql` value or `--pre-sql-file`.
-  `--pre-sql` and `--pre-sql-file` are mutually exclusive. `dump`
-  does not run pre-SQL — it's read-only, and pre-SQL's typical use
-  is DDL session setup.
+  `--pre-sql` and `--pre-sql-file` are mutually exclusive (kong
+  enforces this at parse time via an `xor` group). `dump` does not
+  run pre-SQL — it's read-only, and pre-SQL's typical use is DDL
+  session setup. **Pre-SQL is operator-trusted:** myschema runs
+  whatever SQL the operator passes without scrubbing, so a stray
+  `USE other_db` (which would re-anchor the connection's current
+  database) or destructive DML in pre-SQL is the operator's
+  responsibility — not validated. The one footgun myschema does
+  catch is `--pre-sql-file=-` combined with a `-` desired-file
+  argument: both would read stdin and the second read would silently
+  truncate, so we fail fast with an explicit error.
 - CLI: `plan`, `apply`, `dump`
 - `-- myschema:renamed-from <old>` directive on tables, columns, and
   secondary indexes. Statement-level on `CREATE TABLE` for table

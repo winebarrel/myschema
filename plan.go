@@ -29,7 +29,7 @@ func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, e
 	}
 	// Validate / load pre-SQL BEFORE connect — same posture as apply
 	// (see apply.go for the rationale).
-	preSQL, err := loadPreSQL(options.PreSQLOption)
+	preSQL, err := loadPreSQL(options.PreSQLOption, options.Files)
 	if err != nil {
 		return nil, err
 	}

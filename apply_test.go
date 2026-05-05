@@ -190,6 +190,21 @@ func TestApply_PreSQLEmptyFile(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestApply_PreSQLStdinConflict pins the early-failure check that
+// catches the "both --pre-sql-file=- and desired `-` read stdin"
+// footgun: the second read would hit EOF and silently truncate
+// either the pre-SQL or the desired SQL. Validation runs before
+// any actual stdin read.
+func TestApply_PreSQLStdinConflict(t *testing.T) {
+	c := newClient(t)
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
+		Files:        []string{"-"},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: "-"},
+	}, &bytes.Buffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stdin")
+}
+
 func TestApply_BadDSNError(t *testing.T) {
 	// Pins the apply.go error-wrap path through Database() failing on a
 	// malformed DSN.

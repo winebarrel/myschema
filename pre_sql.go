@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
@@ -26,11 +27,21 @@ import (
 // File reads go through parser.ReadSQLFile so `--pre-sql-file=-`
 // reads from stdin, matching the convention the desired-SQL file
 // args already use.
-func loadPreSQL(opt PreSQLOption) (string, error) {
+//
+// `desiredFiles` is the list of desired-SQL file paths the caller
+// will read AFTER loadPreSQL returns; if both pre-sql-file and a
+// desired file are `-` (stdin), the second read would hit EOF and
+// silently truncate. We fail fast with an explicit error so the
+// user catches the conflict at the CLI layer rather than seeing
+// "empty desired SQL" or "empty pre-SQL" in the wild.
+func loadPreSQL(opt PreSQLOption, desiredFiles []string) (string, error) {
 	preSQL := strings.TrimSpace(opt.PreSQL)
 	preFile := strings.TrimSpace(opt.PreSQLFile)
 	if preSQL != "" && preFile != "" {
 		return "", fmt.Errorf("pre-sql: --pre-sql and --pre-sql-file are mutually exclusive (got both)")
+	}
+	if preFile == "-" && slices.Contains(desiredFiles, "-") {
+		return "", fmt.Errorf("pre-sql: --pre-sql-file=- and a `-` desired file argument both read stdin; pick one")
 	}
 	if preSQL != "" {
 		return preSQL, nil
