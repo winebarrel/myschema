@@ -190,6 +190,18 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   for ALTER TABLE, space for CREATE INDEX) so the user only supplies
   the value (`INPLACE`, `NONE`, …); MySQL rejects unsupported
   combinations at apply time, so CI catches non-online migrations.
+- `--pre-sql` / `--pre-sql-file` (and matching `MYSCHEMA_PRE_SQL` /
+  `MYSCHEMA_PRE_SQL_FILE` env vars) for plan and apply: SQL
+  statement(s) to run on the connection right after connect() and
+  before any diff work — typically session-level SETs that change
+  how the server interprets the upcoming DDL or catalog reads
+  (`SET FOREIGN_KEY_CHECKS=0`, `SET sql_mode='TRADITIONAL'`,
+  `SET explicit_defaults_for_timestamp=ON`). Multi-statement input
+  is split via vitess' SplitStatementToPieces so a chain of SETs
+  can live in a single `--pre-sql` value or `--pre-sql-file`.
+  `--pre-sql` and `--pre-sql-file` are mutually exclusive. `dump`
+  does not run pre-SQL — it's read-only, and pre-SQL's typical use
+  is DDL session setup.
 - CLI: `plan`, `apply`, `dump`
 - `-- myschema:renamed-from <old>` directive on tables, columns, and
   secondary indexes. Statement-level on `CREATE TABLE` for table

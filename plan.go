@@ -10,6 +10,7 @@ type PlanOptions struct {
 	FilterOptions
 	DropPolicy
 	AlterOption
+	PreSQLOption
 	Files []string `arg:"" help:"Path to the desired schema SQL file(s)."`
 }
 
@@ -31,6 +32,10 @@ func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, e
 		return nil, err
 	}
 	defer conn.Close() //nolint:errcheck
+
+	if err := runPreSQL(ctx, conn.Conn, options.PreSQLOption); err != nil {
+		return nil, err
+	}
 
 	r, err := c.diffAll(ctx, conn.Conn, database, &diffAllOptions{
 		FilterOptions: options.FilterOptions,

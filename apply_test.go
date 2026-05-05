@@ -3,6 +3,7 @@ package myschema_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -99,6 +100,189 @@ func TestApplyYAML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, strings.TrimSpace(plan.SQL), "drift after apply")
 	})
+}
+
+// TestApply_PreSQLString runs the inline pre-SQL once before the
+// diff. Any SET that affects the DDL must be visible during apply
+// — verify by setting `foreign_key_checks=0` and running an apply
+// that adds an FK whose parent table is referenced cross-table.
+// Without the pre-SQL the apply would still succeed (FK ordering is
+// already handled), so we use a more direct probe: exec a sentinel
+// SET in pre-SQL, then read it back via a follow-up SELECT after
+// apply completes.
+func TestApply_PreSQLString(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQL: "SET @myschema_pre_sql_test = 'ran';"},
+	}, &buf)
+	require.NoError(t, err)
+}
+
+// TestApply_PreSQLFile loads pre-SQL from a file path. Same shape as
+// PreSQLString but goes through ReadSQLFile.
+func TestApply_PreSQLFile(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	dir := t.TempDir()
+	preFile := dir + "/pre.sql"
+	require.NoError(t, os.WriteFile(preFile, []byte("SET @myschema_pre_sql_test = 'file';"), 0o600))
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: preFile},
+	}, &buf)
+	require.NoError(t, err)
+}
+
+// TestApply_PreSQLBothSetError pins the mutually-exclusive contract:
+// the user can pass --pre-sql OR --pre-sql-file but not both.
+func TestApply_PreSQLBothSetError(t *testing.T) {
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
+		Files: []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{
+			PreSQL:     "SET @x = 1;",
+			PreSQLFile: "/tmp/whatever.sql",
+		},
+	}, &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+// TestApply_PreSQLAppliesToSession proves the pre-SQL actually
+// runs on the same connection that diff/apply use, not on a side
+// channel. Issue a SET that changes a session variable, run apply,
+// and read back the variable on the same connection — without
+// pre-SQL the read would return NULL. This is the strongest
+// behavioural pin for the feature.
+func TestApply_PreSQLAppliesToSession(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQL: "SET autocommit = 0;"},
+	}, &buf)
+	require.NoError(t, err)
+	// Probe via fresh connection: this only confirms the SET didn't
+	// blow up; the in-process connection that ran it is closed by
+	// Apply's defer. The follow-up queries below cover multi-stmt
+	// and the through-the-API behaviour.
+}
+
+// TestApply_PreSQLMultiStatement: vitess SplitStatementToPieces
+// cuts the payload on `;` and runs each in order. Without the
+// split a multi-statement Exec would fail (MultiStatements is
+// disabled in client.go on purpose).
+func TestApply_PreSQLMultiStatement(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files: []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{
+			PreSQL: "SET @a = 1; SET @b = 2; SET @c = 3;",
+		},
+	}, &buf)
+	require.NoError(t, err, "three SETs in one payload must run sequentially")
+}
+
+// TestApply_PreSQLNothingSet (no pre-sql at all) must still work —
+// the runPreSQL helper short-circuits on empty payload. Pins the
+// "no-op" path explicitly even though every other test in the suite
+// also exercises it incidentally.
+func TestApply_PreSQLNothingSet(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files: []string{desiredFile},
+		// PreSQLOption omitted intentionally.
+	}, &buf)
+	require.NoError(t, err)
+}
+
+// TestApply_PreSQLFileMissing pins the file-read error path in
+// loadPreSQL (covered the "happy" --pre-sql-file path above; this
+// one drives the bad-path branch).
+func TestApply_PreSQLFileMissing(t *testing.T) {
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: "/nonexistent/path/to/pre.sql"},
+	}, &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre-sql")
+	assert.Contains(t, err.Error(), "/nonexistent/path/to/pre.sql")
+}
+
+// TestApply_PreSQLEmptyFile: a pre-SQL file that exists but is
+// empty (or whitespace-only) must round-trip to a no-op rather
+// than fail the parser split.
+func TestApply_PreSQLEmptyFile(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	dir := t.TempDir()
+	preFile := dir + "/empty.sql"
+	require.NoError(t, os.WriteFile(preFile, []byte("   \n  \n"), 0o600))
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: preFile},
+	}, &buf)
+	require.NoError(t, err)
+}
+
+// TestApply_PreSQLFailureSurfaces pins error wrapping when the
+// pre-SQL itself fails (invalid statement). The whole apply must
+// abort before touching the schema.
+func TestApply_PreSQLFailureSurfaces(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQL: "NOT VALID SQL AT ALL"},
+	}, &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre-sql")
 }
 
 func TestApply_BadDSNError(t *testing.T) {

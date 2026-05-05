@@ -24,7 +24,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Low — CLI ergonomics
 
-- `--pre-sql` / `--pre-sql-file` (and `MYSCHEMA_PRE_SQL` env vars).
 - `--split` for `dump` (one file per table / view).
 
 ## Low — tests / docs / release

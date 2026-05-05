@@ -69,6 +69,22 @@ type AlterOption struct {
 	AlterLock      string `env:"MYSCHEMA_ALTER_LOCK" enum:",DEFAULT,NONE,SHARED,EXCLUSIVE" default:"" help:"LOCK= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, NONE, SHARED, EXCLUSIVE."`
 }
 
+// PreSQLOption carries a one-shot SQL payload that runs against the
+// connection right after connect() and before plan / apply does any
+// real work. Typical use: session-level SET statements that change
+// how the server interprets the upcoming DDL or catalog reads
+// (e.g. `SET FOREIGN_KEY_CHECKS=0`, `SET sql_mode='TRADITIONAL'`,
+// `SET explicit_defaults_for_timestamp=ON`). Only one source can be
+// set at a time — `PreSQL` and `PreSQLFile` are mutually exclusive
+// to keep the precedence rule trivial. Multi-statement payloads are
+// supported (split on `;`); each statement is executed sequentially
+// against the same connection. dump does NOT run pre-SQL — it's
+// read-only and pre-SQL's typical use is DDL session setup.
+type PreSQLOption struct {
+	PreSQL     string `env:"MYSCHEMA_PRE_SQL" help:"SQL statement(s) to run on the connection before plan / apply (typically session SETs). Multi-statement input is split on ';'. Mutually exclusive with --pre-sql-file."`
+	PreSQLFile string `env:"MYSCHEMA_PRE_SQL_FILE" help:"Path to a file with SQL statement(s) to run on the connection before plan / apply. Mutually exclusive with --pre-sql."`
+}
+
 // DropPolicy decides which DROP categories the diff is allowed to emit.
 type DropPolicy struct {
 	AllowDrop []string `env:"MYSCHEMA_ALLOW_DROP" enum:"all,table,view,column,constraint,foreign_key,index,partition" help:"Comma-separated drop categories to allow."`

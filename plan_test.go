@@ -68,6 +68,37 @@ func TestPlanYAML(t *testing.T) {
 	})
 }
 
+// TestPlan_PreSQLString confirms pre-SQL also runs for plan (even
+// though plan is read-only, session-level SET must be visible
+// during catalog read for parity with apply — e.g. setting
+// `explicit_defaults_for_timestamp` would change how a TIMESTAMP
+// column gets interpreted).
+func TestPlan_PreSQLString(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	c := newClient(t)
+	_, err := c.Plan(ctx, &myschema.PlanOptions{
+		Files:        []string{writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)},
+		PreSQLOption: myschema.PreSQLOption{PreSQL: "SET @myschema_pre_sql_test = 'plan';"},
+	})
+	require.NoError(t, err)
+}
+
+func TestPlan_PreSQLBothSetError(t *testing.T) {
+	c := newClient(t)
+	_, err := c.Plan(context.Background(), &myschema.PlanOptions{
+		Files: []string{writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)},
+		PreSQLOption: myschema.PreSQLOption{
+			PreSQL:     "SET @x = 1;",
+			PreSQLFile: "/tmp/whatever.sql",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
 func TestPlan_BadDSNError(t *testing.T) {
 	c := myschema.NewClient(&myschema.Options{DSN: "garbage"})
 	_, err := c.Plan(context.Background(), &myschema.PlanOptions{})
