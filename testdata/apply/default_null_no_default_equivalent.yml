@@ -1,0 +1,21 @@
+# Equivalence: `x INT DEFAULT NULL` and `x INT` (no DEFAULT clause)
+# must compare equal under the new parser rule (both fold to
+# Default=nil), so switching between the two forms in desired SQL
+# fires no diff.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT,
+      PRIMARY KEY (id)
+  );
+
+applied: ""
+
+verify_no_drift: true

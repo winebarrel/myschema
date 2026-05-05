@@ -157,6 +157,66 @@ CREATE TABLE wide (
 	assert.True(t, full.Stored, "STORED generated column")
 }
 
+// TestParseColumnDefaultNullSkipped pins the parser-side fix for
+// the "TIMESTAMP NULL DEFAULT NULL drift" gap: an explicit
+// `DEFAULT NULL` (vitess hands it back as *sqlparser.NullVal) must
+// fold to Column.Default=nil so the parser side matches the catalog
+// reader, which leaves Default=nil for SQL-NULL COLUMN_DEFAULT.
+// Covers all relevant types since the path is type-agnostic.
+func TestParseColumnDefaultNullSkipped(t *testing.T) {
+	sql := `
+CREATE TABLE t (
+    id INT NOT NULL,
+    ts        TIMESTAMP NULL DEFAULT NULL,
+    x_int     INT       DEFAULT NULL,
+    x_str     VARCHAR(64) DEFAULT NULL,
+    x_dec     DECIMAL(10,2) DEFAULT NULL,
+    x_dt      DATETIME    DEFAULT NULL,
+    PRIMARY KEY (id)
+);`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+
+	for _, col := range []string{"ts", "x_int", "x_str", "x_dec", "x_dt"} {
+		t.Run(col, func(t *testing.T) {
+			c, ok := tbl.Columns.GetOk(col)
+			require.True(t, ok)
+			assert.Nil(t, c.Default, "explicit DEFAULT NULL must fold to nil")
+		})
+	}
+}
+
+// TestParseColumnDefaultLiteralPreserved is the regression guard
+// for the NullVal-skip: literal defaults (numbers, strings, function
+// calls) must continue to round-trip — only the *NullVal case is
+// special-cased.
+func TestParseColumnDefaultLiteralPreserved(t *testing.T) {
+	sql := `
+CREATE TABLE t (
+    id INT NOT NULL,
+    n   INT NOT NULL DEFAULT 0,
+    s   VARCHAR(16) NOT NULL DEFAULT 'pending',
+    ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+
+	n, _ := tbl.Columns.GetOk("n")
+	require.NotNil(t, n.Default)
+	assert.Equal(t, "0", *n.Default)
+
+	s, _ := tbl.Columns.GetOk("s")
+	require.NotNil(t, s.Default)
+	assert.Equal(t, "'pending'", *s.Default)
+
+	ts, _ := tbl.Columns.GetOk("ts")
+	require.NotNil(t, ts.Default)
+	assert.Equal(t, "CURRENT_TIMESTAMP", *ts.Default)
+}
+
 // TestParseSpatialAndFulltextIndex exercises the two index categories that
 // the catalog reader maps via INDEX_TYPE; without them we'd have a regression
 // gap if the catalog renamed those types.

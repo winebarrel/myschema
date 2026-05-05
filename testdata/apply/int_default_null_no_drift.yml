@@ -1,0 +1,21 @@
+# Sibling to timestamp_null_default_null_no_drift: confirms the
+# parser's NullVal-skip fix covers ALL types, not just TIMESTAMP.
+# Pre-fix, any nullable column with an explicit `DEFAULT NULL` had
+# the same drift loop because it's the same NullVal asymmetry path.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: ""
+
+verify_no_drift: true

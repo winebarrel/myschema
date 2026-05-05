@@ -1,0 +1,20 @@
+# Pin dump output for the canonical TIMESTAMP NULL DEFAULT NULL
+# pattern. Catalog stores Default=nil for SQL-NULL COLUMN_DEFAULT,
+# so the model emitter omits the DEFAULT clause entirely. The
+# emitted column is `ts timestamp NULL` (NOT NULL absent → MySQL
+# infers nullable on TIMESTAMP NULL form), which round-trips back
+# to the same model.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      ts TIMESTAMP NULL DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+dump: |
+  -- t
+  CREATE TABLE t (
+      id int NOT NULL,
+      ts timestamp,
+      PRIMARY KEY (id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1,0 +1,24 @@
+# Symmetric to change_default_null_to_literal: a real semantic
+# change from "literal default" to "no default" (the user wrote
+# DEFAULT NULL or just removed the DEFAULT clause — both fold
+# to nil under the new parser rule). MySQL's `MODIFY COLUMN`
+# without a DEFAULT clause keeps the column nullable with
+# implicit NULL default, which matches both desired forms.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE t MODIFY COLUMN x int;
+
+verify_no_drift: true

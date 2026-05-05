@@ -1,0 +1,22 @@
+# Sibling to int_default_null_no_drift: pin a string-typed column,
+# since catalog.normalizeColumnDefault has type-aware paths for
+# VARCHAR / TEXT (the empty-string-to-'' rewrite). Confirm those
+# paths don't accidentally re-introduce the drift for nullable
+# string columns with explicit DEFAULT NULL.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      name VARCHAR(64) DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      name VARCHAR(64) DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: ""
+
+verify_no_drift: true

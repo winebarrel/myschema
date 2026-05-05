@@ -7,15 +7,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Medium — silent diffs / fidelity gaps
 
-- **`TIMESTAMP NULL DEFAULT NULL` round-trip drifts.** Same shape:
-  `verify_no_drift` fails because re-plan repeatedly emits
-  `MODIFY COLUMN ts timestamp DEFAULT null` even though the
-  column already has that default. Likely a normalisation gap
-  between `information_schema.COLUMNS.COLUMN_DEFAULT` (which
-  returns the default in a form the parser doesn't fold back to
-  the same expression) and the desired-side AST. Surfaced
-  while writing the regression-coverage fixtures (PR #58); same
-  treatment as the `NOT ENFORCED` gap above.
 - **View column-alias list (`CREATE VIEW v (a, b) AS …`) changes
   are silent.** `model.View.Cols` is populated on the parser side
   but the catalog reader doesn't fill it: `catalog/views.go` queries
@@ -39,7 +30,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 ## Low — tests / docs / release
 
 - YAML harness extended to parser and diff (currently Go table tests).
-- `README.md` — currently just `# myschema`.
 - `getting-started.md`.
 - `CHANGELOG.md`.
 - Demo asciinema or gif (pistachio-style).

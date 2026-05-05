@@ -1,0 +1,22 @@
+# Pin the diff direction "DEFAULT NULL → DEFAULT 0": the
+# NullVal-skip must not silently swallow a real semantic change
+# from "no default" to "literal default". Diff must still fire
+# `MODIFY COLUMN ... DEFAULT 0`.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT DEFAULT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      x INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE t MODIFY COLUMN x int NOT NULL DEFAULT 0;
+
+verify_no_drift: true
