@@ -137,7 +137,7 @@ CREATE TABLE posts (
 // apply (the regression that motivated this test). MySQL forces
 // NOT NULL on a PK column even when the user wrote just `PRIMARY KEY`,
 // so the column's NotNull flag must also be set — match the table-level
-// behaviour at parser.go:608.
+// behaviour in addIndex's IndexTypePrimary case.
 func TestParseInlineColumnPrimaryKey(t *testing.T) {
 	t.Run("explicit NOT NULL", func(t *testing.T) {
 		sql := `CREATE TABLE t (id INT NOT NULL PRIMARY KEY, name VARCHAR(64));`
@@ -175,8 +175,8 @@ func TestParseInlineColumnPrimaryKey(t *testing.T) {
 // TestParseInlineColumnUnique: `email VARCHAR(255) UNIQUE` and the
 // `UNIQUE KEY` variant should both promote to a UNIQUE Index named
 // after the column (matching MySQL's auto-naming and the table-level
-// path's behaviour at parser.go:617). Without the promotion the
-// constraint silently drops on apply.
+// path's behaviour in addIndex's IndexTypeUnique case). Without the
+// promotion the constraint silently drops on apply.
 func TestParseInlineColumnUnique(t *testing.T) {
 	for _, kw := range []string{"UNIQUE", "UNIQUE KEY"} {
 		t.Run(kw, func(t *testing.T) {

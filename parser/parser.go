@@ -921,13 +921,15 @@ func autoFKName(table, col string) string {
 func applyInlineColumnKey(t *model.Table, colName string, k sqlparser.ColumnKeyOption) error {
 	switch k {
 	case sqlparser.ColKeyPrimary:
-		// Idempotent against a separate table-level PRIMARY KEY:
-		// if both are written, the column-level one wins because
-		// it's processed first; the table-level addIndex pass would
-		// hit the duplicate and the existing PRIMARY KEY equality
-		// check there would let it through. The user-error case
-		// (truly conflicting PK column lists) surfaces at apply
-		// time.
+		// Skip if a table-level PRIMARY KEY was already promoted —
+		// not strictly necessary since addIndex's IndexTypePrimary
+		// case unconditionally overwrites Constraints["PRIMARY"] /
+		// Indexes["PRIMARY"], so a duplicate here would land on the
+		// same end state when the column lists match. The skip just
+		// keeps this branch a no-op for the inline-form-after-
+		// table-level shape (which a parser pass order change could
+		// otherwise expose). Truly conflicting PK column lists are
+		// user error — MySQL rejects them at apply time.
 		if _, ok := t.Constraints.GetOk("PRIMARY"); ok {
 			return nil
 		}
