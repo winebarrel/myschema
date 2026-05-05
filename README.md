@@ -19,6 +19,8 @@ The `dump → edit → plan → apply → re-plan empty` round-trip is
 the core workflow. See [`getting-started.md`](getting-started.md)
 for a ten-minute walkthrough.
 
+<img width="800" src="https://github.com/user-attachments/assets/87c6512b-2a2b-42e5-8774-4a85c4670c90" />
+
 ## Usage
 
 Set the DSN once via env (or pass `--dsn=…` on every command):
