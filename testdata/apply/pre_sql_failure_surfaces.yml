@@ -1,0 +1,15 @@
+# Behavioural pin: invalid pre-SQL must abort apply with the
+# `pre-sql` wrapped error. If pre-SQL were silently skipped, this
+# fixture would pass with an empty `applied` (apply succeeds, no
+# diff to emit), so the `error` field is what keeps the feature
+# honest.
+init: |
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+desired: |
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+pre_sql: |
+  NOT VALID SQL AT ALL
+
+error: pre-sql

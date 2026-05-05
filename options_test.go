@@ -112,6 +112,62 @@ func TestDropPolicyKongParseRejectsUnknownToken(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestPreSQLOptionKongXor pins kong's `xor:"pre-sql"` group on
+// PreSQLOption: passing both --pre-sql and --pre-sql-file at the
+// CLI must fail at parse time, before any client code runs. The
+// runtime check in loadPreSQL covers the programmatic API path
+// (no kong); this test is the matching CLI-level coverage so a
+// future kong-tag typo (e.g. mismatched group names on the two
+// fields) doesn't silently disable the CLI guard.
+func TestPreSQLOptionKongXor(t *testing.T) {
+	var cli struct {
+		myschema.PreSQLOption
+	}
+	parser, err := kong.New(&cli)
+	require.NoError(t, err)
+	_, err = parser.Parse([]string{"--pre-sql=SET @x=1;", "--pre-sql-file=/tmp/whatever.sql"})
+	require.Error(t, err, "kong must reject both --pre-sql and --pre-sql-file")
+}
+
+// TestPreSQLOptionKongAcceptsEither confirms the xor group still
+// allows passing exactly one of the two flags — sanity check so
+// the regression above doesn't accidentally over-restrict.
+func TestPreSQLOptionKongAcceptsEither(t *testing.T) {
+	t.Run("--pre-sql alone", func(t *testing.T) {
+		var cli struct {
+			myschema.PreSQLOption
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"--pre-sql=SET @x=1;"})
+		require.NoError(t, err)
+		assert.Equal(t, "SET @x=1;", cli.PreSQL)
+		assert.Empty(t, cli.PreSQLFile)
+	})
+	t.Run("--pre-sql-file alone", func(t *testing.T) {
+		var cli struct {
+			myschema.PreSQLOption
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"--pre-sql-file=/tmp/whatever.sql"})
+		require.NoError(t, err)
+		assert.Empty(t, cli.PreSQL)
+		assert.Equal(t, "/tmp/whatever.sql", cli.PreSQLFile)
+	})
+	t.Run("neither set", func(t *testing.T) {
+		var cli struct {
+			myschema.PreSQLOption
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{})
+		require.NoError(t, err)
+		assert.Empty(t, cli.PreSQL)
+		assert.Empty(t, cli.PreSQLFile)
+	})
+}
+
 func TestObjectCount(t *testing.T) {
 	c := myschema.ObjectCount{Database: "shop", Tables: 3, Views: 1}
 	assert.Equal(t, "database shop", c.DBLabel())

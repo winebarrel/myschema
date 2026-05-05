@@ -10,6 +10,7 @@ type PlanOptions struct {
 	FilterOptions
 	DropPolicy
 	AlterOption
+	PreSQLOption
 	Files []string `arg:"" help:"Path to the desired schema SQL file(s)."`
 }
 
@@ -26,11 +27,22 @@ func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, e
 	if err != nil {
 		return nil, err
 	}
+	// Validate / load pre-SQL BEFORE connect — same posture as apply
+	// (see apply.go for the rationale).
+	preSQL, err := loadPreSQL(options.PreSQLOption)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close() //nolint:errcheck
+
+	if err := execPreSQL(ctx, conn.Conn, preSQL); err != nil {
+		return nil, err
+	}
 
 	r, err := c.diffAll(ctx, conn.Conn, database, &diffAllOptions{
 		FilterOptions: options.FilterOptions,

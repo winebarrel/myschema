@@ -1,0 +1,19 @@
+# Smoke test for the inline pre-SQL happy path: a valid SET runs on
+# the apply connection without errors. The behavioural pin (does
+# pre-SQL actually execute?) is pre_sql_failure_surfaces.yml below
+# — this fixture only covers the no-error path.
+init: |
+  CREATE TABLE seed (id INT NOT NULL, PRIMARY KEY (id));
+
+desired: |
+  CREATE TABLE seed (id INT NOT NULL, PRIMARY KEY (id));
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+pre_sql: |
+  SET @myschema_pre_sql_test = 'ran';
+
+applied: |
+  CREATE TABLE t (
+      id int NOT NULL,
+      PRIMARY KEY (id)
+  );

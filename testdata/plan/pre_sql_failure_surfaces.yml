@@ -1,0 +1,16 @@
+# Plan-side counterpart of pre_sql_failure_surfaces.yml under
+# testdata/apply: invalid pre-SQL must abort plan with the
+# `pre-sql` wrapped error. Without this pin the plan path could
+# silently skip pre-SQL execution and the fixture would still pass
+# (plan would just return the no-changes diff against the matching
+# init / desired).
+init: |
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+desired: |
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+pre_sql: |
+  NOT VALID SQL AT ALL
+
+error: pre-sql

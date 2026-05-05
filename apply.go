@@ -12,6 +12,7 @@ type ApplyOptions struct {
 	FilterOptions
 	DropPolicy
 	AlterOption
+	PreSQLOption
 	Files []string `arg:"" help:"Path to the desired schema SQL file(s)."`
 }
 
@@ -28,11 +29,24 @@ func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) 
 	if err != nil {
 		return nil, err
 	}
+	// Validate / load pre-SQL BEFORE connect so flag-validation errors
+	// (both flags set, missing file) aren't masked by a downstream
+	// connection failure and so we don't open a DB connection just to
+	// throw it away.
+	preSQL, err := loadPreSQL(options.PreSQLOption)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close() //nolint:errcheck
+
+	if err := execPreSQL(ctx, conn.Conn, preSQL); err != nil {
+		return nil, err
+	}
 
 	r, err := c.diffAll(ctx, conn.Conn, database, &diffAllOptions{
 		FilterOptions: options.FilterOptions,

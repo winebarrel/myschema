@@ -24,6 +24,7 @@ type planTestCase struct {
 	Exclude         []string `yaml:"exclude,omitempty"`
 	AlterAlgorithm  string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
 	AlterLock       string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
+	PreSQL          string   `yaml:"pre_sql,omitempty"`         // SQL run on the connection before the diff (typically session SETs)
 }
 
 func TestPlanYAML(t *testing.T) {
@@ -46,6 +47,9 @@ func TestPlanYAML(t *testing.T) {
 				AlterAlgorithm: tc.AlterAlgorithm,
 				AlterLock:      tc.AlterLock,
 			},
+			PreSQLOption: myschema.PreSQLOption{
+				PreSQL: tc.PreSQL,
+			},
 		})
 
 		if tc.Error != "" {
@@ -66,6 +70,25 @@ func TestPlanYAML(t *testing.T) {
 			"disallowed-drops mismatch",
 		)
 	})
+}
+
+// File-related and programmatic API pre-SQL tests stay in Go; the
+// happy / failure / multi-statement coverage moved to YAML
+// fixtures under testdata/plan/pre_sql_*.yml.
+
+// TestPlan_PreSQLBothSetError pins the runtime mutually-exclusive
+// guard for the programmatic API path (kong's `xor` covers CLI).
+func TestPlan_PreSQLBothSetError(t *testing.T) {
+	c := newClient(t)
+	_, err := c.Plan(context.Background(), &myschema.PlanOptions{
+		Files: []string{writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)},
+		PreSQLOption: myschema.PreSQLOption{
+			PreSQL:     "SET @x = 1;",
+			PreSQLFile: "/tmp/whatever.sql",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
 func TestPlan_BadDSNError(t *testing.T) {

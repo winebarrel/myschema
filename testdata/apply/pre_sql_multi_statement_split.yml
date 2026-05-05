@@ -1,0 +1,21 @@
+# Pin that vitess' SplitStatementToPieces actually cuts the payload
+# on `;` and runs each piece via a separate Exec. The probe: a
+# payload whose FIRST statement is valid and SECOND is invalid; if
+# split happens the error message wraps just the second piece, and
+# apply aborts. If split were skipped, the driver (with
+# MultiStatements disabled) would reject the whole concatenated
+# string with a different error that doesn't reference the second
+# piece.
+init: |
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+desired: |
+  CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));
+
+pre_sql: |
+  SET @a = 1; NOT VALID SQL HERE; SET @b = 2;
+
+# The error string must include the second piece exactly — proves
+# split ran. Substring match against `applyTestCase.Error` is
+# enough because the wrapper is `pre-sql: execute "<piece>": …`.
+error: NOT VALID SQL HERE

@@ -3,6 +3,7 @@ package myschema_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -24,6 +25,7 @@ type applyTestCase struct {
 	Exclude        []string `yaml:"exclude,omitempty"`
 	AlterAlgorithm string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
 	AlterLock      string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
+	PreSQL         string   `yaml:"pre_sql,omitempty"`         // SQL run on the connection before the diff (typically session SETs)
 	VerifyNoDrift  *bool    `yaml:"verify_no_drift,omitempty"` // nil → true; set false to allow follow-up drift
 }
 
@@ -49,6 +51,9 @@ func TestApplyYAML(t *testing.T) {
 			AlterOption: myschema.AlterOption{
 				AlterAlgorithm: tc.AlterAlgorithm,
 				AlterLock:      tc.AlterLock,
+			},
+			PreSQLOption: myschema.PreSQLOption{
+				PreSQL: tc.PreSQL,
 			},
 		}, &buf)
 
@@ -99,6 +104,107 @@ func TestApplyYAML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, strings.TrimSpace(plan.SQL), "drift after apply")
 	})
+}
+
+// File-related pre-SQL tests stay in Go (the YAML harness has no
+// `pre_sql_file` field — adding one would require fixture-relative
+// path handling). Inline-pre-SQL coverage moved to YAML fixtures
+// under testdata/apply/pre_sql_*.yml.
+
+// TestApply_PreSQLFile loads pre-SQL from an on-disk file via
+// os.ReadFile. stdin (`-`) is rejected upstream by loadPreSQL —
+// see TestApply_PreSQLFileStdinRejected for that pin.
+func TestApply_PreSQLFile(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	dir := t.TempDir()
+	preFile := dir + "/pre.sql"
+	require.NoError(t, os.WriteFile(preFile, []byte("SET @myschema_pre_sql_test = 'file';"), 0o600))
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: preFile},
+	}, &buf)
+	require.NoError(t, err)
+}
+
+// TestApply_PreSQLBothSetError pins the runtime mutually-exclusive
+// guard. (kong's `xor:"pre-sql"` tag rejects this at parse time for
+// CLI invocations; the runtime check stays in place to catch
+// programmatic API callers that build options structs directly.)
+func TestApply_PreSQLBothSetError(t *testing.T) {
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
+		Files: []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{
+			PreSQL:     "SET @x = 1;",
+			PreSQLFile: "/tmp/whatever.sql",
+		},
+	}, &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+// TestApply_PreSQLFileMissing pins the file-read error path in
+// loadPreSQL (covered the "happy" --pre-sql-file path above; this
+// one drives the bad-path branch).
+func TestApply_PreSQLFileMissing(t *testing.T) {
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: "/nonexistent/path/to/pre.sql"},
+	}, &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre-sql")
+	assert.Contains(t, err.Error(), "/nonexistent/path/to/pre.sql")
+}
+
+// TestApply_PreSQLEmptyFile: a pre-SQL file that exists but is
+// empty (or whitespace-only) must round-trip to a no-op rather
+// than fail the parser split.
+func TestApply_PreSQLEmptyFile(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, "")
+
+	dir := t.TempDir()
+	preFile := dir + "/empty.sql"
+	require.NoError(t, os.WriteFile(preFile, []byte("   \n  \n"), 0o600))
+
+	c := newClient(t)
+	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	var buf bytes.Buffer
+	_, err := c.Apply(ctx, &myschema.ApplyOptions{
+		Files:        []string{desiredFile},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: preFile},
+	}, &buf)
+	require.NoError(t, err)
+}
+
+// TestApply_PreSQLFileStdinRejected pins the outright rejection of
+// `--pre-sql-file=-` (stdin). The desired-SQL file args already
+// accept `-`; allowing it for pre-SQL too would let both inputs
+// fight over stdin (the second read would hit EOF and silently
+// truncate). Pre-SQL is small enough that --pre-sql / env covers
+// the no-real-file case, so on-disk paths are the only file shape
+// supported.
+func TestApply_PreSQLFileStdinRejected(t *testing.T) {
+	c := newClient(t)
+	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
+		Files:        []string{writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)},
+		PreSQLOption: myschema.PreSQLOption{PreSQLFile: "-"},
+	}, &bytes.Buffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stdin")
 }
 
 func TestApply_BadDSNError(t *testing.T) {
