@@ -562,3 +562,39 @@ CREATE TABLE inv (
 	require.NotNil(t, visible)
 	assert.False(t, visible.Invisible, "non-INVISIBLE column must stay false")
 }
+
+// TestColumnInvisibleComposesWithOnUpdate pins the EXTRA-strip step
+// in loadColumns: an `ON UPDATE CURRENT_TIMESTAMP INVISIBLE` column
+// surfaces in information_schema as
+//
+//	EXTRA = "DEFAULT_GENERATED on update CURRENT_TIMESTAMP INVISIBLE"
+//
+// The naive TrimPrefix("ON UPDATE ") would otherwise drag the
+// trailing INVISIBLE into the OnUpdate value, and the parser side
+// (which sees just `CURRENT_TIMESTAMP`) would diverge — re-plan
+// would loop forever and dump would emit `INVISIBLE INVISIBLE`.
+// Strip the INVISIBLE token *first*, then parse ON UPDATE.
+func TestColumnInvisibleComposesWithOnUpdate(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE comp (
+    id INT NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP INVISIBLE,
+    PRIMARY KEY (id)
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	tbl, _ := tables.GetOk("myschema_test.comp")
+	require.NotNil(t, tbl)
+
+	updated, _ := tbl.Columns.GetOk("updated_at")
+	require.NotNil(t, updated)
+	assert.True(t, updated.Invisible, "INVISIBLE flag must be set")
+	require.NotNil(t, updated.OnUpdate)
+	assert.Equal(t, "CURRENT_TIMESTAMP", *updated.OnUpdate,
+		"OnUpdate must NOT include the trailing INVISIBLE token")
+}

@@ -242,15 +242,18 @@ ORDER  BY ORDINAL_POSITION`
 			col.Default = &d
 		}
 		extraUp := strings.ToUpper(extra)
-		if strings.Contains(extraUp, "AUTO_INCREMENT") {
-			col.AutoIncrement = true
-		}
 		// MySQL 8.0+ surfaces invisible columns as the literal token
-		// `INVISIBLE` in EXTRA. Detect via Contains so we don't trip
-		// on adjacent extras (a column can be both AUTO_INCREMENT and
-		// INVISIBLE simultaneously, though uncommon).
+		// `INVISIBLE` in EXTRA. It can appear *alongside* other extras
+		// (e.g. `DEFAULT_GENERATED on update CURRENT_TIMESTAMP INVISIBLE`),
+		// so detect it first and strip it from the working string —
+		// otherwise the trailing INVISIBLE would leak into the ON UPDATE
+		// TrimPrefix below as part of the expression value.
 		if strings.Contains(extraUp, "INVISIBLE") {
 			col.Invisible = true
+			extraUp = strings.TrimSpace(strings.Replace(extraUp, "INVISIBLE", "", 1))
+		}
+		if strings.Contains(extraUp, "AUTO_INCREMENT") {
+			col.AutoIncrement = true
 		}
 		if strings.Contains(extraUp, "ON UPDATE ") {
 			ou := strings.TrimPrefix(extraUp, "DEFAULT_GENERATED ON UPDATE ")
