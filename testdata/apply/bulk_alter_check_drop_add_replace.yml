@@ -1,0 +1,33 @@
+# Coverage: --bulk-alter folds the same-name DROP CHECK + ADD
+# CONSTRAINT replacement (which fires whenever a CHECK constraint's
+# expression or ENFORCED flag changes — see toggle_check_enforced.yml
+# for the non-bulk baseline) into one multi-spec ALTER. The combined
+# shape is `ALTER TABLE t DROP CHECK x, ADD CONSTRAINT x CHECK (…);`,
+# which MySQL must apply atomically: if the DROP and ADD ran in the
+# wrong relative order MySQL would either reject the duplicate name
+# (ADD before DROP) or be left with no constraint at all (DROP before
+# ADD with an evaluation gap). This fixture pins both that MySQL
+# accepts the combined form and that the round-trip closes.
+
+init: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0) NOT ENFORCED
+  );
+
+desired: |
+  CREATE TABLE products (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE products DROP CHECK chk_price, ADD CONSTRAINT chk_price CHECK (price >= 0);
+
+verify_no_drift: true
