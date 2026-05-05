@@ -1,0 +1,28 @@
+# Coverage: column-level INVISIBLE (MySQL 8.0+) round-trips end-
+# to-end. Pre-fix, vitess parsed the keyword into
+# `cd.Type.Options.Invisible` but `parseColumnDef` ignored it, so a
+# `hidden INT INVISIBLE` desired-side column lost the attribute on
+# parse and the catalog reader (which surfaces it via
+# `information_schema.COLUMNS.EXTRA`) saw a permanent diff against
+# the parser's empty state — drift never closed. Pin the apply +
+# verify_no_drift round-trip so a regression in any of the four
+# wired layers (parser, model, emitter, catalog) re-opens here.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      visible_col INT,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      visible_col INT,
+      hidden_col INT INVISIBLE,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE t ADD COLUMN hidden_col int INVISIBLE AFTER visible_col;
+
+verify_no_drift: true

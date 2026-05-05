@@ -167,7 +167,8 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
 
 - `CREATE TABLE` (columns, PK / UNIQUE / CHECK / FK, secondary indexes,
   inline column-level PK / UNIQUE / REFERENCES, AUTO_INCREMENT, DEFAULT,
-  ON UPDATE, COMMENT, generated columns)
+  ON UPDATE, COMMENT, generated columns, column-level INVISIBLE on
+  MySQL 8.0+)
 - `CREATE INDEX` and `ALTER TABLE … ADD CONSTRAINT` in desired-side SQL
 - `CREATE VIEW` (with optional column-alias list) — emitted as
   `CREATE OR REPLACE VIEW` on apply

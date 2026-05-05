@@ -231,6 +231,43 @@ func TestColumnDefSQLVirtualGenerated(t *testing.T) {
 	assert.Contains(t, out, "GENERATED ALWAYS AS (a + b) VIRTUAL")
 }
 
+// TestColumnDefSQLInvisible: an invisible column emits the
+// `INVISIBLE` keyword; a visible column (default) does not. The
+// keyword sits between AUTO_INCREMENT and COMMENT to match MySQL's
+// SHOW CREATE TABLE order — pinned by index comparison so a future
+// reorder fails this test.
+func TestColumnDefSQLInvisible(t *testing.T) {
+	t.Run("invisible emits INVISIBLE", func(t *testing.T) {
+		c := &model.Column{Name: "x", TypeName: "int", Invisible: true}
+		assert.Contains(t, model.ColumnDefSQL(c), "INVISIBLE")
+	})
+	t.Run("visible (default) emits nothing", func(t *testing.T) {
+		c := &model.Column{Name: "x", TypeName: "int"}
+		assert.NotContains(t, model.ColumnDefSQL(c), "INVISIBLE")
+		assert.NotContains(t, model.ColumnDefSQL(c), "VISIBLE")
+	})
+	t.Run("INVISIBLE sits between AUTO_INCREMENT and COMMENT", func(t *testing.T) {
+		comment := "trace"
+		c := &model.Column{
+			Name:          "id",
+			TypeName:      "bigint",
+			NotNull:       true,
+			AutoIncrement: true,
+			Invisible:     true,
+			Comment:       &comment,
+		}
+		out := model.ColumnDefSQL(c)
+		ai := strings.Index(out, "AUTO_INCREMENT")
+		inv := strings.Index(out, "INVISIBLE")
+		cmt := strings.Index(out, "COMMENT")
+		require.NotEqual(t, -1, ai, "AUTO_INCREMENT must appear")
+		require.NotEqual(t, -1, inv, "INVISIBLE must appear")
+		require.NotEqual(t, -1, cmt, "COMMENT must appear")
+		assert.Less(t, ai, inv, "INVISIBLE must follow AUTO_INCREMENT")
+		assert.Less(t, inv, cmt, "INVISIBLE must precede COMMENT")
+	})
+}
+
 func TestTableFQTN(t *testing.T) {
 	tbl := &model.Table{Database: "shop", Name: "users"}
 	assert.Equal(t, "shop.users", tbl.FQTN())

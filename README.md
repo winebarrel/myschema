@@ -65,9 +65,10 @@ myschema apply --pre-sql 'SET FOREIGN_KEY_CHECKS=0;' desired.sql
 
 ## Features
 
-- Tables, columns, primary / unique / check constraints, foreign
-  keys, secondary indexes (with prefix length, DESC, INVISIBLE),
-  generated columns, partitions (RANGE / LIST / HASH / KEY).
+- Tables, columns (incl. INVISIBLE on MySQL 8.0+), primary /
+  unique / check constraints, foreign keys, secondary indexes
+  (with prefix length, DESC, INVISIBLE), generated columns,
+  partitions (RANGE / LIST / HASH / KEY).
 - Views (`CREATE OR REPLACE` on apply; cross-view dependency
   ordering).
 - `--include` / `--exclude` glob filtering on table and view names.

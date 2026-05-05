@@ -1273,6 +1273,54 @@ func TestParseSQL_UnparseableInputErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestParseColumnInvisible: `col INT INVISIBLE` (MySQL 8.0+) is a
+// column attribute vitess parses into `cd.Type.Options.Invisible`
+// (`*bool`: nil = unspecified, false = VISIBLE, true = INVISIBLE).
+// `parseColumnDef` previously ignored the field and the attribute
+// silently dropped on round-trip. Pin all three vitess states at
+// the parsed-model layer so the nil-vs-false distinction the code
+// relies on (the explicit `opts.Invisible != nil` guard before the
+// dereference) can't quietly regress. Emitter / catalog / diff
+// layers have their own dedicated tests
+// (TestColumnDefSQLInvisible, TestColumnInvisibleRoundTrip,
+// TestColumnEqual/invisible_differs).
+func TestParseColumnInvisible(t *testing.T) {
+	sql := `CREATE TABLE t (
+    id INT NOT NULL,
+    unspec_col INT,
+    visible_col INT VISIBLE,
+    hidden_col INT INVISIBLE,
+    PRIMARY KEY (id)
+);`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	require.NotNil(t, tbl)
+
+	t.Run("INVISIBLE → Invisible=true", func(t *testing.T) {
+		hidden, _ := tbl.Columns.GetOk("hidden_col")
+		require.NotNil(t, hidden)
+		assert.True(t, hidden.Invisible)
+	})
+	t.Run("unspecified → Invisible=false (vitess sets *bool=nil)", func(t *testing.T) {
+		// Pins the `opts.Invisible != nil` branch: we must not
+		// dereference a nil *bool.
+		c, _ := tbl.Columns.GetOk("unspec_col")
+		require.NotNil(t, c)
+		assert.False(t, c.Invisible)
+	})
+	t.Run("explicit VISIBLE → Invisible=false (vitess sets *bool=false)", func(t *testing.T) {
+		// Pins the `*opts.Invisible` false-branch: vitess
+		// distinguishes "unspecified" (nil) from "VISIBLE keyword
+		// written" (false). Both collapse to the model's
+		// Invisible=false default since the round-trip only emits
+		// when Invisible=true.
+		c, _ := tbl.Columns.GetOk("visible_col")
+		require.NotNil(t, c)
+		assert.False(t, c.Invisible)
+	})
+}
+
 // TestParseSQL_PartialDDLSurfacesAsError pins the audit fix for
 // vitess's partial-DDL fallback: by default `Parser.Parse` swallows
 // syntax errors when the parser still has a partial AST handy

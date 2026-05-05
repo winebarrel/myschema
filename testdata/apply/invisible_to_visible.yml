@@ -1,0 +1,26 @@
+# Coverage: reverse toggle of testdata/apply/invisible_column.yml.
+# An INVISIBLE column flipped back to (implicit) VISIBLE produces
+# `MODIFY COLUMN x int` — no INVISIBLE keyword, no explicit VISIBLE.
+# Pin both that the diff fires (catalog Invisible=true vs desired
+# Invisible=false is a real diff) and that the emitter doesn't add a
+# stray VISIBLE (MySQL accepts the bare MODIFY as "make this
+# visible" because VISIBLE is the default).
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      hidden_col INT INVISIBLE,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      hidden_col INT,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  ALTER TABLE t MODIFY COLUMN hidden_col int;
+
+verify_no_drift: true
