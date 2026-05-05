@@ -5,17 +5,67 @@ as plain SQL (`CREATE TABLE` / `CREATE VIEW` / etc.); myschema
 reads the current state from `information_schema`, diffs the two,
 and emits — or applies — the DDL that brings current → desired.
 
-Subcommands: `plan` (preview the DDL), `apply` (run it), `dump`
-(serialize the live schema as SQL).
+```sh
+go install github.com/winebarrel/myschema/cmd/myschema@latest
+
+export MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/app'
+myschema dump > desired.sql       # capture current schema
+$EDITOR desired.sql               # describe the schema you want
+myschema plan desired.sql         # preview the DDL
+myschema apply desired.sql        # run it
+```
+
+The `dump → edit → plan → apply → re-plan empty` round-trip is
+the core workflow. See [`getting-started.md`](getting-started.md)
+for a ten-minute walkthrough.
+
+## Subcommands
+
+- **`plan`** — print the DDL that would converge current → desired,
+  no side effects.
+- **`apply`** — run that DDL against the database.
+- **`dump`** — serialize the live schema as SQL (round-trips with
+  `plan` reporting no changes).
+
+## Features
+
+- Tables, columns, primary / unique / check constraints, foreign
+  keys, secondary indexes (with prefix length, DESC, INVISIBLE),
+  generated columns, partitions (RANGE / LIST / HASH / KEY).
+- Views (`CREATE OR REPLACE` on apply; cross-view dependency
+  ordering).
+- `--include` / `--exclude` glob filtering on table names.
+- `--allow-drop=table,view,column,constraint,foreign_key,index,partition`
+  — destructive ops are opt-in, per category. `all` enables every
+  category at once.
+- `--alter-algorithm=…` / `--alter-lock=…` — inject MySQL online-DDL
+  hints into every generated `ALTER TABLE` / `CREATE INDEX`.
+- `--bulk-alter` — fold consecutive same-table `ALTER TABLE`
+  statements into one multi-spec ALTER.
+- `--pre-sql` / `--pre-sql-file` — run session-level SQL on the
+  connection before the diff (e.g. `SET FOREIGN_KEY_CHECKS=0`).
+- `--split=<dir>` (dump only) — write one SQL file per table / view.
+- Directives in desired SQL: `-- myschema:renamed-from`,
+  `-- myschema:convert-charset`, `-- myschema:execute`.
+
+Every flag has a matching `MYSCHEMA_*` env var.
 
 ## Requirements
 
-- **MySQL 8.0+** — the catalog reader uses
+- **MySQL 8.0+.** The catalog reader uses
   `information_schema.CHECK_CONSTRAINTS` (8.0.16+),
-  `STATISTICS.IS_VISIBLE` (8.0+), and emits `ALTER TABLE … RENAME
-  COLUMN` (8.0+). MySQL 5.7 is not supported.
+  `STATISTICS.IS_VISIBLE` (8.0+), and emits
+  `ALTER TABLE … RENAME COLUMN` (8.0+). MySQL 5.7 isn't supported.
 - Go 1.26+ to build from source.
 
-See `AGENTS.md` (developer guide), `CAVEATS.md` (operational rules
-and known sharp edges), and `PARTITIONING.md` (partition-diff
-scope and limits) for details.
+## Documentation
+
+- [`getting-started.md`](getting-started.md) — install, first DSN,
+  dump → plan → apply round-trip, common flags, directives.
+- [`AGENTS.md`](AGENTS.md) — developer guide: feature surface,
+  parser quirks, diff invariants, layout. Read before sending a PR.
+- [`CAVEATS.md`](CAVEATS.md) — operational rules, sharp edges,
+  what myschema deliberately doesn't manage (triggers, routines,
+  events, sequences).
+- [`PARTITIONING.md`](PARTITIONING.md) — partition-diff scope and
+  limits.
