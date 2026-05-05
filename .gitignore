@@ -34,4 +34,6 @@ go.work.sum
 # Project-local
 /myschema
 /*.sql
+*.bak
+demo.gif
 .DS_Store
