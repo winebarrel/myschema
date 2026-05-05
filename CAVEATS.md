@@ -160,6 +160,54 @@ parent table exists with the required columns / unique key
 *before* any plan that references it lands. Use `dump` to
 verify the child-side FK survived the round trip.
 
+## Bulk-alter does not combine FK operations
+
+**Behaviour.** `--bulk-alter` (default off) folds *consecutive*
+same-table single-spec `ALTER TABLE` statements into one multi-spec
+ALTER. ADD / DROP FOREIGN KEY are intentionally left out of the
+combinable set — even when they target the same table that just had
+columns added — and surface as their own separate `ALTER TABLE …
+ADD CONSTRAINT …` / `… DROP FOREIGN KEY …` statements.
+
+**Why.** myschema's diff pipeline keeps FK ops in two dedicated
+buckets (`FKDropStmts`, `FKAddStmts`) and orders them as
+`FK drops → table changes → FK adds`. The order is load-bearing:
+
+- An FK that points at a brand-new table only exists once that
+  parent's `CREATE TABLE` has run, so all FK adds must run *after*
+  every other table change in the plan.
+- An FK pointing at a column being dropped or renamed must be
+  dropped *before* the parent column changes, so all FK drops
+  must run *before* every other table change.
+
+If `--bulk-alter` mixed FK ops into the column-change bucket, the
+combined `ALTER TABLE child ADD COLUMN …, ADD CONSTRAINT fk_parent
+…` would run *during* the table-change phase, not *after* the FK-add
+phase — silently breaking the cross-table ordering invariant. By the
+time MySQL rejected it (or worse, accepted it in the wrong order
+because the parent happened to already exist) the bug would only
+surface when a plan actually had a brand-new parent table to
+reference.
+
+The two-statement output is the cost of keeping the ordering safe.
+Same-table column / index / constraint changes still combine — only
+FK operations stay separate.
+
+**What myschema also does NOT combine** (each acts as a run
+separator under `--bulk-alter`):
+
+- Partition operations (`REORGANIZE PARTITION`, `ADD PARTITION`,
+  `DROP PARTITION`, `COALESCE PARTITION`, `TRUNCATE PARTITION`,
+  `EXCHANGE PARTITION`). MySQL's grammar rejects the trailing-comma
+  multi-spec form for these clauses (the comma after `INTO (…)` or
+  the partition list parses as a new partition definition); the
+  combiner detects the keyword via the same `partitionOpInsertPos`
+  helper `--alter-algorithm` uses for the same reason.
+- Standalone `CREATE INDEX … ON t (…)` statements. These come from
+  `CREATE INDEX` lines in desired SQL (or from secondary-index adds
+  on brand-new tables); they aren't `ALTER TABLE` at all.
+- `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`.
+
 ## Integer display widths drift; type-name casing doesn't
 
 **Display widths.** Writing `INT(11)`, `BIGINT(20)`, `TINYINT(4)`,

@@ -190,6 +190,22 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   for ALTER TABLE, space for CREATE INDEX) so the user only supplies
   the value (`INPLACE`, `NONE`, …); MySQL rejects unsupported
   combinations at apply time, so CI catches non-online migrations.
+- `--bulk-alter` (and matching `MYSCHEMA_BULK_ALTER` env var) folds
+  *consecutive* same-table single-spec `ALTER TABLE` statements into
+  one multi-spec ALTER. Default off, opt-in. Combinable: ADD / MODIFY
+  / DROP COLUMN, ADD / DROP INDEX (when emitted as `ALTER TABLE … ADD
+  KEY`), ADD / DROP CONSTRAINT (PK / CHECK), DEFAULT CHARSET /
+  COLLATE, COMMENT — anything whose syntactic shape is `ALTER TABLE
+  <ident> <single-spec>;`. Excluded (each acts as a run separator):
+  FK ops (kept in their own `FKAddStmts` / `FKDropStmts` buckets so
+  cross-table ordering survives), partition ops (REORGANIZE / ADD /
+  DROP / COALESCE / TRUNCATE / EXCHANGE PARTITION — MySQL's grammar
+  rejects the trailing-comma multi-spec form for these clauses),
+  standalone `CREATE INDEX` (different statement shape), and
+  CREATE / DROP / RENAME TABLE. The combiner is order-preserving —
+  it never reorders, so the diff's own ordering invariants are not at
+  risk. See CAVEATS.md "Bulk-alter does not combine FK operations"
+  for the FK rationale.
 - `--pre-sql` / `--pre-sql-file` (and matching `MYSCHEMA_PRE_SQL` /
   `MYSCHEMA_PRE_SQL_FILE` env vars) for plan and apply: SQL
   statement(s) to run on the connection right after connect() and

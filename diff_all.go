@@ -64,11 +64,21 @@ func (c *Client) diffAll(ctx context.Context, conn *sql.Conn, database string, o
 	// Table renames must precede FK drops because the same combined
 	// migration may target the table under its new name (the rename goes
 	// first, then anything that ALTERs the new-named table).
+	// --bulk-alter folds consecutive same-table ALTERs in the
+	// table-change bucket only. Run BEFORE the buckets are merged
+	// so the FK buckets (which keep separate ordering) and the
+	// view / rename / drop buckets are not at risk. The combiner is
+	// itself a no-op when --bulk-alter is unset.
+	tableStmts := tableDiff.Stmts
+	if options.BulkAlter {
+		tableStmts = combineSameTableAlters(tableStmts)
+	}
+
 	var stmts []string
 	stmts = append(stmts, viewDiff.DropStmts...)
 	stmts = append(stmts, tableDiff.RenameStmts...)
 	stmts = append(stmts, tableDiff.FKDropStmts...)
-	stmts = append(stmts, tableDiff.Stmts...)
+	stmts = append(stmts, tableStmts...)
 	stmts = append(stmts, tableDiff.DropStmts...)
 	stmts = append(stmts, tableDiff.FKAddStmts...)
 	stmts = append(stmts, viewDiff.CreateStmts...)
