@@ -366,7 +366,10 @@ func TestExtractInlineRenamesForeignKey(t *testing.T) {
 // CREATE TABLE body. Each kind must route to its own bucket
 // without competing — a regression in the line-classifier (e.g.
 // dropping the leading-CONSTRAINT recognition) would surface here
-// as one of the buckets being empty or misrouted.
+// as one of the buckets being empty or misrouted. Length checks
+// also pin "exactly one" per bucket, so a duplicating bug
+// (directive routed to its own bucket *and* an unrelated one)
+// fails the test.
 func TestExtractInlineRenamesAllKindsInOneTable(t *testing.T) {
 	got := parser.ExtractInlineRenames(`CREATE TABLE posts (
     id BIGINT NOT NULL,
@@ -385,15 +388,19 @@ func TestExtractInlineRenamesAllKindsInOneTable(t *testing.T) {
 	assert.Equal(t, "old_idx", got.Indexes["idx_user"])
 	assert.Equal(t, "old_fk", got.ForeignKeys["fk_user"])
 	assert.Equal(t, "old_chk", got.Constraints["chk_user"])
+	assert.Len(t, got.Columns, 1, "no extra column entries")
+	assert.Len(t, got.Indexes, 1, "no extra index entries")
+	assert.Len(t, got.ForeignKeys, 1, "no extra FK entries")
+	assert.Len(t, got.Constraints, 1, "no extra constraint entries")
 	assert.Empty(t, got.Unsupported)
 }
 
 // TestExtractInlineRenamesColumnAndIndexShareName: a column named
-// `email` AND an index named `email` (e.g. UNIQUE KEY auto-named
-// after its first column) can both carry rename directives. The
-// classifier must route each to its own bucket so the column
-// doesn't claim the index's directive (or vice versa) when their
-// names happen to collide.
+// `email` AND an index also named `email` (the user spelled the
+// index name explicitly here — `UNIQUE KEY email (email)`) can
+// both carry rename directives. The classifier must route each to
+// its own bucket so the column doesn't claim the index's directive
+// (or vice versa) when their names happen to collide.
 func TestExtractInlineRenamesColumnAndIndexShareName(t *testing.T) {
 	got := parser.ExtractInlineRenames(`CREATE TABLE users (
     id BIGINT NOT NULL,
