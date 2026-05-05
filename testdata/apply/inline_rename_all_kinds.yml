@@ -1,0 +1,62 @@
+# Pins inline `-- myschema:renamed-from` directives across all
+# four supported kinds in one CREATE TABLE: column, index, FK,
+# CHECK constraint. Each directive must route to its own bucket
+# (Columns / Indexes / ForeignKeys / Constraints) so a
+# KEY-named-after-its-column doesn't compete for the column
+# rename's directive, and so on.
+#
+# Caveat: the CHECK references `id` (not the renamed `user_id`)
+# because MySQL refuses to RENAME COLUMN that's referenced by an
+# active CHECK constraint, and the diff layer's pass-order
+# currently emits the column rename before the CHECK drop. See
+# TODO.md "CHECK referencing renamed column blocks rename" for
+# the open case.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      old_user_id BIGINT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      KEY old_idx (old_user_id),
+      CONSTRAINT old_fk FOREIGN KEY (old_user_id) REFERENCES users (id),
+      CONSTRAINT old_chk CHECK (id > 0)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_user_id
+      user_id BIGINT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from old_idx
+      KEY idx_user (user_id),
+      -- myschema:renamed-from old_fk
+      CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users (id),
+      -- myschema:renamed-from old_chk
+      CONSTRAINT chk_id CHECK (id > 0)
+  );
+
+allow_drop:
+  - all
+
+applied: |
+  ALTER TABLE posts DROP FOREIGN KEY old_fk;
+  ALTER TABLE posts RENAME COLUMN old_user_id TO user_id;
+  ALTER TABLE posts RENAME INDEX old_idx TO idx_user;
+  ALTER TABLE posts DROP CHECK old_chk;
+  ALTER TABLE posts ADD CONSTRAINT chk_id CHECK (id > 0);
+  ALTER TABLE posts ADD CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id);
+
+verify_no_drift: true
