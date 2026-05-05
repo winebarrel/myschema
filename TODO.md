@@ -56,6 +56,32 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   table-level item above but for compressed indexes. Found
   during the PR #81 audit.
 
+- **Inline column-level `REFERENCES` auto-names the FK as
+  `<table>_ibfk_<col>` but MySQL auto-names it `<table>_ibfk_<n>`
+  (numeric).** Parser-side `posts_ibfk_user_id` vs catalog-side
+  `posts_ibfk_1` for `user_id BIGINT REFERENCES users(id)` —
+  every plan emits a redundant `ALTER TABLE posts ADD CONSTRAINT
+  posts_ibfk_user_id …`. Workaround: write the FK explicitly as
+  `CONSTRAINT fk_<name> FOREIGN KEY (...) REFERENCES …` and the
+  names align. Fix options: (a) parser auto-naming matches
+  MySQL's numeric scheme (fragile — need next free number), (b)
+  catalog reader recognises the `_ibfk_<n>` pattern and rewrites
+  to match parser's column-shaped naming, (c) docs recommend
+  always-explicit FK names. Found during the kitchen-sink fixture
+  work for the test-coverage audit.
+
+- **Generated-column expression drifts when the body references a
+  vitess-keyword identifier.** `GENERATED ALWAYS AS (CONCAT(email,
+  ' ', name)) STORED` round-trips as
+  ``CONCAT(email, ' ', `name`)`` because vitess `String()` on a
+  `ColName` back-ticks any identifier in its keyword list (`name`
+  is one). Catalog stores the back-ticked form via SHOW CREATE
+  TABLE, parser doesn't, so re-plan emits a no-op `MODIFY COLUMN`
+  every time. Workaround: rename the column to a non-keyword
+  identifier. Fix: normalise expression bodies through one
+  formatter on both sides (or strip uniformly-safe back-ticks
+  before compare). Found during the kitchen-sink fixture work.
+
 ## Medium — test coverage audit
 
 The PR #84 review caught a real bug (catalog `loadColumns` leaked the

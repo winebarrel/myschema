@@ -1,0 +1,27 @@
+# Pins the error path of `applyColumnRenames`'s collision check.
+# Catalog has both `old_name` and `name`; desired says
+# "renamed-from old_name → name" but a separate `name` column
+# already exists. Renaming would collide; the parser/diff layer
+# refuses and surfaces a clear error rather than silently
+# clobbering one of the two columns.
+#
+# This case can happen if a user pulls a desired-side schema from
+# an old branch where the target column was added later than the
+# rename source. Without the guard the rename pass would
+# delete-then-rename and lose the destination column's data.
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL PRIMARY KEY,
+      old_name VARCHAR(64),
+      name VARCHAR(64)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL PRIMARY KEY,
+      -- myschema:renamed-from old_name
+      name VARCHAR(64)
+  );
+
+error: "destination already exists"
