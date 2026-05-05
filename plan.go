@@ -27,13 +27,20 @@ func (c *Client) Plan(ctx context.Context, options *PlanOptions) (*PlanResult, e
 	if err != nil {
 		return nil, err
 	}
+	// Validate / load pre-SQL BEFORE connect — same posture as apply
+	// (see apply.go for the rationale).
+	preSQL, err := loadPreSQL(options.PreSQLOption)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close() //nolint:errcheck
 
-	if err := runPreSQL(ctx, conn.Conn, options.PreSQLOption); err != nil {
+	if err := execPreSQL(ctx, conn.Conn, preSQL); err != nil {
 		return nil, err
 	}
 

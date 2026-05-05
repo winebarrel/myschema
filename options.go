@@ -81,8 +81,12 @@ type AlterOption struct {
 // against the same connection. dump does NOT run pre-SQL — it's
 // read-only and pre-SQL's typical use is DDL session setup.
 type PreSQLOption struct {
-	PreSQL     string `env:"MYSCHEMA_PRE_SQL" help:"SQL statement(s) to run on the connection before plan / apply (typically session SETs). Multi-statement input is split on ';'. Mutually exclusive with --pre-sql-file."`
-	PreSQLFile string `env:"MYSCHEMA_PRE_SQL_FILE" help:"Path to a file with SQL statement(s) to run on the connection before plan / apply. Mutually exclusive with --pre-sql."`
+	// kong's `xor` group rejects the both-set case at parse time
+	// before our code sees it. The runtime check in loadPreSQL
+	// stays in place to cover programmatic API callers (Apply /
+	// Plan invoked from Go without going through kong).
+	PreSQL     string `xor:"pre-sql" env:"MYSCHEMA_PRE_SQL" help:"SQL statement(s) to run on the connection before plan / apply (typically session SETs). Multi-statement input is split on ';'. Mutually exclusive with --pre-sql-file."`
+	PreSQLFile string `xor:"pre-sql" env:"MYSCHEMA_PRE_SQL_FILE" help:"Path to a file with SQL statement(s) to run on the connection before plan / apply. Mutually exclusive with --pre-sql."`
 }
 
 // DropPolicy decides which DROP categories the diff is allowed to emit.

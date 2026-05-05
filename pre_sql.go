@@ -4,28 +4,60 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
+
+	"github.com/winebarrel/myschema/parser"
 )
 
-// runPreSQL executes the pre-SQL payload (inline string or file)
-// against conn before the caller does any other work. Both sources
-// are mutually exclusive and the function fails early on conflict.
-// Empty payload is a no-op. Multi-statement payloads are split via
-// vitess' SplitStatementToPieces (same splitter as the parser uses
-// for desired SQL) so a chain like
+// loadPreSQL resolves and validates the pre-SQL payload from
+// --pre-sql / --pre-sql-file. It returns the raw SQL text (or empty
+// when nothing is configured) without contacting MySQL — apply / plan
+// call this BEFORE connect() so flag-validation errors aren't masked
+// by a downstream connection failure (and the client doesn't open a
+// DB connection just to find out the user passed both flags).
+//
+// `--pre-sql` and `--pre-sql-file` are mutually exclusive — keeps the
+// precedence rule trivial. Whitespace-only values are treated as
+// not-set so `MYSCHEMA_PRE_SQL=` (empty / whitespace) doesn't trip the
+// mutually-exclusive check against a legitimate --pre-sql-file.
+//
+// File reads go through parser.ReadSQLFile so `--pre-sql-file=-`
+// reads from stdin, matching the convention the desired-SQL file
+// args already use.
+func loadPreSQL(opt PreSQLOption) (string, error) {
+	preSQL := strings.TrimSpace(opt.PreSQL)
+	preFile := strings.TrimSpace(opt.PreSQLFile)
+	if preSQL != "" && preFile != "" {
+		return "", fmt.Errorf("pre-sql: --pre-sql and --pre-sql-file are mutually exclusive (got both)")
+	}
+	if preSQL != "" {
+		return preSQL, nil
+	}
+	if preFile != "" {
+		data, err := parser.ReadSQLFile(preFile)
+		if err != nil {
+			return "", fmt.Errorf("pre-sql: read %s: %w", preFile, err)
+		}
+		return data, nil
+	}
+	return "", nil
+}
+
+// execPreSQL runs the pre-SQL text against conn. The caller is
+// expected to have validated/loaded the payload via loadPreSQL
+// before opening the connection. Empty payload is a no-op.
+//
+// Multi-statement payloads are split via vitess'
+// SplitStatementToPieces (same splitter parser/parser.go uses for
+// desired SQL) so a chain like
 // `SET FOREIGN_KEY_CHECKS=0; SET sql_mode=<empty>` runs as two
 // Exec calls in order. Splitting via vitess (rather than naive
 // strings.Split on `;`) is what keeps `;` inside string literals
 // from breaking the chain.
-func runPreSQL(ctx context.Context, conn *sql.Conn, opt PreSQLOption) error {
-	sqlText, err := loadPreSQL(opt)
-	if err != nil {
-		return err
-	}
-	if sqlText == "" {
+func execPreSQL(ctx context.Context, conn *sql.Conn, sqlText string) error {
+	if strings.TrimSpace(sqlText) == "" {
 		return nil
 	}
 	p, err := sqlparser.New(sqlparser.Options{})
@@ -46,24 +78,4 @@ func runPreSQL(ctx context.Context, conn *sql.Conn, opt PreSQLOption) error {
 		}
 	}
 	return nil
-}
-
-// loadPreSQL resolves the payload from --pre-sql / --pre-sql-file,
-// rejecting the both-set case with a clear "mutually exclusive"
-// error so the user doesn't have to guess which one wins.
-func loadPreSQL(opt PreSQLOption) (string, error) {
-	if opt.PreSQL != "" && opt.PreSQLFile != "" {
-		return "", fmt.Errorf("pre-sql: --pre-sql and --pre-sql-file are mutually exclusive (got both)")
-	}
-	if opt.PreSQL != "" {
-		return opt.PreSQL, nil
-	}
-	if opt.PreSQLFile != "" {
-		data, err := os.ReadFile(opt.PreSQLFile)
-		if err != nil {
-			return "", fmt.Errorf("pre-sql: read %s: %w", opt.PreSQLFile, err)
-		}
-		return string(data), nil
-	}
-	return "", nil
 }

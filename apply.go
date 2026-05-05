@@ -29,13 +29,22 @@ func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) 
 	if err != nil {
 		return nil, err
 	}
+	// Validate / load pre-SQL BEFORE connect so flag-validation errors
+	// (both flags set, missing file) aren't masked by a downstream
+	// connection failure and so we don't open a DB connection just to
+	// throw it away.
+	preSQL, err := loadPreSQL(options.PreSQLOption)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close() //nolint:errcheck
 
-	if err := runPreSQL(ctx, conn.Conn, options.PreSQLOption); err != nil {
+	if err := execPreSQL(ctx, conn.Conn, preSQL); err != nil {
 		return nil, err
 	}
 

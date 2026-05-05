@@ -24,6 +24,7 @@ type planTestCase struct {
 	Exclude         []string `yaml:"exclude,omitempty"`
 	AlterAlgorithm  string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
 	AlterLock       string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
+	PreSQL          string   `yaml:"pre_sql,omitempty"`         // SQL run on the connection before the diff (typically session SETs)
 }
 
 func TestPlanYAML(t *testing.T) {
@@ -45,6 +46,9 @@ func TestPlanYAML(t *testing.T) {
 			AlterOption: myschema.AlterOption{
 				AlterAlgorithm: tc.AlterAlgorithm,
 				AlterLock:      tc.AlterLock,
+			},
+			PreSQLOption: myschema.PreSQLOption{
+				PreSQL: tc.PreSQL,
 			},
 		})
 
@@ -68,24 +72,12 @@ func TestPlanYAML(t *testing.T) {
 	})
 }
 
-// TestPlan_PreSQLString confirms pre-SQL also runs for plan (even
-// though plan is read-only, session-level SET must be visible
-// during catalog read for parity with apply — e.g. setting
-// `explicit_defaults_for_timestamp` would change how a TIMESTAMP
-// column gets interpreted).
-func TestPlan_PreSQLString(t *testing.T) {
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, "")
+// File-related and programmatic API pre-SQL tests stay in Go; the
+// happy / failure / multi-statement coverage moved to YAML
+// fixtures under testdata/plan/pre_sql_*.yml.
 
-	c := newClient(t)
-	_, err := c.Plan(ctx, &myschema.PlanOptions{
-		Files:        []string{writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)},
-		PreSQLOption: myschema.PreSQLOption{PreSQL: "SET @myschema_pre_sql_test = 'plan';"},
-	})
-	require.NoError(t, err)
-}
-
+// TestPlan_PreSQLBothSetError pins the runtime mutually-exclusive
+// guard for the programmatic API path (kong's `xor` covers CLI).
 func TestPlan_PreSQLBothSetError(t *testing.T) {
 	c := newClient(t)
 	_, err := c.Plan(context.Background(), &myschema.PlanOptions{

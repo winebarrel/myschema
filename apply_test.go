@@ -25,6 +25,7 @@ type applyTestCase struct {
 	Exclude        []string `yaml:"exclude,omitempty"`
 	AlterAlgorithm string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
 	AlterLock      string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
+	PreSQL         string   `yaml:"pre_sql,omitempty"`         // SQL run on the connection before the diff (typically session SETs)
 	VerifyNoDrift  *bool    `yaml:"verify_no_drift,omitempty"` // nil → true; set false to allow follow-up drift
 }
 
@@ -50,6 +51,9 @@ func TestApplyYAML(t *testing.T) {
 			AlterOption: myschema.AlterOption{
 				AlterAlgorithm: tc.AlterAlgorithm,
 				AlterLock:      tc.AlterLock,
+			},
+			PreSQLOption: myschema.PreSQLOption{
+				PreSQL: tc.PreSQL,
 			},
 		}, &buf)
 
@@ -102,31 +106,14 @@ func TestApplyYAML(t *testing.T) {
 	})
 }
 
-// TestApply_PreSQLString runs the inline pre-SQL once before the
-// diff. Any SET that affects the DDL must be visible during apply
-// — verify by setting `foreign_key_checks=0` and running an apply
-// that adds an FK whose parent table is referenced cross-table.
-// Without the pre-SQL the apply would still succeed (FK ordering is
-// already handled), so we use a more direct probe: exec a sentinel
-// SET in pre-SQL, then read it back via a follow-up SELECT after
-// apply completes.
-func TestApply_PreSQLString(t *testing.T) {
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, "")
+// File-related pre-SQL tests stay in Go (the YAML harness has no
+// `pre_sql_file` field — adding one would require fixture-relative
+// path handling). Inline-pre-SQL coverage moved to YAML fixtures
+// under testdata/apply/pre_sql_*.yml.
 
-	c := newClient(t)
-	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
-	var buf bytes.Buffer
-	_, err := c.Apply(ctx, &myschema.ApplyOptions{
-		Files:        []string{desiredFile},
-		PreSQLOption: myschema.PreSQLOption{PreSQL: "SET @myschema_pre_sql_test = 'ran';"},
-	}, &buf)
-	require.NoError(t, err)
-}
-
-// TestApply_PreSQLFile loads pre-SQL from a file path. Same shape as
-// PreSQLString but goes through ReadSQLFile.
+// TestApply_PreSQLFile loads pre-SQL from a file path through
+// parser.ReadSQLFile (so `-` for stdin works too in principle, not
+// exercised here).
 func TestApply_PreSQLFile(t *testing.T) {
 	ctx := context.Background()
 	conn := testutil.ConnectDB(t)
@@ -146,8 +133,10 @@ func TestApply_PreSQLFile(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestApply_PreSQLBothSetError pins the mutually-exclusive contract:
-// the user can pass --pre-sql OR --pre-sql-file but not both.
+// TestApply_PreSQLBothSetError pins the runtime mutually-exclusive
+// guard. (kong's `xor:"pre-sql"` tag rejects this at parse time for
+// CLI invocations; the runtime check stays in place to catch
+// programmatic API callers that build options structs directly.)
 func TestApply_PreSQLBothSetError(t *testing.T) {
 	c := newClient(t)
 	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
@@ -161,71 +150,6 @@ func TestApply_PreSQLBothSetError(t *testing.T) {
 	}, &buf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
-}
-
-// TestApply_PreSQLAppliesToSession proves the pre-SQL actually
-// runs on the same connection that diff/apply use, not on a side
-// channel. Issue a SET that changes a session variable, run apply,
-// and read back the variable on the same connection — without
-// pre-SQL the read would return NULL. This is the strongest
-// behavioural pin for the feature.
-func TestApply_PreSQLAppliesToSession(t *testing.T) {
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, "")
-
-	c := newClient(t)
-	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
-	var buf bytes.Buffer
-	_, err := c.Apply(ctx, &myschema.ApplyOptions{
-		Files:        []string{desiredFile},
-		PreSQLOption: myschema.PreSQLOption{PreSQL: "SET autocommit = 0;"},
-	}, &buf)
-	require.NoError(t, err)
-	// Probe via fresh connection: this only confirms the SET didn't
-	// blow up; the in-process connection that ran it is closed by
-	// Apply's defer. The follow-up queries below cover multi-stmt
-	// and the through-the-API behaviour.
-}
-
-// TestApply_PreSQLMultiStatement: vitess SplitStatementToPieces
-// cuts the payload on `;` and runs each in order. Without the
-// split a multi-statement Exec would fail (MultiStatements is
-// disabled in client.go on purpose).
-func TestApply_PreSQLMultiStatement(t *testing.T) {
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, "")
-
-	c := newClient(t)
-	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
-	var buf bytes.Buffer
-	_, err := c.Apply(ctx, &myschema.ApplyOptions{
-		Files: []string{desiredFile},
-		PreSQLOption: myschema.PreSQLOption{
-			PreSQL: "SET @a = 1; SET @b = 2; SET @c = 3;",
-		},
-	}, &buf)
-	require.NoError(t, err, "three SETs in one payload must run sequentially")
-}
-
-// TestApply_PreSQLNothingSet (no pre-sql at all) must still work —
-// the runPreSQL helper short-circuits on empty payload. Pins the
-// "no-op" path explicitly even though every other test in the suite
-// also exercises it incidentally.
-func TestApply_PreSQLNothingSet(t *testing.T) {
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, "")
-
-	c := newClient(t)
-	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
-	var buf bytes.Buffer
-	_, err := c.Apply(ctx, &myschema.ApplyOptions{
-		Files: []string{desiredFile},
-		// PreSQLOption omitted intentionally.
-	}, &buf)
-	require.NoError(t, err)
 }
 
 // TestApply_PreSQLFileMissing pins the file-read error path in
@@ -264,25 +188,6 @@ func TestApply_PreSQLEmptyFile(t *testing.T) {
 		PreSQLOption: myschema.PreSQLOption{PreSQLFile: preFile},
 	}, &buf)
 	require.NoError(t, err)
-}
-
-// TestApply_PreSQLFailureSurfaces pins error wrapping when the
-// pre-SQL itself fails (invalid statement). The whole apply must
-// abort before touching the schema.
-func TestApply_PreSQLFailureSurfaces(t *testing.T) {
-	ctx := context.Background()
-	conn := testutil.ConnectDB(t)
-	testutil.SetupDB(t, ctx, conn, "")
-
-	c := newClient(t)
-	desiredFile := writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
-	var buf bytes.Buffer
-	_, err := c.Apply(ctx, &myschema.ApplyOptions{
-		Files:        []string{desiredFile},
-		PreSQLOption: myschema.PreSQLOption{PreSQL: "NOT VALID SQL AT ALL"},
-	}, &buf)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "pre-sql")
 }
 
 func TestApply_BadDSNError(t *testing.T) {
