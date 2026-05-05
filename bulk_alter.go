@@ -17,6 +17,16 @@ import "strings"
 //   - Partition ops (REORGANIZE / ADD / DROP / COALESCE / TRUNCATE /
 //     EXCHANGE PARTITION) — MySQL's grammar rejects the trailing-comma
 //     multi-spec form for these clauses; detected via partitionOpInsertPos.
+//   - `RENAME COLUMN` / `RENAME INDEX` — within one ALTER, MySQL
+//     resolves spec-target identifiers (`MODIFY COLUMN <name>`,
+//     `DROP INDEX <name>`, …) against the *original* table state,
+//     so a follow-on spec referring to the renamed object by its
+//     new name fails with `Error 1054 Unknown column …` /
+//     similar. Combine would silently break the round-trip; keep
+//     RENAME COLUMN / RENAME INDEX as their own ALTERs.
+//     (`RENAME TO <table>` is in `RenameStmts` not `Stmts`, so the
+//     check here is for the column / index variants reaching this
+//     bucket.)
 //   - Standalone `CREATE INDEX` — different statement shape; the diff
 //     layer emits it as its own statement so it can carry the
 //     CREATE-INDEX flavour of `--alter-algorithm` / `--alter-lock`.
@@ -97,7 +107,10 @@ func combineSameTableAlters(stmts []string) []string {
 //
 //   - stmt isn't `ALTER TABLE …` (case-insensitive prefix);
 //   - the spec body is empty;
-//   - the spec is a partition op (detected via partitionOpInsertPos).
+//   - the spec is a partition op (detected via partitionOpInsertPos);
+//   - the spec starts with `RENAME COLUMN` or `RENAME INDEX` — see
+//     combineSameTableAlters' doc comment for the MySQL evaluation-
+//     order trap that motivates the exclusion.
 //
 // Identifier parsing reuses skipQualifiedIdentifier, so a `db.table`
 // chain or back-ticked identifier is handled exactly the same way as
@@ -129,6 +142,9 @@ func splitCombinableAlter(stmt string) (ident, spec string, hasSemi bool, ok boo
 	pos = skipASCIIWhitespace(s, pos)
 	specBody := strings.TrimSpace(s[pos:])
 	if specBody == "" {
+		return "", "", false, false
+	}
+	if hasPrefixFold(specBody, 0, "RENAME COLUMN ") || hasPrefixFold(specBody, 0, "RENAME INDEX ") {
 		return "", "", false, false
 	}
 	return s[identStart:identEnd], specBody, hasSemi, true

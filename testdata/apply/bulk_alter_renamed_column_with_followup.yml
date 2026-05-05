@@ -1,12 +1,14 @@
-# Coverage: --bulk-alter folds RENAME COLUMN into a multi-spec ALTER
-# alongside other same-table changes. The diff layer rewrites column
-# refs (FK Columns, FK RefCols, PK columns, index parts) when a column
-# is renamed, but a multi-spec `ALTER TABLE … RENAME COLUMN a TO b,
-# ADD COLUMN c …;` puts MySQL in charge of the within-statement
-# evaluation order. This fixture pins that:
-#   - the combined ALTER applies cleanly (MySQL accepts RENAME COLUMN
-#     followed by ADD COLUMN in one alter_specifications list),
-#   - and the round-trip closes (verify_no_drift: true).
+# Coverage: --bulk-alter does NOT fold RENAME COLUMN with surrounding
+# same-table specs. Within one ALTER, MySQL resolves spec-target
+# identifiers (`MODIFY COLUMN <name>`, `DROP INDEX <name>`, …) against
+# the *original* table state — so a follow-on spec referring to the
+# renamed object by its new name would fail with `Error 1054 Unknown
+# column …`. To stay safe, splitCombinableAlter rejects any spec
+# starting with `RENAME COLUMN` / `RENAME INDEX`, so renames keep
+# their own ALTER even under --bulk-alter.
+#
+# This fixture pins that the rename and the column add stay as two
+# separate ALTERs and the round-trip still closes.
 
 init: |
   CREATE TABLE users (
@@ -27,6 +29,7 @@ desired: |
 bulk_alter: true
 
 applied: |
-  ALTER TABLE users RENAME COLUMN old_name TO name, ADD COLUMN email varchar(255) AFTER name;
+  ALTER TABLE users RENAME COLUMN old_name TO name;
+  ALTER TABLE users ADD COLUMN email varchar(255) AFTER name;
 
 verify_no_drift: true

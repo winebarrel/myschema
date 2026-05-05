@@ -211,6 +211,17 @@ separator under `--bulk-alter`):
   with `--bulk-alter` against a desired SQL that adds three columns
   and one secondary index produces one combined ALTER plus a
   separate CREATE INDEX, not a single ALTER carrying both.
+- **`RENAME COLUMN` / `RENAME INDEX`.** Within one ALTER, MySQL
+  resolves spec-target identifiers (e.g. the column name in
+  `MODIFY COLUMN <name>`) against the *original* table state, so a
+  follow-on spec referring to the renamed object by its new name
+  fails at apply time with `Error 1054 Unknown column …` (or
+  similar for indexes). To stay safe across all rename + follow-up
+  shapes the diff might emit, splitCombinableAlter rejects any
+  spec starting with `RENAME COLUMN` or `RENAME INDEX` — the
+  rename keeps its own ALTER even under `--bulk-alter`. (Whole-
+  table `RENAME TO new_table` lives in the `RenameStmts` bucket
+  upstream and never reaches the combiner.)
 - `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`.
 
 ## Integer display widths drift; type-name casing doesn't

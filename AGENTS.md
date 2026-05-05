@@ -208,6 +208,13 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
     `CREATE INDEX … ON t (…);` statements, not as
     `ALTER TABLE … ADD KEY`. Different statement shape, never
     folded. (Index *DROPs* still combine — they're ALTER TABLE.)
+  - **`RENAME COLUMN` / `RENAME INDEX`** — within one ALTER, MySQL
+    resolves spec-target identifiers (`MODIFY COLUMN <name>`,
+    `DROP INDEX <name>`, …) against the original table state, so
+    a follow-on spec referencing the renamed object by its new
+    name fails with `Error 1054 Unknown column …`. Rename specs
+    keep their own ALTER even under `--bulk-alter`. See CAVEATS.md
+    for the trap.
   - CREATE / DROP / RENAME TABLE.
 
   The combiner is order-preserving — it never reorders, so the diff's

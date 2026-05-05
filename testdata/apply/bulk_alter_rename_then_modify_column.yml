@@ -1,0 +1,36 @@
+# Regression pin for the MySQL evaluation-order bug --bulk-alter has
+# to side-step: within one ALTER, MySQL resolves `MODIFY COLUMN <name>`
+# against the *original* table state, so the combined form
+#
+#   ALTER TABLE users RENAME COLUMN old_name TO name, MODIFY COLUMN name varchar(128) NOT NULL;
+#
+# fails at apply time with `Error 1054 Unknown column 'name' in
+# 'users'`. splitCombinableAlter rejects any spec starting with
+# `RENAME COLUMN` so the rename and the modify stay as two separate
+# ALTERs even under --bulk-alter, and the round-trip closes.
+#
+# Without the rename-rejection guard this fixture would fail with
+# 1054 — the safety check is what keeps it green.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      old_name VARCHAR(64) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_name
+      name VARCHAR(128) NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE users RENAME COLUMN old_name TO name;
+  ALTER TABLE users MODIFY COLUMN name varchar(128) NOT NULL;
+
+verify_no_drift: true

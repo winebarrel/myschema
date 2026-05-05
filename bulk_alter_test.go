@@ -162,6 +162,35 @@ func TestCombineSameTableAlters_MalformedAlterPassThrough(t *testing.T) {
 	}
 }
 
+// TestCombineSameTableAlters_RenameColumnPassThrough: `RENAME COLUMN`
+// is a run separator. Within one ALTER, MySQL resolves spec-target
+// identifiers (e.g. the column name in `MODIFY COLUMN x`) against the
+// *original* table state, so a follow-on spec referring to the renamed
+// column by its new name fails with `Error 1054 Unknown column …`.
+// Keep RENAME COLUMN as its own ALTER so the round-trip stays correct.
+func TestCombineSameTableAlters_RenameColumnPassThrough(t *testing.T) {
+	in := []string{
+		"ALTER TABLE t ADD COLUMN x INT;",
+		"ALTER TABLE t RENAME COLUMN a TO b;",
+		"ALTER TABLE t MODIFY COLUMN b varchar(128);",
+	}
+	got := combineSameTableAlters(in)
+	assert.Equal(t, in, got, "RENAME COLUMN must NOT combine with surrounding specs")
+}
+
+// TestCombineSameTableAlters_RenameIndexPassThrough: same as the
+// RENAME COLUMN guard, on RENAME INDEX. Pin separately so a future
+// refactor can't drop one branch without dropping the other.
+func TestCombineSameTableAlters_RenameIndexPassThrough(t *testing.T) {
+	in := []string{
+		"ALTER TABLE t ADD COLUMN x INT;",
+		"ALTER TABLE t RENAME INDEX old_idx TO new_idx;",
+		"ALTER TABLE t DROP INDEX new_idx;",
+	}
+	got := combineSameTableAlters(in)
+	assert.Equal(t, in, got, "RENAME INDEX must NOT combine with surrounding specs")
+}
+
 // TestCombineSameTableAlters_DropTableInteraction: a `DROP TABLE` is
 // not an `ALTER TABLE` and breaks the run. (Realistic case: the diff
 // pipeline never mixes Stmts and DropStmts buckets, but combineSameTableAlters
