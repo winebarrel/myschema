@@ -162,7 +162,19 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			return nil, err
 		}
 		inlineRenames := ExtractInlineRenames(piece)
-		stmt, err := p.Parse(piece)
+		// ParseStrictDDL (vs Parse) bypasses vitess's partial-DDL
+		// fallback. Parse2 — which Parse calls under the hood —
+		// swallows syntax errors as a WARN log and returns the
+		// partially-parsed AST with err=nil when vitess's tokenizer
+		// has a `partialDDL` to fall back to. That fallback would
+		// let inputs like `id INT STORAGE DISK` (NDB-only attribute,
+		// no InnoDB grammar) through silently, and myschema would
+		// emit an empty `CREATE TABLE t ();` from the half-built AST.
+		// ParseStrictDDL skips the fallback and returns the tokenizer
+		// LastError instead, so the user sees the actual parse error
+		// at plan time rather than a half-applied schema at apply
+		// time.
+		stmt, err := p.ParseStrictDDL(piece)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse SQL: %w", err)
 		}

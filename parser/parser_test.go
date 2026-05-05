@@ -1273,6 +1273,24 @@ func TestParseSQL_UnparseableInputErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestParseSQL_PartialDDLSurfacesAsError pins the audit fix for
+// vitess's partial-DDL fallback: by default `Parser.Parse` swallows
+// syntax errors when the parser still has a partial AST handy
+// (it logs WARN + sets FullyParsed=false + returns err=nil), which
+// would let myschema emit an empty `CREATE TABLE t ();` for inputs
+// it actually couldn't parse — silent data loss. Use vitess's
+// `ParseStrictDDL` to make the same condition surface as a real
+// error. Repro: `STORAGE DISK` on a column (NDB-only attribute
+// that vitess doesn't grammar-parse for InnoDB).
+func TestParseSQL_PartialDDLSurfacesAsError(t *testing.T) {
+	_, err := parser.ParseSQL(
+		`CREATE TABLE bad (id INT NOT NULL STORAGE DISK, PRIMARY KEY (id));`,
+		"app",
+	)
+	require.Error(t, err, "vitess partial-DDL must error rather than silently emit an empty AST")
+	assert.Contains(t, err.Error(), "STORAGE", "wrapped error should preserve vitess's diagnostic")
+}
+
 func TestParseSQL_ValidateDirectivesError(t *testing.T) {
 	// An unknown directive prefix is rejected by ValidateDirectives
 	// before any vitess parse runs — pin the early-out path.

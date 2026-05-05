@@ -5,22 +5,6 @@ For object families that are intentionally **not** on the roadmap
 (triggers / stored procedures / functions / events / sequences),
 see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
-## High — parser silently swallows vitess parse errors
-
-- **vitess `Parse2` warns instead of returning an error for some
-  syntax it doesn't fully support, and `parser.ParseSQL` treats
-  that as success.** Repro: write `CREATE TABLE t (id INT NOT NULL
-  COLUMN_FORMAT DYNAMIC STORAGE DISK, PRIMARY KEY (id));` —
-  vitess emits a `WARN ignoring error parsing DDL: syntax error
-  at position 62 near 'STORAGE'` and returns a partially-parsed
-  AST; myschema then emits an empty `CREATE TABLE t ();` from
-  `plan` and would happily run that against the database. This
-  is silent **data loss**, not just feature drop. Investigate
-  whether vitess offers a strict-parse path (or whether we need
-  to wrap `p.Parse` with our own check that the input fully
-  consumed), and surface the parse error rather than the empty
-  AST. Found during the PR #81 silent-drop audit.
-
 ## Medium — silent diffs / fidelity gaps
 
 - **View column-alias list (`CREATE VIEW v (a, b) AS …`) changes
