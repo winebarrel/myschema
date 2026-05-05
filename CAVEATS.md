@@ -190,8 +190,8 @@ surface when a plan actually had a brand-new parent table to
 reference.
 
 The two-statement output is the cost of keeping the ordering safe.
-Same-table column / index / constraint changes still combine — only
-FK operations stay separate.
+Same-table column / constraint / DEFAULT-CHARSET / COMMENT / DROP
+INDEX changes still combine — only FK operations stay separate.
 
 **What myschema also does NOT combine** (each acts as a run
 separator under `--bulk-alter`):
@@ -203,9 +203,14 @@ separator under `--bulk-alter`):
   the partition list parses as a new partition definition); the
   combiner detects the keyword via the same `partitionOpInsertPos`
   helper `--alter-algorithm` uses for the same reason.
-- Standalone `CREATE INDEX … ON t (…)` statements. These come from
-  `CREATE INDEX` lines in desired SQL (or from secondary-index adds
-  on brand-new tables); they aren't `ALTER TABLE` at all.
+- **Secondary-index ADDs.** `diff/tables.go` emits the new index as
+  a standalone `CREATE INDEX … ON t (…);` — not an
+  `ALTER TABLE … ADD KEY …` — for both brand-new and modified
+  tables. Different statement shape; never folded. (Index *DROPs*
+  emit as `ALTER TABLE … DROP INDEX …;` and *do* combine.) An apply
+  with `--bulk-alter` against a desired SQL that adds three columns
+  and one secondary index produces one combined ALTER plus a
+  separate CREATE INDEX, not a single ALTER carrying both.
 - `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`.
 
 ## Integer display widths drift; type-name casing doesn't

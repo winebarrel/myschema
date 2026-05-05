@@ -4,8 +4,10 @@ import "strings"
 
 // combineSameTableAlters merges *consecutive* same-table single-spec
 // `ALTER TABLE` statements into one multi-spec ALTER. Opt-in via
-// `--bulk-alter` (DumpOptions / AlterOption.BulkAlter); the default
-// is unchanged.
+// `--bulk-alter` on plan / apply (AlterOption.BulkAlter); the default
+// is unchanged. dump does not embed AlterOption — bulk-alter is a
+// diff-time concern and dump emits whole CREATE TABLE / CREATE VIEW
+// statements with no ALTER folding to do.
 //
 // Statements that aren't combinable act as run separators: they pass
 // through untouched and break any in-progress combine group. The

@@ -192,20 +192,27 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   combinations at apply time, so CI catches non-online migrations.
 - `--bulk-alter` (and matching `MYSCHEMA_BULK_ALTER` env var) folds
   *consecutive* same-table single-spec `ALTER TABLE` statements into
-  one multi-spec ALTER. Default off, opt-in. Combinable: ADD / MODIFY
-  / DROP COLUMN, ADD / DROP INDEX (when emitted as `ALTER TABLE … ADD
-  KEY`), ADD / DROP CONSTRAINT (PK / CHECK), DEFAULT CHARSET /
-  COLLATE, COMMENT — anything whose syntactic shape is `ALTER TABLE
-  <ident> <single-spec>;`. Excluded (each acts as a run separator):
-  FK ops (kept in their own `FKAddStmts` / `FKDropStmts` buckets so
-  cross-table ordering survives), partition ops (REORGANIZE / ADD /
-  DROP / COALESCE / TRUNCATE / EXCHANGE PARTITION — MySQL's grammar
-  rejects the trailing-comma multi-spec form for these clauses),
-  standalone `CREATE INDEX` (different statement shape), and
-  CREATE / DROP / RENAME TABLE. The combiner is order-preserving —
-  it never reorders, so the diff's own ordering invariants are not at
-  risk. See CAVEATS.md "Bulk-alter does not combine FK operations"
-  for the FK rationale.
+  one multi-spec ALTER. Default off, opt-in. **Combinable:** anything
+  the diff layer emits as `ALTER TABLE <ident> <single-spec>;` —
+  ADD / MODIFY / DROP COLUMN, DROP INDEX, ADD / DROP CONSTRAINT
+  (PK / CHECK), DEFAULT CHARSET / COLLATE, COMMENT, and the
+  partition shapes that aren't on the excluded list below.
+  **Excluded** (each acts as a run separator):
+  - FK ops — kept in their own `FKAddStmts` / `FKDropStmts` buckets
+    so cross-table ordering survives.
+  - Partition ops (REORGANIZE / ADD / DROP / COALESCE / TRUNCATE /
+    EXCHANGE PARTITION) — MySQL's grammar rejects the
+    trailing-comma multi-spec form for these clauses.
+  - **Index ADDs** — `diff/tables.go` emits secondary-index adds
+    (both on brand-new and modified tables) as standalone
+    `CREATE INDEX … ON t (…);` statements, not as
+    `ALTER TABLE … ADD KEY`. Different statement shape, never
+    folded. (Index *DROPs* still combine — they're ALTER TABLE.)
+  - CREATE / DROP / RENAME TABLE.
+
+  The combiner is order-preserving — it never reorders, so the diff's
+  own ordering invariants are not at risk. See CAVEATS.md "Bulk-alter
+  does not combine FK operations" for the FK rationale.
 - `--pre-sql` / `--pre-sql-file` (and matching `MYSCHEMA_PRE_SQL` /
   `MYSCHEMA_PRE_SQL_FILE` env vars) for plan and apply: SQL
   statement(s) to run on the connection right after connect() and

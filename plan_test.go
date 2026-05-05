@@ -24,6 +24,7 @@ type planTestCase struct {
 	Exclude         []string `yaml:"exclude,omitempty"`
 	AlterAlgorithm  string   `yaml:"alter_algorithm,omitempty"` // appended as ALGORITHM= clause to ALTER TABLE / CREATE INDEX
 	AlterLock       string   `yaml:"alter_lock,omitempty"`      // appended as LOCK= clause to ALTER TABLE / CREATE INDEX
+	BulkAlter       bool     `yaml:"bulk_alter,omitempty"`      // combine consecutive same-table ALTER TABLE statements
 	PreSQL          string   `yaml:"pre_sql,omitempty"`         // SQL run on the connection before the diff (typically session SETs)
 }
 
@@ -46,6 +47,7 @@ func TestPlanYAML(t *testing.T) {
 			AlterOption: myschema.AlterOption{
 				AlterAlgorithm: tc.AlterAlgorithm,
 				AlterLock:      tc.AlterLock,
+				BulkAlter:      tc.BulkAlter,
 			},
 			PreSQLOption: myschema.PreSQLOption{
 				PreSQL: tc.PreSQL,
