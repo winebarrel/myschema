@@ -24,7 +24,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Low — tests / docs / release
 
-- YAML harness extended to parser and diff (currently Go table tests).
 - `getting-started.md`.
 - `CHANGELOG.md`.
 - Demo asciinema or gif (pistachio-style).
