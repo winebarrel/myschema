@@ -1,9 +1,13 @@
 # Pin dump output for the canonical TIMESTAMP NULL DEFAULT NULL
 # pattern. Catalog stores Default=nil for SQL-NULL COLUMN_DEFAULT,
-# so the model emitter omits the DEFAULT clause entirely. The
-# emitted column is `ts timestamp NULL` (NOT NULL absent → MySQL
-# infers nullable on TIMESTAMP NULL form), which round-trips back
-# to the same model.
+# so the model emitter omits the DEFAULT clause entirely; it also
+# omits an explicit NULL keyword because nullability is implied by
+# the absence of NOT NULL in the SHOW CREATE TABLE form myschema
+# emits. The emitted column is therefore the bare `ts timestamp`,
+# which under MySQL 8.0+ default `explicit_defaults_for_timestamp=ON`
+# round-trips back to a nullable column with no implicit default.
+# (`=OFF` legacy servers re-add an implicit `NOT NULL DEFAULT
+# CURRENT_TIMESTAMP` here — out of scope, see CAVEATS.md.)
 init: |
   CREATE TABLE t (
       id INT NOT NULL,
