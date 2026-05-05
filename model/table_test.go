@@ -268,6 +268,83 @@ func TestColumnDefSQLInvisible(t *testing.T) {
 	})
 }
 
+// TestColumnDefSQLFullOrdering pins every emitted attribute's
+// position with index-comparison so a future reorder of
+// `columnDefSQL` fails a specific edge here instead of silently
+// shipping wrong-order DDL. PR #84 pinned only INVISIBLE's slot;
+// extend the pin to the full chain (CHARSET → COLLATE → GENERATED →
+// NOT NULL → DEFAULT → ON UPDATE → AUTO_INCREMENT → INVISIBLE →
+// COMMENT). Mirror what MySQL emits in SHOW CREATE TABLE so the
+// catalog round-trip stays bytewise.
+func TestColumnDefSQLFullOrdering(t *testing.T) {
+	cs := "utf8mb4"
+	coll := "utf8mb4_0900_ai_ci"
+	def := "0"
+	gen := "id + 1"
+	comment := "audit"
+
+	// AUTO_INCREMENT and a generated column are mutually exclusive
+	// in MySQL but `columnDefSQL` is a pure formatter — it doesn't
+	// validate semantic combinations, just emits whatever fields
+	// are set. Set both so the ordering pin covers their slots.
+	c := &model.Column{
+		Name:          "n",
+		TypeName:      "bigint",
+		CharacterSet:  &cs,
+		Collation:     &coll,
+		Generated:     &gen,
+		Stored:        true,
+		NotNull:       true,
+		Default:       &def,
+		OnUpdate:      &def,
+		AutoIncrement: true,
+		Invisible:     true,
+		Comment:       &comment,
+	}
+	out := model.ColumnDefSQL(c)
+
+	tokens := []string{
+		"CHARACTER SET", "COLLATE", "GENERATED ALWAYS AS",
+		"NOT NULL", "DEFAULT", "ON UPDATE", "AUTO_INCREMENT",
+		"INVISIBLE", "COMMENT",
+	}
+	pos := make([]int, len(tokens))
+	for i, tok := range tokens {
+		pos[i] = strings.Index(out, tok)
+		require.NotEqual(t, -1, pos[i], "%q must appear in %q", tok, out)
+	}
+	for i := 1; i < len(tokens); i++ {
+		assert.Less(t, pos[i-1], pos[i],
+			"%q must precede %q (got %q)", tokens[i-1], tokens[i], out)
+	}
+}
+
+// TestConstraintInlineSQLCheckEnforcedOrdering pins the
+// `CHECK (…) NOT ENFORCED` order on the inline CHECK constraint
+// emitter. There's only one variable suffix, so the pin is short:
+// the keyword block must appear before the trailing
+// `NOT ENFORCED`.
+func TestConstraintInlineSQLCheckEnforcedOrdering(t *testing.T) {
+	tbl := emptyTable("shop", "products")
+	tbl.Columns.Set("id", &model.Column{Name: "id", TypeName: "bigint", NotNull: true})
+	tbl.Columns.Set("price", &model.Column{Name: "price", TypeName: "int"})
+	tbl.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(id)", Columns: []string{"id"},
+	})
+	tbl.Constraints.Set("chk_price", &model.Constraint{
+		Name: "chk_price", Type: model.CheckConstraint,
+		Definition: "CHECK (price > 0)", Enforced: false,
+	})
+	out := tbl.SQL()
+	check := strings.Index(out, "CHECK (price > 0)")
+	notEnforced := strings.Index(out, "NOT ENFORCED")
+	require.NotEqual(t, -1, check)
+	require.NotEqual(t, -1, notEnforced)
+	assert.Less(t, check, notEnforced,
+		"NOT ENFORCED must follow the CHECK keyword body")
+}
+
 func TestTableFQTN(t *testing.T) {
 	tbl := &model.Table{Database: "shop", Name: "users"}
 	assert.Equal(t, "shop.users", tbl.FQTN())
