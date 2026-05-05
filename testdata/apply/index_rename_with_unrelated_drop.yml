@@ -1,0 +1,40 @@
+# Pins that an index rename and an unrelated index drop in the
+# same plan compose without interfering with each other. Catalog
+# has two indexes (`old_idx`, `drop_me`); desired keeps only
+# `new_idx (renamed-from old_idx)` so:
+#
+#   - `old_idx` becomes `new_idx` via RENAME INDEX (data preserved).
+#   - `drop_me` is dropped (allow-drop:index gates this).
+#
+# Pre-PR-#84 the rename + drop were tested only individually; this
+# composes them so a regression in the diff layer's per-index
+# pass-order surfaces here.
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT,
+      b INT,
+      PRIMARY KEY (id),
+      KEY old_idx (a),
+      KEY drop_me (b)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      a INT,
+      b INT,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from old_idx
+      KEY new_idx (a)
+  );
+
+allow_drop:
+  - index
+
+applied: |
+  ALTER TABLE t RENAME INDEX old_idx TO new_idx;
+  ALTER TABLE t DROP INDEX drop_me;
+
+verify_no_drift: true
