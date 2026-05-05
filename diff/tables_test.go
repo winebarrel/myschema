@@ -10,6 +10,7 @@ import (
 	"github.com/winebarrel/myschema/diff"
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/myschema/parser"
+	"github.com/winebarrel/orderedmap"
 )
 
 // allowAll / allowList helpers cut down the noise in test bodies.
@@ -704,4 +705,190 @@ func TestDropConstraintSQL_Check(t *testing.T) {
 	c := &model.Constraint{Type: model.CheckConstraint, Name: "chk_pos"}
 	got := diff.DropConstraintSQL("t", c)
 	assert.Equal(t, "ALTER TABLE t DROP CHECK chk_pos;", got)
+}
+
+func TestTableCharsetCollationSQL(t *testing.T) {
+	mk := func(charset, coll *string) *model.Table {
+		return &model.Table{Charset: charset, Collation: coll}
+	}
+	utf8 := "utf8mb4"
+	latin1 := "latin1"
+	ai := "utf8mb4_0900_ai_ci"
+	bin := "utf8mb4_bin"
+
+	t.Run("both nil → empty", func(t *testing.T) {
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(nil, nil), mk(nil, nil)))
+	})
+	t.Run("desired nil/nil short-circuit even if current set", func(t *testing.T) {
+		// desired Charset=nil, Collation=nil means "user didn't declare
+		// anything"; short-circuit returns empty regardless of current.
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(&utf8, &ai), mk(nil, nil)))
+	})
+	t.Run("charset only, equal", func(t *testing.T) {
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(&utf8, nil), mk(&utf8, nil)))
+	})
+	t.Run("charset only, differs", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(&utf8, nil), mk(&latin1, nil))
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=latin1;", got)
+	})
+	t.Run("collation only, differs", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(nil, &ai), mk(nil, &bin))
+		assert.Equal(t, "ALTER TABLE t COLLATE=utf8mb4_bin;", got)
+	})
+	t.Run("charset+collation, both differ", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(&latin1, nil), mk(&utf8, &ai))
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;", got)
+	})
+	t.Run("desired Charset != nil, Collation nil; current Collation nil → equal", func(t *testing.T) {
+		// "use the charset's default collation" — catalog represents
+		// that as nil, so equal when current.Collation is also nil.
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(&utf8, nil), mk(&utf8, nil)))
+	})
+	t.Run("desired Charset, no Collation; current has explicit non-default Collation → fires", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(&utf8, &bin), mk(&utf8, nil))
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=utf8mb4;", got)
+	})
+	t.Run("convert-charset directive emits CONVERT TO when charset differs", func(t *testing.T) {
+		current := mk(&latin1, nil)
+		desired := mk(&utf8, &ai)
+		desired.ConvertCharset = true
+		got := diff.TableCharsetCollationSQL("t", current, desired)
+		assert.Equal(t, "ALTER TABLE t CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;", got)
+	})
+	t.Run("convert-charset directive: collation-only diff falls through", func(t *testing.T) {
+		// Charset matches, only Collation differs → CONVERT TO would
+		// needlessly rebuild the table. Falls through to DEFAULT
+		// CHARSET=…  COLLATE=… (full shape because parser requires
+		// DEFAULT CHARSET on the directive's CREATE TABLE).
+		current := mk(&utf8, &bin)
+		desired := mk(&utf8, &ai)
+		desired.ConvertCharset = true
+		got := diff.TableCharsetCollationSQL("t", current, desired)
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;", got)
+	})
+}
+
+func TestTableCommentSQL(t *testing.T) {
+	mk := func(c *string) *model.Table { return &model.Table{Comment: c} }
+	old, new_ := "old", "new"
+	empty := ""
+
+	t.Run("both nil → empty", func(t *testing.T) {
+		assert.Empty(t, diff.TableCommentSQL("t", mk(nil), mk(nil)))
+	})
+	t.Run("change", func(t *testing.T) {
+		assert.Equal(t,
+			"ALTER TABLE t COMMENT='new';",
+			diff.TableCommentSQL("t", mk(&old), mk(&new_)))
+	})
+	t.Run("add", func(t *testing.T) {
+		assert.Equal(t,
+			"ALTER TABLE t COMMENT='new';",
+			diff.TableCommentSQL("t", mk(nil), mk(&new_)))
+	})
+	t.Run("drop emits empty literal", func(t *testing.T) {
+		assert.Equal(t,
+			"ALTER TABLE t COMMENT='';",
+			diff.TableCommentSQL("t", mk(&old), mk(nil)))
+	})
+	t.Run("desired explicit empty folded to nil → no diff", func(t *testing.T) {
+		// canonicalComment folds &"" to nil so an explicit empty
+		// COMMENT in desired SQL converges against catalog-side nil.
+		assert.Empty(t, diff.TableCommentSQL("t", mk(nil), mk(&empty)))
+	})
+}
+
+func TestCanonicalComment(t *testing.T) {
+	empty := ""
+	val := "x"
+	assert.Nil(t, diff.CanonicalComment(nil))
+	assert.Nil(t, diff.CanonicalComment(&empty))
+	got := diff.CanonicalComment(&val)
+	require.NotNil(t, got)
+	assert.Equal(t, "x", *got)
+}
+
+func TestUniqueKeyPartitionCoverGap(t *testing.T) {
+	mk := func(idxs ...*model.Index) *model.Table {
+		tbl := &model.Table{
+			Indexes: orderedmap.New[string, *model.Index](),
+		}
+		for _, i := range idxs {
+			tbl.Indexes.Set(i.Name, i)
+		}
+		return tbl
+	}
+	pk := func(cols ...string) *model.Index {
+		parts := make([]model.IndexPart, len(cols))
+		for i, c := range cols {
+			parts[i] = model.IndexPart{Column: c}
+		}
+		return &model.Index{Name: "PRIMARY", Primary: true, Parts: parts}
+	}
+	uniq := func(name string, cols ...string) *model.Index {
+		parts := make([]model.IndexPart, len(cols))
+		for i, c := range cols {
+			parts[i] = model.IndexPart{Column: c}
+		}
+		return &model.Index{Name: name, KeyType: model.IndexUnique, Parts: parts}
+	}
+
+	t.Run("no required columns short-circuits", func(t *testing.T) {
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(pk("id")), nil))
+	})
+	t.Run("PK covers required column", func(t *testing.T) {
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(pk("id", "yr")), []string{"yr"}))
+	})
+	t.Run("PK missing partition column", func(t *testing.T) {
+		got := diff.UniqueKeyPartitionCoverGap(mk(pk("id")), []string{"yr"})
+		assert.Contains(t, got, "PRIMARY KEY")
+		assert.Contains(t, got, "yr")
+	})
+	t.Run("UNIQUE missing partition column", func(t *testing.T) {
+		got := diff.UniqueKeyPartitionCoverGap(mk(pk("id"), uniq("u_email", "email")), []string{"yr"})
+		// PRIMARY is reported first because index iteration follows
+		// declaration order (PRIMARY was set first).
+		assert.Contains(t, got, "missing partition column")
+	})
+	t.Run("non-unique non-primary index ignored", func(t *testing.T) {
+		// A plain KEY (not unique, not primary) doesn't constrain
+		// partition coverage; only PRIMARY / UNIQUE matter.
+		idx := &model.Index{Name: "idx", Parts: []model.IndexPart{{Column: "id"}}}
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(idx), []string{"yr"}))
+	})
+	t.Run("case-insensitive column match", func(t *testing.T) {
+		// required is lower-cased upstream; index parts may carry
+		// any case from desired SQL. Match should fold both.
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(pk("ID", "YR")), []string{"yr"}))
+	})
+}
+
+func TestPartitionRequiredColumns(t *testing.T) {
+	t.Run("empty clause → nil", func(t *testing.T) {
+		got, err := diff.PartitionRequiredColumns("")
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+	t.Run("simple column reference", func(t *testing.T) {
+		got, err := diff.PartitionRequiredColumns("partition by range (yr) (partition p0 values less than (2021))")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"yr"}, got)
+	})
+	t.Run("function-wrapped column extracted", func(t *testing.T) {
+		// PARTITION BY RANGE (YEAR(dt)) — only `dt` matters; YEAR
+		// is a function name, not a column.
+		got, err := diff.PartitionRequiredColumns("partition by range (year(dt)) (partition p0 values less than (2021))")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"dt"}, got)
+	})
+	t.Run("multi-column dedup case-folded", func(t *testing.T) {
+		got, err := diff.PartitionRequiredColumns("partition by range columns (a, B, a) (partition p0 values less than (1, 2, 3))")
+		require.NoError(t, err)
+		// Order preserves first-occurrence; case folded; dedup.
+		assert.Equal(t, []string{"a", "b"}, got)
+	})
+	t.Run("invalid clause surfaces parse error", func(t *testing.T) {
+		_, err := diff.PartitionRequiredColumns("not a partition clause")
+		require.Error(t, err)
+	})
 }
