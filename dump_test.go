@@ -6,11 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/winebarrel/orderedmap"
 
 	"github.com/winebarrel/myschema"
 	"github.com/winebarrel/myschema/internal/testutil"
+	"github.com/winebarrel/myschema/model"
 )
 
 // dumpTestCase is the authoritative shape of a testdata/dump/*.yml fixture.
@@ -226,6 +229,152 @@ func TestDump_SplitEmptySchema(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "no objects → no files (but dir is created)")
+}
+
+// TestDump_SplitFlagName pins the kong-derived CLI flag name as
+// `--split` (not the default `--split-dir` kong would derive from
+// the SplitDir field). Documentation and PR history say `--split=<dir>`;
+// a future field rename or a dropped `name:"split"` tag would silently
+// shift the user-facing flag, so parse the flag through real kong
+// here to keep the surface in lockstep with the docs.
+func TestDump_SplitFlagName(t *testing.T) {
+	var cli struct {
+		myschema.DumpOptions
+	}
+	parser, err := kong.New(&cli)
+	require.NoError(t, err)
+	_, err = parser.Parse([]string{"--split=/tmp/out"})
+	require.NoError(t, err, "kong must accept --split=<dir>")
+	assert.Equal(t, "/tmp/out", cli.SplitDir)
+
+	// And the legacy auto-derived `--split-dir` must NOT work — if
+	// it did, both names would coexist and docs would drift.
+	_, err = parser.Parse([]string{"--split-dir=/tmp/out"})
+	require.Error(t, err, "kong must reject --split-dir (renamed to --split)")
+}
+
+// TestDump_SplitRejectsUnsafeName pins the path-traversal guard in
+// splitPath. MySQL itself rejects '/', '\', '.' in identifiers, so
+// these cases are defence-in-depth: if a future catalog change or a
+// non-MySQL data source ever fed an unsafe name through, the writer
+// must refuse rather than scribble outside the requested directory.
+func TestDump_SplitRejectsUnsafeName(t *testing.T) {
+	cases := []struct {
+		name string
+		obj  string
+	}{
+		{"empty", ""},
+		{"single dot", "."},
+		{"double dot", ".."},
+		{"forward slash", "a/b"},
+		{"backslash", `a\b`},
+		{"traversal", "../escape"},
+		{"absolute", "/etc/passwd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := myschema.SplitPath(t.TempDir(), tc.obj)
+			require.Error(t, err, "splitPath(%q) must reject", tc.obj)
+			assert.Contains(t, err.Error(), "unsafe object name")
+		})
+	}
+}
+
+// TestDump_SplitPath_Valid pins the happy path: a normal identifier
+// (incl. underscore, $, digits) returns dir/name.sql.
+func TestDump_SplitPath_Valid(t *testing.T) {
+	dir := t.TempDir()
+	got, err := myschema.SplitPath(dir, "my_table$1")
+	require.NoError(t, err)
+	assert.Equal(t, dir+"/my_table$1.sql", got)
+}
+
+// TestWriteDumpSplit_RejectsTableWithUnsafeName: defence-in-depth.
+// MySQL forbids these characters at the source, so the only way an
+// unsafe name reaches writeDumpSplit is via a non-MySQL data source
+// (mocks, tests, or a future upstream change). Pin the in-loop
+// validator branch so a future refactor can't silently bypass it.
+func TestWriteDumpSplit_RejectsTableWithUnsafeName(t *testing.T) {
+	dir := t.TempDir()
+	tables := orderedmap.New[string, *model.Table]()
+	tables.Set("evil", &model.Table{Name: "../escape"})
+	views := orderedmap.New[string, *model.View]()
+	err := myschema.WriteDumpSplit(dir, tables, views)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe object name")
+}
+
+// TestWriteDumpSplit_RejectsViewWithUnsafeName: same as the table
+// guard above, on the view loop.
+func TestWriteDumpSplit_RejectsViewWithUnsafeName(t *testing.T) {
+	dir := t.TempDir()
+	tables := orderedmap.New[string, *model.Table]()
+	views := orderedmap.New[string, *model.View]()
+	views.Set("evil", &model.View{Name: "a/b"})
+	err := myschema.WriteDumpSplit(dir, tables, views)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe object name")
+}
+
+// emptyTable returns a Table whose maps are initialised so
+// model.TableToSQL won't panic during a write-error test.
+func emptyTable(name string) *model.Table {
+	return &model.Table{
+		Name:        name,
+		Columns:     orderedmap.New[string, *model.Column](),
+		Constraints: orderedmap.New[string, *model.Constraint](),
+		ForeignKeys: orderedmap.New[string, *model.ForeignKey](),
+		Indexes:     orderedmap.New[string, *model.Index](),
+	}
+}
+
+// TestWriteDumpSplit_TableWriteError: when the per-table file path
+// already exists as a *directory*, os.WriteFile fails with EISDIR.
+// The error must surface up wrapped with the path so the operator
+// can tell which file failed (vs. a generic mkdir / IO problem).
+func TestWriteDumpSplit_TableWriteError(t *testing.T) {
+	dir := t.TempDir()
+	// Pre-create a *directory* at <dir>/t.sql so os.WriteFile fails.
+	require.NoError(t, os.MkdirAll(dir+"/t.sql", 0o755))
+	tables := orderedmap.New[string, *model.Table]()
+	tables.Set("t", emptyTable("t"))
+	views := orderedmap.New[string, *model.View]()
+	err := myschema.WriteDumpSplit(dir, tables, views)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dump: write")
+	assert.Contains(t, err.Error(), "t.sql")
+}
+
+// TestWriteDumpSplit_ViewWriteError: same as the table-write-error
+// guard above but on the view branch.
+func TestWriteDumpSplit_ViewWriteError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(dir+"/v.sql", 0o755))
+	tables := orderedmap.New[string, *model.Table]()
+	views := orderedmap.New[string, *model.View]()
+	views.Set("v", &model.View{Name: "v", Definition: "SELECT 1"})
+	err := myschema.WriteDumpSplit(dir, tables, views)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dump: write")
+	assert.Contains(t, err.Error(), "v.sql")
+}
+
+// TestDump_SplitMkdirOverFile: when the caller points --split at an
+// existing regular file, MkdirAll fails with "not a directory" and
+// the error must surface up through Dump rather than silently no-op'ing.
+func TestDump_SplitMkdirOverFile(t *testing.T) {
+	dir := t.TempDir()
+	// Create a regular file at the path we'll then ask --split to use.
+	clash := dir + "/not_a_dir"
+	require.NoError(t, os.WriteFile(clash, []byte("x"), 0o600))
+
+	ctx := context.Background()
+	conn := testutil.ConnectDB(t)
+	testutil.SetupDB(t, ctx, conn, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
+	c := newClient(t)
+	_, err := c.Dump(ctx, &myschema.DumpOptions{SplitDir: clash})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mkdir")
 }
 
 func TestDump_BadDSNError(t *testing.T) {

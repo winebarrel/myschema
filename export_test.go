@@ -7,6 +7,8 @@ var (
 	SkipIdentifier        = skipIdentifier
 	AppendBeforeSemicolon = appendBeforeSemicolon
 	PartitionOpInsertPos  = partitionOpInsertPos
+	SplitPath             = splitPath
+	WriteDumpSplit        = writeDumpSplit
 )
 
 // DSNConfigFor invokes the unexported dsnConfig method on Client and

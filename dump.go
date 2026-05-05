@@ -15,7 +15,10 @@ import (
 // DumpOptions are the flags accepted by `myschema dump`.
 type DumpOptions struct {
 	FilterOptions
-	SplitDir string `help:"Write one SQL file per table/view into this directory (mkdir -p). Filters apply. SQL is omitted from stdout — only the header summary and a 'wrote N file(s) to <dir>' notice are printed."`
+	// `name:"split"` overrides kong's CamelCase→kebab default
+	// (`--split-dir`) so the CLI surface matches the documented
+	// `--split=<dir>` shape.
+	SplitDir string `name:"split" help:"Write one SQL file per table/view into this directory (mkdir -p). Filters apply. SQL is omitted from stdout — only the header summary and a 'wrote N file(s) to <dir>' notice are printed."`
 }
 
 // DumpResult is the rendered current-schema SQL plus a count for the header.
@@ -100,18 +103,39 @@ func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], vi
 		return fmt.Errorf("dump: mkdir %s: %w", dir, err)
 	}
 	for _, t := range tables.CollectValues() {
-		path := filepath.Join(dir, t.Name+".sql")
+		path, err := splitPath(dir, t.Name)
+		if err != nil {
+			return err
+		}
 		body := model.TableToSQL(t) + "\n"
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec // dump output, not a credential file
 			return fmt.Errorf("dump: write %s: %w", path, err)
 		}
 	}
 	for _, v := range views.CollectValues() {
-		path := filepath.Join(dir, v.Name+".sql")
+		path, err := splitPath(dir, v.Name)
+		if err != nil {
+			return err
+		}
 		body := model.ViewToSQL(v) + "\n"
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec
 			return fmt.Errorf("dump: write %s: %w", path, err)
 		}
 	}
 	return nil
+}
+
+// splitPath returns the per-object output path under dir, refusing any
+// object name that could break out of dir. MySQL itself rejects '/',
+// '\', and '.' in table/view names, so this is defence-in-depth: it
+// pins the contract regardless of upstream changes (or a mocked /
+// non-MySQL data source) and keeps `--split=<dir>` from accidentally
+// scribbling outside the chosen directory.
+func splitPath(dir, name string) (string, error) {
+	if name == "" || name == "." || name == ".." ||
+		strings.ContainsAny(name, `/\`) ||
+		strings.ContainsRune(name, os.PathSeparator) {
+		return "", fmt.Errorf("dump: refusing unsafe object name %q for split mode", name)
+	}
+	return filepath.Join(dir, name+".sql"), nil
 }
