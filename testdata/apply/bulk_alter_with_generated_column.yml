@@ -1,0 +1,30 @@
+# Coverage: --bulk-alter folds a plain ADD COLUMN with a generated
+# (STORED) column add into one multi-spec ALTER. Combine is
+# spec-agnostic, so this works in principle, but generated-column
+# emission has its own quirks (parenthesisation of the expression,
+# STORED vs VIRTUAL, NOT NULL ordering) — pin the round-trip so a
+# future regression in either path surfaces here rather than in
+# production.
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      qty INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      qty INT NOT NULL,
+      price INT NOT NULL,
+      total INT GENERATED ALWAYS AS ((qty * price)) STORED NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t ADD COLUMN price int NOT NULL AFTER qty, ADD COLUMN total int GENERATED ALWAYS AS (qty * price) STORED NOT NULL AFTER price;
+
+verify_no_drift: true
