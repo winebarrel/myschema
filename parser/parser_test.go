@@ -1277,10 +1277,13 @@ func TestParseSQL_UnparseableInputErrors(t *testing.T) {
 // column attribute vitess parses into `cd.Type.Options.Invisible`
 // (`*bool`: nil = unspecified, false = VISIBLE, true = INVISIBLE).
 // `parseColumnDef` previously ignored the field and the attribute
-// silently dropped on round-trip. Pin all three states so the new
-// wiring (parser → model → emitter → catalog → diff) stays honest
-// and the nil-vs-false distinction the code relies on can't quietly
-// regress.
+// silently dropped on round-trip. Pin all three vitess states at
+// the parsed-model layer so the nil-vs-false distinction the code
+// relies on (the explicit `opts.Invisible != nil` guard before the
+// dereference) can't quietly regress. Emitter / catalog / diff
+// layers have their own dedicated tests
+// (TestColumnDefSQLInvisible, TestColumnInvisibleRoundTrip,
+// TestColumnEqual/invisible_differs).
 func TestParseColumnInvisible(t *testing.T) {
 	sql := `CREATE TABLE t (
     id INT NOT NULL,
