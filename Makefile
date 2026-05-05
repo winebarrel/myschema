@@ -4,9 +4,8 @@
 MYSQL_HOST ?= 127.0.0.1
 MYSQL_PORT ?= 3306
 MYSQL_USER ?= root
-MYSQL_PWD  ?=
 MYSQL_DB   ?= myschema_test
-export MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PWD MYSQL_DB
+export MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_DB
 
 # Default DSN used by tests / scenario scripts. The trailing slash makes it
 # easy for tests to append the test DB name; the production CLI requires the
@@ -101,3 +100,13 @@ load-sakila:
 .PHONY: schema-drop
 schema-drop:
 	$(MYSQL) -e 'DROP DATABASE IF EXISTS Chinook; DROP DATABASE IF EXISTS employees; DROP DATABASE IF EXISTS sakila'
+
+# Records demo.tape into demo.gif via VHS. clean-schema resets
+# MYSQL_DB so the recording starts from an empty database; the
+# DSN is built from the same MYSQL_* vars test / clean-schema
+# already use so a custom host / port carries through.
+# Recorder needs vhs + bat on PATH and the `myschema` binary
+# on PATH (`go install ./cmd/myschema` or move ./myschema there).
+.PHONY: demo
+demo: clean-schema
+	MYSCHEMA_DSN='$(MYSQL_USER)@tcp($(MYSQL_HOST):$(MYSQL_PORT))/$(MYSQL_DB)' vhs demo.tape
