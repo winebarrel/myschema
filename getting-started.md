@@ -209,7 +209,7 @@ wildcard.
 
 | Flag | What it does |
 |------|---|
-| `--include 'user*'`, `--exclude 'tmp_*'` | filter table names |
+| `--include 'user*'`, `--exclude 'tmp_*'` | filter table and view names |
 | `--allow-drop=…` | allow specific destructive op categories |
 | `--alter-algorithm=INPLACE`, `--alter-lock=NONE` | inject MySQL online-DDL hints |
 | `--bulk-alter` | fold consecutive same-table ALTERs into one multi-spec ALTER |

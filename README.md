@@ -31,7 +31,7 @@ export MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/app'
 
 ```sh
 myschema dump > current.sql                          # full database
-myschema dump --include 'user*' --exclude 'tmp_*'    # filter tables
+myschema dump --include 'user*' --exclude 'tmp_*'    # filter tables and views
 myschema dump --split=./schema/                      # one SQL file per table/view
 ```
 
@@ -68,7 +68,7 @@ myschema apply --pre-sql 'SET FOREIGN_KEY_CHECKS=0;' desired.sql
   generated columns, partitions (RANGE / LIST / HASH / KEY).
 - Views (`CREATE OR REPLACE` on apply; cross-view dependency
   ordering).
-- `--include` / `--exclude` glob filtering on table names.
+- `--include` / `--exclude` glob filtering on table and view names.
 - `--allow-drop=table,view,column,constraint,foreign_key,index,partition`
   — destructive ops are opt-in, per category. `all` enables every
   category at once.
