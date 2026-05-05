@@ -209,12 +209,14 @@ func TestParseInlineColumnPrimaryKey(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"a"}, pk.Columns, "first column with inline PK wins")
 
-		// Both columns get NotNull forced — the first by its own
-		// promotion, the second is unaffected by the skip and stays
-		// at whatever NOT NULL vitess parsed (here, the implicit
-		// nullable default for INT). Don't over-pin the second
-		// column's NotNull flag; the relevant assertion is that
-		// the PK columns list contains only `a`.
+		// Only column `a` gets NotNull forced — by its own
+		// promotion. Column `b` hits the skip branch and is left
+		// untouched: its NotNull flag stays at whatever vitess
+		// parsed (here, the implicit nullable default for INT,
+		// since the source SQL doesn't write NOT NULL on `b`).
+		// The relevant assertion for this test is that the PK
+		// column list contains only `a`; don't over-pin column
+		// `b`'s NotNull flag.
 	})
 }
 
