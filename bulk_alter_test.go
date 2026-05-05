@@ -92,7 +92,7 @@ func TestCombineSameTableAlters_PartitionOpsPassThrough(t *testing.T) {
 // TestCombineSameTableAlters_CreateIndexPassThrough: standalone
 // `CREATE INDEX … ON t (…);` isn't an `ALTER TABLE` statement; pass
 // through unchanged. It also breaks an in-progress combine group on
-// the same table because the runs separator is "any non-combinable
+// the same table because the run separator is "any non-combinable
 // statement," not just same-table.
 func TestCombineSameTableAlters_CreateIndexPassThrough(t *testing.T) {
 	in := []string{

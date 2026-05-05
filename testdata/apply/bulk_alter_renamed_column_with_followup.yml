@@ -2,10 +2,11 @@
 # same-table specs. Within one ALTER, MySQL resolves spec-target
 # identifiers (`MODIFY COLUMN <name>`, `DROP INDEX <name>`, …) against
 # the *original* table state — so a follow-on spec referring to the
-# renamed object by its new name would fail with `Error 1054 Unknown
-# column …`. To stay safe, splitCombinableAlter rejects any spec
-# starting with `RENAME COLUMN` / `RENAME INDEX`, so renames keep
-# their own ALTER even under --bulk-alter.
+# renamed object by its new name would fail at apply time (`Error
+# 1054 Unknown column …` for the column case, the matching index
+# error code for the index case). To stay safe, splitCombinableAlter
+# rejects any spec starting with `RENAME COLUMN` / `RENAME INDEX`, so
+# renames keep their own ALTER even under --bulk-alter.
 #
 # This fixture pins that the rename and the column add stay as two
 # separate ALTERs and the round-trip still closes.

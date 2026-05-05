@@ -21,9 +21,10 @@ import "strings"
 //     resolves spec-target identifiers (`MODIFY COLUMN <name>`,
 //     `DROP INDEX <name>`, …) against the *original* table state,
 //     so a follow-on spec referring to the renamed object by its
-//     new name fails with `Error 1054 Unknown column …` /
-//     similar. Combine would silently break the round-trip; keep
-//     RENAME COLUMN / RENAME INDEX as their own ALTERs.
+//     new name fails at apply time (`Error 1054 Unknown column …`
+//     for the column case, the matching index error code for the
+//     index case). Combine would silently break the round-trip;
+//     keep RENAME COLUMN / RENAME INDEX as their own ALTERs.
 //     (`RENAME TO <table>` is in `RenameStmts` not `Stmts`, so the
 //     check here is for the column / index variants reaching this
 //     bucket.)

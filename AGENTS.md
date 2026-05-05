@@ -213,9 +213,10 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
     resolves spec-target identifiers (`MODIFY COLUMN <name>`,
     `DROP INDEX <name>`, …) against the original table state, so
     a follow-on spec referencing the renamed object by its new
-    name fails with `Error 1054 Unknown column …`. Rename specs
-    keep their own ALTER even under `--bulk-alter`. See CAVEATS.md
-    for the trap.
+    name fails at apply time (`Error 1054 Unknown column …` for
+    the column case, the matching index error code for the index
+    case). Rename specs keep their own ALTER even under
+    `--bulk-alter`. See CAVEATS.md for the trap.
   - CREATE / DROP / RENAME TABLE.
 
   The combiner is order-preserving — it never reorders, so the diff's
