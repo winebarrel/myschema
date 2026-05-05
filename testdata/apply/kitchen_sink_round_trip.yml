@@ -1,0 +1,140 @@
+# Kitchen-sink round-trip fixture (PR #84 postmortem audit, item 6).
+#
+# One fixture exercising as many supported attributes as fit in a
+# small schema, asserting that init=desired produces no diff (apply
+# is a no-op) AND verify_no_drift confirms the catalog read →
+# parser model round-trip closes. The regression net is wide: any
+# future attribute interaction bug surfaces here before shipping.
+#
+# Coverage matrix (faithful to the DDL below — see "intentional
+# omissions" footnote at the bottom for what isn't here and why):
+#   - column: PK / AUTO_INCREMENT / NOT NULL / DEFAULT literal /
+#     DEFAULT CURRENT_TIMESTAMP / ON UPDATE / COMMENT / INVISIBLE /
+#     STORED GENERATED
+#   - inline column-level: UNIQUE (auto-named index)
+#   - table-level constraint: CHECK (with default ENFORCED)
+#   - index: PRIMARY / inline-UNIQUE auto-named / KEY with prefix
+#     length INVISIBLE / FULLTEXT with COMMENT
+#   - foreign key: explicit named CONSTRAINT with ON DELETE CASCADE
+#   - table options: ENGINE / DEFAULT CHARSET / COLLATE / COMMENT
+#   - partitioning: RANGE (single-expression form) with three
+#     partitions
+#   - views: simple SELECT, plus a view with column alias list
+#     (the alias list is NOT compared by the diff — see TODO.md
+#      "View column-alias list … silent" — so the alias names are
+#      really pinned only by the SELECT body round-trip; included
+#      so the catalog reader path for views with `(col1, col2)`
+#      headers gets exercised even though the comparison itself is
+#      currently a no-op).
+#
+# Intentional omissions (each has a separate sub-fixture or
+# open TODO):
+#   - VIRTUAL generated column — covered by
+#     bulk_alter_with_generated_column.yml (STORED) plus parser-
+#     side TestParseColumnAttributes (VIRTUAL). Adding both
+#     STORED + VIRTUAL on this kitchen-sink table would risk
+#     drift on the per-column charset metadata MySQL fills in.
+#   - per-column COLLATE — covered by TestColumnAttributesRoundTrip
+#     in catalog/tables_test.go.
+#   - UNIQUE INDEX with explicit COMMENT — the inline UNIQUE on
+#     `email` exercises auto-naming, and the FULLTEXT KEY exercises
+#     the COMMENT-on-an-index path. UNIQUE-with-COMMENT
+#     specifically is pinned by TestIndexAttributeMatrix's
+#     `UNIQUE × INVISIBLE × COMMENT` sub-test in catalog.
+#   - inline column-level `REFERENCES` — MySQL auto-names the FK
+#     numerically (`<table>_ibfk_1`) while the parser auto-names it
+#     column-shaped (`<table>_ibfk_<col>`); the round-trip drifts.
+#     An explicit named CONSTRAINT is used instead. See TODO.md for
+#     the open auto-naming issue.
+#
+# Pattern:
+#   init = desired = full schema, applied = "" (no-op).
+#   verify_no_drift: true → re-plan after no-op must also be empty.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      display_name VARCHAR(64) NOT NULL DEFAULT 'anonymous' COMMENT 'display name',
+      bio TEXT INVISIBLE,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      score INT NOT NULL DEFAULT 0,
+      score_doubled INT GENERATED ALWAYS AS (score * 2) STORED,
+      PRIMARY KEY (id),
+      KEY ix_name (display_name(20)) INVISIBLE,
+      CONSTRAINT chk_score CHECK (score >= 0)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='primary user table';
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      user_id BIGINT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      body TEXT,
+      PRIMARY KEY (id),
+      KEY idx_user (user_id),
+      FULLTEXT KEY ft_body (body) COMMENT 'fulltext search',
+      CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      ts INT NOT NULL,
+      payload VARCHAR(255),
+      PRIMARY KEY (id, ts),
+      KEY idx_ts (ts)
+  )
+  PARTITION BY RANGE (ts) (
+      PARTITION p2024 VALUES LESS THAN (2025),
+      PARTITION p2025 VALUES LESS THAN (2026),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+  CREATE VIEW v_users_simple AS SELECT id, email FROM users;
+  CREATE VIEW v_users_aliased (uid, addr) AS SELECT id, email FROM users;
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      display_name VARCHAR(64) NOT NULL DEFAULT 'anonymous' COMMENT 'display name',
+      bio TEXT INVISIBLE,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      score INT NOT NULL DEFAULT 0,
+      score_doubled INT GENERATED ALWAYS AS (score * 2) STORED,
+      PRIMARY KEY (id),
+      KEY ix_name (display_name(20)) INVISIBLE,
+      CONSTRAINT chk_score CHECK (score >= 0)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='primary user table';
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      user_id BIGINT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      body TEXT,
+      PRIMARY KEY (id),
+      KEY idx_user (user_id),
+      FULLTEXT KEY ft_body (body) COMMENT 'fulltext search',
+      CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE events (
+      id BIGINT NOT NULL,
+      ts INT NOT NULL,
+      payload VARCHAR(255),
+      PRIMARY KEY (id, ts),
+      KEY idx_ts (ts)
+  )
+  PARTITION BY RANGE (ts) (
+      PARTITION p2024 VALUES LESS THAN (2025),
+      PARTITION p2025 VALUES LESS THAN (2026),
+      PARTITION pmax VALUES LESS THAN MAXVALUE
+  );
+
+  CREATE VIEW v_users_simple AS SELECT id, email FROM users;
+  CREATE VIEW v_users_aliased (uid, addr) AS SELECT id, email FROM users;
+
+applied: ""
+
+verify_no_drift: true
