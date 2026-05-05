@@ -1,0 +1,37 @@
+# Coverage: --bulk-alter folds the same-table DROP PRIMARY KEY +
+# ADD PRIMARY KEY pair (emitted by the diff layer when the PK
+# column set changes — see change_primary_key.yml for the
+# non-bulk baseline) into one multi-spec ALTER:
+#
+#   ALTER TABLE t DROP PRIMARY KEY, ADD PRIMARY KEY (tenant_id, id);
+#
+# MySQL 8.0+ accepts this combined form: the parser recognises
+# DROP PRIMARY KEY followed by ADD PRIMARY KEY in one
+# alter_specifications list as a replacement, applied atomically.
+# (Older MySQL versions required two separate statements; myschema's
+# baseline is 8.0+ — see AGENTS.md Requirements — so the combined
+# shape is in scope.)
+#
+# verify_no_drift: true confirms the round-trip closes after one
+# combined apply.
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      tenant_id INT NOT NULL,
+      PRIMARY KEY (tenant_id, id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t DROP PRIMARY KEY, ADD PRIMARY KEY (tenant_id, id);
+
+verify_no_drift: true

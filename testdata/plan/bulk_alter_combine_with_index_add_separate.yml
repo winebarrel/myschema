@@ -3,8 +3,8 @@
 # fixture only verifies that the round-trip closes — it can't catch a
 # rendering bug that still happens to apply cleanly).
 #
-# Three column adds + one secondary index add, all on the same table:
-#   - The three ADD COLUMNs fold into one multi-spec ALTER.
+# Four column adds + one secondary index add, all on the same table:
+#   - The four ADD COLUMNs fold into one multi-spec ALTER.
 #   - The secondary index add lands as a standalone CREATE INDEX
 #     (diff/tables.go:728 — not an ALTER TABLE … ADD KEY), so it
 #     stays on its own line and breaks the run.
@@ -12,7 +12,7 @@
 # Combined with --alter-algorithm / --alter-lock to also pin that
 # the hint splice still fires once per output statement (so the
 # combined ALTER carries one trailing `, ALGORITHM=…, LOCK=…`, not
-# three).
+# four).
 init: |
   CREATE TABLE users (
       id BIGINT NOT NULL,
