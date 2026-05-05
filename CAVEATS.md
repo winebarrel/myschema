@@ -242,15 +242,30 @@ trailing-comma splice that `appendAlterHints` does still fires
   rejects it at apply time because the most-restrictive spec in
   the bundle isn't INSTANT-compatible.
 - Without `--bulk-alter` the same two specs are two separate
-  ALTERs, and MySQL's per-statement default ALGORITHM picks the
-  right level for each. Operators who pin ALGORITHM to a strict
-  level (INSTANT especially) need to weigh this against the
-  combine: enabling `--bulk-alter` can turn a previously
-  online-DDL-clean migration into a COPY-or-fail.
+  ALTERs. `appendAlterHints` still appends `ALGORITHM=INSTANT` to
+  each one independently, so a spec that isn't INSTANT-eligible
+  still fails on its own statement — splitting alone doesn't
+  recover from an INSTANT mismatch. What it does recover is the
+  *all-or-nothing* failure shape of bulk-alter: with separate
+  ALTERs, each spec succeeds or fails individually, instead of
+  one combined statement aborting the whole run on the first
+  non-eligible spec.
 
-Run `plan` first to see the combined statement, and check each
-spec against MySQL's online-DDL matrix. Drop one of the flags if
-the combined ALGORITHM/LOCK choice doesn't fit.
+To recover from a combined `ALGORITHM=…` rejection:
+
+- **Loosen the algorithm pin.** Switch `--alter-algorithm=INSTANT`
+  to `INPLACE`, `COPY`, or drop the flag entirely so MySQL picks
+  per-spec defaults. This is the only fix that actually changes
+  what algorithm MySQL applies.
+- **Drop `--bulk-alter`** to split the run into per-spec ALTERs.
+  Each spec is then independently rejectable; the operator can
+  triage which one is non-INSTANT and apply it without the strict
+  hint. (Dropping bulk-alter alone, while keeping
+  `--alter-algorithm=INSTANT`, won't make any individual spec
+  more compatible — the hint still fires per ALTER.)
+
+Run `plan` first to see the combined statement and check each spec
+against MySQL's online-DDL matrix before opting in.
 
 ## Integer display widths drift; type-name casing doesn't
 
