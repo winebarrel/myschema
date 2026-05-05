@@ -253,11 +253,14 @@ func TestDump_SplitFlagName(t *testing.T) {
 	require.Error(t, err, "kong must reject --split-dir (renamed to --split)")
 }
 
-// TestDump_SplitRejectsUnsafeName pins the path-traversal guard in
-// splitPath. MySQL itself rejects '/', '\', '.' in identifiers, so
-// these cases are defence-in-depth: if a future catalog change or a
-// non-MySQL data source ever fed an unsafe name through, the writer
-// must refuse rather than scribble outside the requested directory.
+// TestDump_SplitRejectsUnsafeName pins what splitPath actually
+// rejects: anything filepath.Join would treat as escaping dir. The
+// list is filesystem-shaped (path-segment sentinels, embedded
+// separators, Windows volume names), not "what MySQL allows" —
+// names that merely contain '.' (e.g. `my.tbl`) are accepted because
+// the OS treats them as ordinary filename characters. The MySQL-side
+// identifier rules are an upstream concern; splitPath is the
+// last-line defence at the filesystem boundary.
 func TestDump_SplitRejectsUnsafeName(t *testing.T) {
 	cases := []struct {
 		name string
@@ -270,6 +273,13 @@ func TestDump_SplitRejectsUnsafeName(t *testing.T) {
 		{"backslash", `a\b`},
 		{"traversal", "../escape"},
 		{"absolute", "/etc/passwd"},
+		// Windows-volume escape vectors. The ':' branch catches
+		// `C:foo` on every host (Linux's filepath.VolumeName always
+		// returns ""), so Linux/macOS CI exercises the reject path
+		// even though the volume parser only fires on Windows.
+		{"windows drive", "C:foo"},
+		{"windows unc", `\\server\share\x`},
+		{"colon anywhere", "weird:name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

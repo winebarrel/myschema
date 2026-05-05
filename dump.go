@@ -18,7 +18,7 @@ type DumpOptions struct {
 	// `name:"split"` overrides kong's CamelCase→kebab default
 	// (`--split-dir`) so the CLI surface matches the documented
 	// `--split=<dir>` shape.
-	SplitDir string `name:"split" help:"Write one SQL file per table/view into this directory (mkdir -p). Filters apply. SQL is omitted from stdout — only the header summary and a 'wrote N file(s) to <dir>' notice are printed."`
+	SplitDir string `name:"split" help:"Write one SQL file per table/view into this directory (mkdir -p). Filters apply. SQL is omitted from stdout — only the header summary and a '-- Wrote N file(s) to <dir>' notice are printed."`
 }
 
 // DumpResult is the rendered current-schema SQL plus a count for the header.
@@ -126,15 +126,37 @@ func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], vi
 }
 
 // splitPath returns the per-object output path under dir, refusing any
-// object name that could break out of dir. MySQL itself rejects '/',
-// '\', and '.' in table/view names, so this is defence-in-depth: it
-// pins the contract regardless of upstream changes (or a mocked /
-// non-MySQL data source) and keeps `--split=<dir>` from accidentally
-// scribbling outside the chosen directory.
+// object name that filepath.Join would interpret as escaping dir. The
+// rejection list is defence-in-depth — MySQL forbids most of these in
+// identifiers anyway — but is written against what the *filesystem*
+// would do, not what MySQL allows:
+//
+//   - "" / "." / ".." — path-segment sentinels that, even joined with
+//     dir, resolve to dir itself or its parent.
+//   - '/' or '\' — embedded path separators would create unintended
+//     subdirectories or, on Windows, change the meaning of the join.
+//     Checked alongside os.PathSeparator so the Unix and Windows
+//     separators are both rejected on every host.
+//   - ':' anywhere in the name — on Windows, names like `C:foo`
+//     have a volume part that filepath.Join *discards* dir and writes
+//     to instead. The check is a literal `:` scan rather than
+//     filepath.VolumeName, because that helper is OS-specific
+//     (Linux/macOS always return ""), so a Linux-built binary would
+//     not catch a Windows-shaped name without the explicit byte
+//     scan. filepath.VolumeName is also called as a belt-and-suspenders
+//     guard for backslash UNC shapes (`\\server\share\x`) that the
+//     '/' / '\' branch above already covers — kept so Windows-only
+//     escape vectors fail closed even if someone widens the separator
+//     check later.
+//
+// Names that merely *contain* '.' (e.g. `my.tbl`) are NOT rejected —
+// the filesystem treats them as ordinary characters; only the bare
+// "." / ".." segment sentinels are unsafe.
 func splitPath(dir, name string) (string, error) {
 	if name == "" || name == "." || name == ".." ||
-		strings.ContainsAny(name, `/\`) ||
-		strings.ContainsRune(name, os.PathSeparator) {
+		strings.ContainsAny(name, `/\:`) ||
+		strings.ContainsRune(name, os.PathSeparator) ||
+		filepath.VolumeName(name) != "" {
 		return "", fmt.Errorf("dump: refusing unsafe object name %q for split mode", name)
 	}
 	return filepath.Join(dir, name+".sql"), nil
