@@ -129,6 +129,124 @@ CREATE TABLE posts (
 	assert.Equal(t, "CASCADE", fk.OnDelete)
 }
 
+// TestParseInlineColumnPrimaryKey: vitess parses `id INT PRIMARY KEY`
+// as a column with KeyOpt = ColKeyPrimary, distinct from a table-level
+// PRIMARY KEY (id) constraint. The parser must promote the inline form
+// to the same `t.Constraints["PRIMARY"]` + `t.Indexes["PRIMARY"]` shape
+// the table-level path produces, otherwise the PK silently drops on
+// apply (the regression that motivated this test). MySQL forces
+// NOT NULL on a PK column even when the user wrote just `PRIMARY KEY`,
+// so the column's NotNull flag must also be set — match the table-level
+// behaviour in addIndex's IndexTypePrimary case.
+func TestParseInlineColumnPrimaryKey(t *testing.T) {
+	t.Run("explicit NOT NULL", func(t *testing.T) {
+		sql := `CREATE TABLE t (id INT NOT NULL PRIMARY KEY, name VARCHAR(64));`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		require.NotNil(t, tbl)
+
+		pk, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok, "inline PRIMARY KEY must produce a PRIMARY constraint")
+		assert.Equal(t, model.PrimaryKeyConstraint, pk.Type)
+		assert.Equal(t, []string{"id"}, pk.Columns)
+
+		idx, ok := tbl.Indexes.GetOk("PRIMARY")
+		require.True(t, ok, "inline PRIMARY KEY must produce a PRIMARY index")
+		assert.True(t, idx.Primary)
+
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull, "PK column must be NOT NULL")
+	})
+	t.Run("PRIMARY KEY without explicit NOT NULL forces NotNull", func(t *testing.T) {
+		// MySQL silently makes the column NOT NULL when it's a PK; the
+		// parser must mirror that so the dump round-trip stays stable.
+		sql := `CREATE TABLE t (id INT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull, "inline PK must force NotNull on its column")
+	})
+	t.Run("AUTO_INCREMENT combines with inline PRIMARY KEY", func(t *testing.T) {
+		// `BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY` is one of the
+		// most common real-world shapes for surrogate-key tables. It
+		// should produce a PK constraint and preserve AUTO_INCREMENT
+		// on the column — both attributes are independent in vitess
+		// (KeyOpt and Autoincrement live on different fields), so the
+		// promotion must not clobber AutoIncrement.
+		sql := `CREATE TABLE t (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+
+		_, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok, "inline PK must produce PRIMARY constraint")
+
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull)
+		assert.True(t, id.AutoIncrement, "AUTO_INCREMENT must survive PK promotion")
+	})
+	t.Run("two inline PRIMARY KEYs: first column wins", func(t *testing.T) {
+		// `CREATE TABLE t (a INT PRIMARY KEY, b INT PRIMARY KEY)` is
+		// invalid MySQL (multiple PRIMARY KEYs), but vitess parses it
+		// without an error — every column carries ColKeyPrimary
+		// independently. applyInlineColumnKey's idempotent skip drops
+		// the second promotion so the parsed model stays well-shaped:
+		// the first column wins, MySQL still rejects at apply time.
+		// Pin the precedence here so a refactor that flips the order
+		// (or removes the skip) surfaces a regression in CI rather
+		// than at apply.
+		sql := `CREATE TABLE t (a INT PRIMARY KEY, b INT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+
+		pk, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok)
+		assert.Equal(t, []string{"a"}, pk.Columns, "first column with inline PK wins")
+
+		// Only column `a` gets NotNull forced — by its own
+		// promotion. Column `b` hits the skip branch and is left
+		// untouched: its NotNull flag stays at whatever vitess
+		// parsed (here, the implicit nullable default for INT,
+		// since the source SQL doesn't write NOT NULL on `b`).
+		// The relevant assertion for this test is that the PK
+		// column list contains only `a`; don't over-pin column
+		// `b`'s NotNull flag.
+	})
+}
+
+// TestParseInlineColumnUnique: `email VARCHAR(255) UNIQUE` and the
+// `UNIQUE KEY` variant should both promote to a UNIQUE Index named
+// after the column (matching MySQL's auto-naming and the table-level
+// path's behaviour in addIndex's IndexTypeUnique case). Without the
+// promotion the constraint silently drops on apply.
+func TestParseInlineColumnUnique(t *testing.T) {
+	for _, kw := range []string{"UNIQUE", "UNIQUE KEY"} {
+		t.Run(kw, func(t *testing.T) {
+			sql := `CREATE TABLE t (
+    id INT NOT NULL,
+    email VARCHAR(255) ` + kw + `,
+    PRIMARY KEY (id)
+);`
+			r, err := parser.ParseSQL(sql, "app")
+			require.NoError(t, err)
+			tbl, _ := r.Tables.GetOk("app.t")
+			require.NotNil(t, tbl)
+
+			idx, ok := tbl.Indexes.GetOk("email")
+			require.True(t, ok, "inline UNIQUE must produce a UNIQUE index named after the column")
+			assert.Equal(t, model.IndexUnique, idx.KeyType)
+			require.Len(t, idx.Parts, 1)
+			assert.Equal(t, "email", idx.Parts[0].Column)
+		})
+	}
+}
+
 func TestParseCreateIndex(t *testing.T) {
 	sql := `
 CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(64), PRIMARY KEY (id));

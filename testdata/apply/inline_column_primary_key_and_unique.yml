@@ -1,0 +1,28 @@
+# Coverage: inline column-level PRIMARY KEY and UNIQUE round-trip
+# end-to-end. AGENTS.md "In scope (v1)" lists "inline column-level
+# PK / UNIQUE / REFERENCES" — REFERENCES had its own pin
+# (TestParseInlineForeignKey) but PK and UNIQUE silently dropped on
+# apply until the parser was taught to read vitess's
+# `cd.Type.Options.KeyOpt`. Pin both shapes here so a regression
+# in `applyInlineColumnKey` (parser/parser.go) surfaces in the
+# integration suite, not just in the unit tests.
+
+init: |
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL PRIMARY KEY,
+      email VARCHAR(255) UNIQUE,
+      name VARCHAR(64)
+  );
+
+applied: |
+  CREATE TABLE t (
+      id int NOT NULL,
+      email varchar(255),
+      name varchar(64),
+      PRIMARY KEY (id)
+  );
+  CREATE UNIQUE INDEX email ON t (email);
+
+verify_no_drift: true
