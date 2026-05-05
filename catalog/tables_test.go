@@ -625,7 +625,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		id, _ := tbl.Columns.GetOk("id")
 		require.NotNil(t, id)
 		assert.True(t, id.AutoIncrement, "AUTO_INCREMENT must round-trip")
@@ -652,7 +653,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		total, _ := tbl.Columns.GetOk("total")
 		require.NotNil(t, total)
 		require.NotNil(t, total.Generated, "GENERATED expression must round-trip")
@@ -680,7 +682,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		d, _ := tbl.Columns.GetOk("doubled")
 		require.NotNil(t, d)
 		require.NotNil(t, d.Generated)
@@ -712,7 +715,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		idx, ok := tbl.Indexes.GetOk("uq_email")
 		require.True(t, ok)
 		assert.Equal(t, model.IndexUnique, idx.KeyType, "UNIQUE classification")
@@ -735,7 +739,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		idx, ok := tbl.Indexes.GetOk("ft_body")
 		require.True(t, ok)
 		assert.Equal(t, model.IndexFulltext, idx.KeyType, "FULLTEXT classification")
@@ -743,14 +748,13 @@ CREATE TABLE t (
 		assert.Equal(t, "fulltext search", *idx.Comment)
 	})
 
-	t.Run("SPATIAL × prefix length", func(t *testing.T) {
-		// Spatial indexes use INDEX_TYPE = "SPATIAL"; columns are
-		// not prefix-lengthed in practice but MySQL accepts a
-		// (numeric) SUB_PART on b-tree indexes. Cover the most
-		// common SPATIAL path to pin the classification, then
-		// pair with a separate prefix-length test on a regular
-		// secondary index since SUB_PART on SPATIAL is rejected
-		// by MySQL.
+	t.Run("SPATIAL classification", func(t *testing.T) {
+		// Spatial indexes use INDEX_TYPE = "SPATIAL". MySQL rejects
+		// per-part SUB_PART (prefix length) on SPATIAL indexes,
+		// so the prefix-length aspect is exercised in the separate
+		// "prefix length × INVISIBLE" sub-test below using a regular
+		// (b-tree) secondary index. This sub-test pins SPATIAL
+		// classification only.
 		db := testutil.ConnectDB(t)
 		ctx := context.Background()
 		testutil.SetupDB(t, ctx, db, `
@@ -764,7 +768,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		idx, ok := tbl.Indexes.GetOk("sp_geom")
 		require.True(t, ok)
 		assert.Equal(t, model.IndexSpatial, idx.KeyType, "SPATIAL classification")
@@ -789,7 +794,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		idx, ok := tbl.Indexes.GetOk("pref_name")
 		require.True(t, ok)
 		assert.True(t, idx.Invisible, "INVISIBLE flag")
@@ -819,7 +825,8 @@ CREATE TABLE t (
 		cat := catalog.NewCatalog(db, testutil.DefaultDB)
 		tables, err := cat.Tables(ctx)
 		require.NoError(t, err)
-		tbl, _ := tables.GetOk("myschema_test.t")
+		tbl, ok := tables.GetOk("myschema_test.t")
+		require.True(t, ok)
 		idx, ok := tbl.Indexes.GetOk("ix_ab")
 		require.True(t, ok)
 		assert.True(t, idx.Invisible)
