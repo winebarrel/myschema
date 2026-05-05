@@ -18,7 +18,7 @@ type DumpOptions struct {
 	// `name:"split"` overrides kong's CamelCase→kebab default
 	// (`--split-dir`) so the CLI surface matches the documented
 	// `--split=<dir>` shape.
-	SplitDir string `name:"split" help:"Write one SQL file per table/view into this directory (mkdir -p). Filters apply. SQL is omitted from stdout — only the header summary and a '-- Wrote N file(s) to <dir>' notice are printed. Object names containing path separators or ':' are rejected at write time."`
+	SplitDir string `name:"split" help:"Write one SQL file per table/view into this directory (mkdir -p). Filters apply. SQL is omitted from stdout — only the header summary and a '-- Wrote N file(s) to <dir>' notice are printed."`
 }
 
 // DumpResult is the rendered current-schema SQL plus a count for the header.
