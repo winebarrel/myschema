@@ -135,8 +135,10 @@ func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], vi
 //     dir, resolve to dir itself or its parent.
 //   - '/' or '\' — embedded path separators would create unintended
 //     subdirectories or, on Windows, change the meaning of the join.
-//     Checked alongside os.PathSeparator so the Unix and Windows
-//     separators are both rejected on every host.
+//     Both forms are checked literally so the same rejection runs on
+//     every host (os.PathSeparator is always one of '/' or '\', so
+//     listing both in the ContainsAny call covers it without a
+//     separate ContainsRune).
 //   - ':' anywhere in the name — on Windows, names like `C:foo`
 //     have a volume part that filepath.Join *discards* dir and writes
 //     to instead. The check is a literal `:` scan rather than
@@ -155,7 +157,6 @@ func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], vi
 func splitPath(dir, name string) (string, error) {
 	if name == "" || name == "." || name == ".." ||
 		strings.ContainsAny(name, `/\:`) ||
-		strings.ContainsRune(name, os.PathSeparator) ||
 		filepath.VolumeName(name) != "" {
 		return "", fmt.Errorf("dump: refusing unsafe object name %q for split mode", name)
 	}
