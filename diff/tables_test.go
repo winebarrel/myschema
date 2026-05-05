@@ -705,3 +705,104 @@ func TestDropConstraintSQL_Check(t *testing.T) {
 	got := diff.DropConstraintSQL("t", c)
 	assert.Equal(t, "ALTER TABLE t DROP CHECK chk_pos;", got)
 }
+
+func TestTableCharsetCollationSQL(t *testing.T) {
+	mk := func(charset, coll *string) *model.Table {
+		return &model.Table{Charset: charset, Collation: coll}
+	}
+	utf8 := "utf8mb4"
+	latin1 := "latin1"
+	ai := "utf8mb4_0900_ai_ci"
+	bin := "utf8mb4_bin"
+
+	t.Run("both nil → empty", func(t *testing.T) {
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(nil, nil), mk(nil, nil)))
+	})
+	t.Run("desired nil/nil short-circuit even if current set", func(t *testing.T) {
+		// desired Charset=nil, Collation=nil means "user didn't declare
+		// anything"; short-circuit returns empty regardless of current.
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(&utf8, &ai), mk(nil, nil)))
+	})
+	t.Run("charset only, equal", func(t *testing.T) {
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(&utf8, nil), mk(&utf8, nil)))
+	})
+	t.Run("charset only, differs", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(&utf8, nil), mk(&latin1, nil))
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=latin1;", got)
+	})
+	t.Run("collation only, differs", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(nil, &ai), mk(nil, &bin))
+		assert.Equal(t, "ALTER TABLE t COLLATE=utf8mb4_bin;", got)
+	})
+	t.Run("charset+collation, both differ", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(&latin1, nil), mk(&utf8, &ai))
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;", got)
+	})
+	t.Run("desired Charset != nil, Collation nil; current Collation nil → equal", func(t *testing.T) {
+		// "use the charset's default collation" — catalog represents
+		// that as nil, so equal when current.Collation is also nil.
+		assert.Empty(t, diff.TableCharsetCollationSQL("t", mk(&utf8, nil), mk(&utf8, nil)))
+	})
+	t.Run("desired Charset, no Collation; current has explicit non-default Collation → fires", func(t *testing.T) {
+		got := diff.TableCharsetCollationSQL("t", mk(&utf8, &bin), mk(&utf8, nil))
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=utf8mb4;", got)
+	})
+	t.Run("convert-charset directive emits CONVERT TO when charset differs", func(t *testing.T) {
+		current := mk(&latin1, nil)
+		desired := mk(&utf8, &ai)
+		desired.ConvertCharset = true
+		got := diff.TableCharsetCollationSQL("t", current, desired)
+		assert.Equal(t, "ALTER TABLE t CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;", got)
+	})
+	t.Run("convert-charset directive: collation-only diff falls through", func(t *testing.T) {
+		// Charset matches, only Collation differs → CONVERT TO would
+		// needlessly rebuild the table. Falls through to DEFAULT
+		// CHARSET=…  COLLATE=… (full shape because parser requires
+		// DEFAULT CHARSET on the directive's CREATE TABLE).
+		current := mk(&utf8, &bin)
+		desired := mk(&utf8, &ai)
+		desired.ConvertCharset = true
+		got := diff.TableCharsetCollationSQL("t", current, desired)
+		assert.Equal(t, "ALTER TABLE t DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;", got)
+	})
+}
+
+func TestTableCommentSQL(t *testing.T) {
+	mk := func(c *string) *model.Table { return &model.Table{Comment: c} }
+	old, new_ := "old", "new"
+	empty := ""
+
+	t.Run("both nil → empty", func(t *testing.T) {
+		assert.Empty(t, diff.TableCommentSQL("t", mk(nil), mk(nil)))
+	})
+	t.Run("change", func(t *testing.T) {
+		assert.Equal(t,
+			"ALTER TABLE t COMMENT='new';",
+			diff.TableCommentSQL("t", mk(&old), mk(&new_)))
+	})
+	t.Run("add", func(t *testing.T) {
+		assert.Equal(t,
+			"ALTER TABLE t COMMENT='new';",
+			diff.TableCommentSQL("t", mk(nil), mk(&new_)))
+	})
+	t.Run("drop emits empty literal", func(t *testing.T) {
+		assert.Equal(t,
+			"ALTER TABLE t COMMENT='';",
+			diff.TableCommentSQL("t", mk(&old), mk(nil)))
+	})
+	t.Run("desired explicit empty folded to nil → no diff", func(t *testing.T) {
+		// canonicalComment folds &"" to nil so an explicit empty
+		// COMMENT in desired SQL converges against catalog-side nil.
+		assert.Empty(t, diff.TableCommentSQL("t", mk(nil), mk(&empty)))
+	})
+}
+
+func TestCanonicalComment(t *testing.T) {
+	empty := ""
+	val := "x"
+	assert.Nil(t, diff.CanonicalComment(nil))
+	assert.Nil(t, diff.CanonicalComment(&empty))
+	got := diff.CanonicalComment(&val)
+	require.NotNil(t, got)
+	assert.Equal(t, "x", *got)
+}
