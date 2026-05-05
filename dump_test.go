@@ -238,19 +238,33 @@ func TestDump_SplitEmptySchema(t *testing.T) {
 // shift the user-facing flag, so parse the flag through real kong
 // here to keep the surface in lockstep with the docs.
 func TestDump_SplitFlagName(t *testing.T) {
-	var cli struct {
-		myschema.DumpOptions
-	}
-	parser, err := kong.New(&cli)
-	require.NoError(t, err)
-	_, err = parser.Parse([]string{"--split=/tmp/out"})
-	require.NoError(t, err, "kong must accept --split=<dir>")
-	assert.Equal(t, "/tmp/out", cli.SplitDir)
-
-	// And the legacy auto-derived `--split-dir` must NOT work — if
-	// it did, both names would coexist and docs would drift.
-	_, err = parser.Parse([]string{"--split-dir=/tmp/out"})
-	require.Error(t, err, "kong must reject --split-dir (renamed to --split)")
+	// Build a fresh parser+cli per assertion. kong.Parse mutates the
+	// destination struct; reusing one parser across two Parse() calls
+	// is technically supported today but couples the test to that
+	// reuse semantic. Mirror the pre-sql tests' pattern (one parser
+	// per case) so a future kong upgrade that tightens the contract
+	// can't make this test flaky.
+	t.Run("--split is accepted", func(t *testing.T) {
+		var cli struct {
+			myschema.DumpOptions
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"--split=/tmp/out"})
+		require.NoError(t, err, "kong must accept --split=<dir>")
+		assert.Equal(t, "/tmp/out", cli.SplitDir)
+	})
+	t.Run("--split-dir is rejected", func(t *testing.T) {
+		// And the legacy auto-derived `--split-dir` must NOT work —
+		// if it did, both names would coexist and docs would drift.
+		var cli struct {
+			myschema.DumpOptions
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"--split-dir=/tmp/out"})
+		require.Error(t, err, "kong must reject --split-dir (renamed to --split)")
+	})
 }
 
 // TestDump_SplitRejectsUnsafeName pins what splitPath actually

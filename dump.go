@@ -100,7 +100,7 @@ func (c *Client) Dump(ctx context.Context, options *DumpOptions) (*DumpResult, e
 // view, never both at once).
 func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], views *orderedmap.Map[string, *model.View]) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("dump: mkdir %s: %w", dir, err)
+		return fmt.Errorf("dump: mkdir %q: %w", dir, err)
 	}
 	for _, t := range tables.CollectValues() {
 		path, err := splitPath(dir, t.Name)
@@ -109,7 +109,7 @@ func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], vi
 		}
 		body := model.TableToSQL(t) + "\n"
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec // dump output, not a credential file
-			return fmt.Errorf("dump: write %s: %w", path, err)
+			return fmt.Errorf("dump: write %q: %w", path, err)
 		}
 	}
 	for _, v := range views.CollectValues() {
@@ -119,7 +119,7 @@ func writeDumpSplit(dir string, tables *orderedmap.Map[string, *model.Table], vi
 		}
 		body := model.ViewToSQL(v) + "\n"
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec
-			return fmt.Errorf("dump: write %s: %w", path, err)
+			return fmt.Errorf("dump: write %q: %w", path, err)
 		}
 	}
 	return nil
