@@ -6,24 +6,46 @@
 # parser model round-trip closes. The regression net is wide: any
 # future attribute interaction bug surfaces here before shipping.
 #
-# Coverage matrix:
+# Coverage matrix (faithful to the DDL below — see "intentional
+# omissions" footnote at the bottom for what isn't here and why):
 #   - column: PK / AUTO_INCREMENT / NOT NULL / DEFAULT literal /
 #     DEFAULT CURRENT_TIMESTAMP / ON UPDATE / COMMENT / INVISIBLE /
-#     STORED GENERATED / VIRTUAL GENERATED / per-column COLLATE
+#     STORED GENERATED
 #   - inline column-level: UNIQUE (auto-named index)
-#     [inline column-level REFERENCES is deliberately excluded —
-#      MySQL auto-names the FK numerically (`<table>_ibfk_1`) while
-#      the parser auto-names it column-shaped (`<table>_ibfk_<col>`),
-#      so the round-trip drifts; an explicit named CONSTRAINT is
-#      used instead and the auto-name mismatch lives as a separate
-#      open issue]
 #   - table-level constraint: CHECK (with default ENFORCED)
-#   - index: PRIMARY / UNIQUE with COMMENT / KEY with prefix length
-#     INVISIBLE / FULLTEXT with COMMENT
-#   - foreign key: ON DELETE CASCADE
+#   - index: PRIMARY / inline-UNIQUE auto-named / KEY with prefix
+#     length INVISIBLE / FULLTEXT with COMMENT
+#   - foreign key: explicit named CONSTRAINT with ON DELETE CASCADE
 #   - table options: ENGINE / DEFAULT CHARSET / COLLATE / COMMENT
-#   - partitioning: RANGE COLUMNS with three partitions
-#   - views: simple SELECT, view with column alias list
+#   - partitioning: RANGE (single-expression form) with three
+#     partitions
+#   - views: simple SELECT, plus a view with column alias list
+#     (the alias list is NOT compared by the diff — see TODO.md
+#      "View column-alias list … silent" — so the alias names are
+#      really pinned only by the SELECT body round-trip; included
+#      so the catalog reader path for views with `(col1, col2)`
+#      headers gets exercised even though the comparison itself is
+#      currently a no-op).
+#
+# Intentional omissions (each has a separate sub-fixture or
+# open TODO):
+#   - VIRTUAL generated column — covered by
+#     bulk_alter_with_generated_column.yml (STORED) plus parser-
+#     side TestParseColumnAttributes (VIRTUAL). Adding both
+#     STORED + VIRTUAL on this kitchen-sink table would risk
+#     drift on the per-column charset metadata MySQL fills in.
+#   - per-column COLLATE — covered by TestColumnAttributesRoundTrip
+#     in catalog/tables_test.go.
+#   - UNIQUE INDEX with explicit COMMENT — the inline UNIQUE on
+#     `email` exercises auto-naming, and the FULLTEXT KEY exercises
+#     the COMMENT-on-an-index path. UNIQUE-with-COMMENT
+#     specifically is pinned by TestIndexAttributeMatrix's
+#     `UNIQUE × INVISIBLE × COMMENT` sub-test in catalog.
+#   - inline column-level `REFERENCES` — MySQL auto-names the FK
+#     numerically (`<table>_ibfk_1`) while the parser auto-names it
+#     column-shaped (`<table>_ibfk_<col>`); the round-trip drifts.
+#     An explicit named CONSTRAINT is used instead. See TODO.md for
+#     the open auto-naming issue.
 #
 # Pattern:
 #   init = desired = full schema, applied = "" (no-op).

@@ -73,7 +73,7 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 - **Generated-column expression drifts when the body references a
   vitess-keyword identifier.** `GENERATED ALWAYS AS (CONCAT(email,
   ' ', name)) STORED` round-trips as
-  `CONCAT(email, ' ', `name`)` because vitess `String()` on a
+  ``CONCAT(email, ' ', `name`)`` because vitess `String()` on a
   `ColName` back-ticks any identifier in its keyword list (`name`
   is one). Catalog stores the back-ticked form via SHOW CREATE
   TABLE, parser doesn't, so re-plan emits a no-op `MODIFY COLUMN`
