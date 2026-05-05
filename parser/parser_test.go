@@ -78,6 +78,37 @@ CREATE TABLE posts (
 	assert.Equal(t, "SET NULL", fk.OnUpdate)
 }
 
+// TestParseForeignKeyMatchType pins the MATCH FULL / PARTIAL /
+// SIMPLE branches in buildFK. Vitess parses the MATCH clause as
+// sqlparser.{Full,Partial,Simple} and buildFK maps each to the
+// model's MatchType string; the existing TestParseForeignKey only
+// exercises the empty (no MATCH clause) path.
+func TestParseForeignKeyMatchType(t *testing.T) {
+	tests := []struct{ clause, want string }{
+		{"MATCH FULL", "FULL"},
+		{"MATCH PARTIAL", "PARTIAL"},
+		{"MATCH SIMPLE", "SIMPLE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			sql := `
+CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE posts (
+    id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users(id) ` + tt.clause + `
+);`
+			r, err := parser.ParseSQL(sql, "app")
+			require.NoError(t, err)
+			posts, _ := r.Tables.GetOk("app.posts")
+			fk, ok := posts.ForeignKeys.GetOk("fk")
+			require.True(t, ok)
+			assert.Equal(t, tt.want, fk.MatchType)
+		})
+	}
+}
+
 // TestParseInlineForeignKey checks the column-level `REFERENCES other(col)`
 // shorthand: parser should auto-name the FK as `<table>_ibfk_<col>`.
 func TestParseInlineForeignKey(t *testing.T) {

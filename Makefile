@@ -28,15 +28,9 @@ vet:
 	go vet ./...
 
 # `-p 1` because integration tests share a single MySQL instance.
-# `-coverpkg=./...` so cross-package coverage counts: root-package
-# integration tests (myschema_test) exercise diff / parser / catalog /
-# model code paths, and that contribution should appear under each
-# package's coverage when CI uploads the merged profile to Codecov.
-# Without it, each test binary only records its own package's stmts
-# and Codecov undercounts (catalog drops to ~75%, diff to ~80%).
 .PHONY: test
 test:
-	go test -p 1 -v -coverpkg=./... ./... $(TEST_OPTS)
+	go test -p 1 -v ./... $(TEST_OPTS)
 
 # test-mysql9 runs the full integration suite against the MySQL 9.x
 # compose service on port 3307. Both MYSQL_PORT and MYSCHEMA_TEST_DSN

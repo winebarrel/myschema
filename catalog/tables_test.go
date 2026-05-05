@@ -465,3 +465,68 @@ CREATE TABLE meta (
 	require.NotNil(t, m.Comment)
 	assert.Equal(t, "hello world", *m.Comment)
 }
+
+// TestPartitionRoundTrip pins loadPartitions by SHOW CREATE TABLE
+// against a partitioned table — the function has its own SQL
+// (information_schema.PARTITIONS) plus a per-table SHOW CREATE
+// TABLE round-trip, so it gets coverage only when an actual
+// partitioned table exists in the test DB.
+func TestPartitionRoundTrip(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE events (
+    id BIGINT NOT NULL,
+    yr INT NOT NULL,
+    PRIMARY KEY (id, yr)
+) PARTITION BY RANGE (yr) (
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION pfuture VALUES LESS THAN MAXVALUE
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	ev, ok := tables.GetOk("myschema_test.events")
+	require.True(t, ok)
+	require.NotNil(t, ev.Partition, "PARTITION clause must round-trip")
+	assert.Contains(t, *ev.Partition, "partition by range")
+	assert.Contains(t, *ev.Partition, "p2020")
+	assert.Contains(t, *ev.Partition, "pfuture")
+}
+
+// TestColumnAttributesRoundTrip pins less-frequently-tested column
+// metadata: ON UPDATE CURRENT_TIMESTAMP, COMMENT, COLLATE — each
+// goes through a separate branch in loadColumns that wasn't covered
+// directly.
+func TestColumnAttributesRoundTrip(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE attrs (
+    id BIGINT NOT NULL,
+    note VARCHAR(64) NOT NULL DEFAULT 'x' COMMENT 'free text',
+    body TEXT COLLATE utf8mb4_general_ci,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	tbl, ok := tables.GetOk("myschema_test.attrs")
+	require.True(t, ok)
+
+	note, _ := tbl.Columns.GetOk("note")
+	require.NotNil(t, note.Comment, "COMMENT must round-trip")
+	assert.Equal(t, "free text", *note.Comment)
+
+	body, _ := tbl.Columns.GetOk("body")
+	require.NotNil(t, body.Collation, "COLLATE must round-trip")
+	assert.Equal(t, "utf8mb4_general_ci", *body.Collation)
+
+	updated, _ := tbl.Columns.GetOk("updated_at")
+	require.NotNil(t, updated.OnUpdate, "ON UPDATE must round-trip")
+	assert.Contains(t, *updated.OnUpdate, "CURRENT_TIMESTAMP")
+}

@@ -4,23 +4,28 @@ package diff
 // can be pinned without polluting the public API.
 
 var (
-	PtrEq                     = ptrEq[string]
-	LooseEqual                = looseEqual
-	NormalizeIndexType        = normalizeIndexType
-	ColumnEqual               = columnEqual
-	ConstraintEqual           = constraintEqual
-	IndexEqual                = indexEqual
-	FKEqual                   = fkEqual
-	AllPartsDropped           = allPartsDropped
-	SplitCheckDef             = splitCheckDef
-	CanonicalExpr             = canonicalExpr
-	EqualExpr                 = equalExpr
-	ViewDefEqual              = viewDefEqual
-	TopoSortViews             = topoSortViews
-	DropConstraintSQL         = dropConstraintSQL
-	AddConstraintSQL          = addConstraintSQL
-	TemporarilySortListValues = temporarilySortListValues
-	PartitionValueRangeEqual  = partitionValueRangeEqual
-	PartitionHeaderEqual      = partitionHeaderEqual
-	RangeBoundaryAsInt64      = rangeBoundaryAsInt64
+	PtrEq                      = ptrEq[string]
+	LooseEqual                 = looseEqual
+	NormalizeIndexType         = normalizeIndexType
+	ColumnEqual                = columnEqual
+	ConstraintEqual            = constraintEqual
+	IndexEqual                 = indexEqual
+	FKEqual                    = fkEqual
+	AllPartsDropped            = allPartsDropped
+	SplitCheckDef              = splitCheckDef
+	CanonicalExpr              = canonicalExpr
+	EqualExpr                  = equalExpr
+	ViewDefEqual               = viewDefEqual
+	TopoSortViews              = topoSortViews
+	DropConstraintSQL          = dropConstraintSQL
+	AddConstraintSQL           = addConstraintSQL
+	TemporarilySortListValues  = temporarilySortListValues
+	PartitionValueRangeEqual   = partitionValueRangeEqual
+	PartitionHeaderEqual       = partitionHeaderEqual
+	RangeBoundaryAsInt64       = rangeBoundaryAsInt64
+	TableCharsetCollationSQL   = tableCharsetCollationSQL
+	TableCommentSQL            = tableCommentSQL
+	CanonicalComment           = canonicalComment
+	UniqueKeyPartitionCoverGap = uniqueKeyPartitionCoverGap
+	PartitionRequiredColumns   = partitionRequiredColumns
 )

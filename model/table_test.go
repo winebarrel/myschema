@@ -230,3 +230,8 @@ func TestColumnDefSQLVirtualGenerated(t *testing.T) {
 	out := model.ColumnDefSQL(c)
 	assert.Contains(t, out, "GENERATED ALWAYS AS (a + b) VIRTUAL")
 }
+
+func TestTableFQTN(t *testing.T) {
+	tbl := &model.Table{Database: "shop", Name: "users"}
+	assert.Equal(t, "shop.users", tbl.FQTN())
+}
