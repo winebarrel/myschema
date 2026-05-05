@@ -168,6 +168,47 @@ func TestPreSQLOptionKongAcceptsEither(t *testing.T) {
 	})
 }
 
+// TestAlterOptionKongBulkAlter pins the kong wiring for --bulk-alter
+// and MYSCHEMA_BULK_ALTER. The YAML apply / plan fixtures set
+// AlterOption.BulkAlter directly via Go, so a typo in the kong tag
+// (field name → flag name; env tag content) would otherwise sneak
+// past CI. Same shape as TestDropPolicyKongParseAcceptsPartition for
+// AllowDrop and TestPreSQLOptionKongAcceptsEither for the pre-sql
+// xor group.
+func TestAlterOptionKongBulkAlter(t *testing.T) {
+	t.Run("--bulk-alter sets BulkAlter=true", func(t *testing.T) {
+		var cli struct {
+			myschema.AlterOption
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"--bulk-alter"})
+		require.NoError(t, err)
+		assert.True(t, cli.BulkAlter)
+	})
+	t.Run("MYSCHEMA_BULK_ALTER=1 sets BulkAlter=true", func(t *testing.T) {
+		var cli struct {
+			myschema.AlterOption
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		t.Setenv("MYSCHEMA_BULK_ALTER", "1")
+		_, err = parser.Parse([]string{})
+		require.NoError(t, err)
+		assert.True(t, cli.BulkAlter)
+	})
+	t.Run("default off", func(t *testing.T) {
+		var cli struct {
+			myschema.AlterOption
+		}
+		parser, err := kong.New(&cli)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{})
+		require.NoError(t, err)
+		assert.False(t, cli.BulkAlter)
+	})
+}
+
 func TestObjectCount(t *testing.T) {
 	c := myschema.ObjectCount{Database: "shop", Tables: 3, Views: 1}
 	assert.Equal(t, "database shop", c.DBLabel())

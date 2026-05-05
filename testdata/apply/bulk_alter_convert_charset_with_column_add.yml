@@ -1,0 +1,40 @@
+# Coverage: --bulk-alter folds `ALTER TABLE t CONVERT TO CHARACTER
+# SET <new>` (emitted by the `-- myschema:convert-charset` directive
+# when the table charset differs — see convert_charset_directive_one_shot.yml
+# for the non-bulk baseline) with a same-table column add into one
+# multi-spec ALTER:
+#
+#   ALTER TABLE t CONVERT TO CHARACTER SET utf8mb4, ADD COLUMN ...;
+#
+# CONVERT TO CHARACTER SET has different syntax and rebuild
+# semantics from `DEFAULT CHARSET=…` (data rewrite vs. table-default
+# flip), so the combined shape needs its own end-to-end pin —
+# bulk_alter_charset_with_column_change.yml only covers the
+# DEFAULT CHARSET path.
+#
+# verify_no_drift: true confirms the combined apply converges in
+# one apply (the convert-charset directive's whole point — see
+# CAVEATS.md "Changing DEFAULT CHARSET").
+
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=latin1;
+
+desired: |
+  -- myschema:convert-charset
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      note VARCHAR(255),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4;
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t CONVERT TO CHARACTER SET utf8mb4, ADD COLUMN note varchar(255) AFTER name;
+
+verify_no_drift: true

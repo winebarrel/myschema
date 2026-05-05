@@ -224,6 +224,34 @@ separator under `--bulk-alter`):
   upstream and never reaches the combiner.)
 - `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`.
 
+**`--bulk-alter` interacts with `--alter-algorithm` /
+`--alter-lock`.** When the two flags are used together, every spec
+in a combined ALTER shares one ALGORITHM= / LOCK= clause —
+MySQL applies it to the whole statement, not per-spec. The
+trailing-comma splice that `appendAlterHints` does still fires
+(combine first, then hint), so the syntax is correct, but the
+*operational* effect changes:
+
+- A run of two specs that would each apply INSTANT separately
+  (e.g. two `ADD COLUMN` adds) folded into one ALTER with
+  `--alter-algorithm=INSTANT` is fine — both qualify.
+- A run that mixes an INSTANT-eligible spec (ADD COLUMN) with one
+  that requires INPLACE / COPY (e.g. DEFAULT CHARSET change,
+  generated-column add, certain MODIFY COLUMNs) becomes one
+  ALTER with the user-supplied ALGORITHM=INSTANT — MySQL
+  rejects it at apply time because the most-restrictive spec in
+  the bundle isn't INSTANT-compatible.
+- Without `--bulk-alter` the same two specs are two separate
+  ALTERs, and MySQL's per-statement default ALGORITHM picks the
+  right level for each. Operators who pin ALGORITHM to a strict
+  level (INSTANT especially) need to weigh this against the
+  combine: enabling `--bulk-alter` can turn a previously
+  online-DDL-clean migration into a COPY-or-fail.
+
+Run `plan` first to see the combined statement, and check each
+spec against MySQL's online-DDL matrix. Drop one of the flags if
+the combined ALGORITHM/LOCK choice doesn't fit.
+
 ## Integer display widths drift; type-name casing doesn't
 
 **Display widths.** Writing `INT(11)`, `BIGINT(20)`, `TINYINT(4)`,
