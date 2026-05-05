@@ -1,10 +1,13 @@
 # Replace the PRIMARY KEY (single-column → multi-column).
-# AGENTS.md "In scope" lists ADD / DROP CONSTRAINT (PK /
-# CHECK), but the modify-PK shape (DROP + ADD in the right
-# order) wasn't pinned. Pin it so a regression in the diff
-# layer's PK ordering (PK has to drop before re-adding,
-# never overlap, can't combine in a single statement when
-# the column set changes) surfaces here.
+# AGENTS.md "In scope" lists ADD / DROP CONSTRAINT (PK / CHECK),
+# but the modify-PK shape (DROP + ADD in the right order) wasn't
+# pinned. Pin it so a regression in the diff layer's PK ordering
+# (PK has to drop before re-adding; the two specs go to two
+# separate ALTER statements in the default mode) surfaces here.
+# Note: under --bulk-alter the same diff folds these two specs
+# into one combined `ALTER TABLE t DROP PRIMARY KEY, ADD PRIMARY
+# KEY (...);` — MySQL 8.0+ accepts the combined form. See
+# bulk_alter_pk_replace.yml for that variant.
 init: |
   CREATE TABLE t (
       id INT NOT NULL,

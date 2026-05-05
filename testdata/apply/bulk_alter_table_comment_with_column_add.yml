@@ -1,0 +1,33 @@
+# Coverage: --bulk-alter folds a table-level `COMMENT=` change with
+# a same-table column add into one multi-spec ALTER:
+#
+#   ALTER TABLE t COMMENT='new comment', ADD COLUMN ...;
+#
+# `COMMENT=` is a different grammar shape from per-column
+# alter_specifications (it's a table_option, not an
+# alter_specification), so the combined form needs its own
+# end-to-end pin — the existing fixtures cover columns,
+# constraints, charset, generated columns, and rename separators
+# but not table-options like COMMENT.
+#
+# verify_no_drift: true confirms the round-trip closes.
+
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  ) COMMENT='old comment';
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      note VARCHAR(255),
+      PRIMARY KEY (id)
+  ) COMMENT='new comment';
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t COMMENT='new comment', ADD COLUMN note varchar(255) AFTER id;
+
+verify_no_drift: true

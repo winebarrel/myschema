@@ -1,0 +1,29 @@
+# Coverage: --bulk-alter folds `ADD COLUMN <new>` with a follow-on
+# `ADD CONSTRAINT … CHECK (<new>)` referencing the column just added.
+# Same evaluation-order class as the RENAME COLUMN trap (see
+# CAVEATS.md), but on this path MySQL 8.0+ accepts the combined form:
+# CHECK constraint expressions resolve against the post-spec table
+# state, not the original. Pin the round-trip so a future MySQL
+# change (or a regression in the combiner) can't silently break this
+# shape — without this fixture, the equivalent of the RENAME COLUMN +
+# MODIFY trap on the constraint side would only surface in production.
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      price INT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_price CHECK (price >= 0)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t ADD COLUMN price int NOT NULL AFTER id, ADD CONSTRAINT chk_price CHECK (price >= 0);
+
+verify_no_drift: true

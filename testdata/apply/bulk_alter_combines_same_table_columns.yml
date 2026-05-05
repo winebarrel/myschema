@@ -1,0 +1,31 @@
+# bulk_alter pins the headline behaviour: two consecutive ADD COLUMNs
+# on the same table fold into one multi-spec ALTER TABLE. Without
+# bulk_alter (see add_column_consecutive.yml) the same desired state
+# would emit two separate ALTERs.
+#
+# verify_no_drift: true ensures the combined ALTER actually applies
+# cleanly through MySQL — a syntax-correct join would still fail this
+# pin if MySQL refused the combined form.
+
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      last VARCHAR(64),
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      last VARCHAR(64),
+      PRIMARY KEY (id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t ADD COLUMN a varchar(64) AFTER id, ADD COLUMN b varchar(64) AFTER a;
+
+verify_no_drift: true

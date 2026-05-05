@@ -160,6 +160,117 @@ parent table exists with the required columns / unique key
 *before* any plan that references it lands. Use `dump` to
 verify the child-side FK survived the round trip.
 
+## Bulk-alter does not combine FK operations
+
+**Behaviour.** `--bulk-alter` (default off) folds *consecutive*
+same-table single-spec `ALTER TABLE` statements into one multi-spec
+ALTER. ADD / DROP FOREIGN KEY are intentionally left out of the
+combinable set — even when they target the same table that just had
+columns added — and surface as their own separate `ALTER TABLE …
+ADD CONSTRAINT …` / `… DROP FOREIGN KEY …` statements.
+
+**Why.** myschema's diff pipeline keeps FK ops in two dedicated
+buckets (`FKDropStmts`, `FKAddStmts`) and orders them as
+`FK drops → table changes → FK adds`. The order is load-bearing:
+
+- An FK that points at a brand-new table only exists once that
+  parent's `CREATE TABLE` has run, so all FK adds must run *after*
+  every other table change in the plan.
+- An FK pointing at a column being dropped or renamed must be
+  dropped *before* the parent column changes, so all FK drops
+  must run *before* every other table change.
+
+If `--bulk-alter` mixed FK ops into the column-change bucket, the
+combined `ALTER TABLE child ADD COLUMN …, ADD CONSTRAINT fk_parent
+…` would run *during* the table-change phase, not *after* the FK-add
+phase — silently breaking the cross-table ordering invariant. By the
+time MySQL rejected it (or worse, accepted it in the wrong order
+because the parent happened to already exist) the bug would only
+surface when a plan actually had a brand-new parent table to
+reference.
+
+The two-statement output is the cost of keeping the ordering safe.
+Same-table column / constraint / DEFAULT-CHARSET / COMMENT / DROP
+INDEX changes still combine — only FK operations stay separate.
+
+**What myschema also does NOT combine** (each acts as a run
+separator under `--bulk-alter`):
+
+- Partition operations (`REORGANIZE PARTITION`, `ADD PARTITION`,
+  `DROP PARTITION`, `COALESCE PARTITION`, `TRUNCATE PARTITION`,
+  `EXCHANGE PARTITION`). MySQL's grammar rejects the trailing-comma
+  multi-spec form for these clauses (the comma after `INTO (…)` or
+  the partition list parses as a new partition definition); the
+  combiner detects the keyword via the same `partitionOpInsertPos`
+  helper `--alter-algorithm` uses for the same reason.
+- **Secondary-index ADDs.** `diff/tables.go` emits the new index as
+  a standalone `CREATE INDEX … ON t (…);` — not an
+  `ALTER TABLE … ADD KEY …` — for both brand-new and modified
+  tables. Different statement shape; never folded. (Index *DROPs*
+  emit as `ALTER TABLE … DROP INDEX …;` and *do* combine.) An apply
+  with `--bulk-alter` against a desired SQL that adds three columns
+  and one secondary index produces one combined ALTER plus a
+  separate CREATE INDEX, not a single ALTER carrying both.
+- **`RENAME COLUMN` / `RENAME INDEX`.** Within one ALTER, MySQL
+  resolves spec-target identifiers (e.g. the column name in
+  `MODIFY COLUMN <name>`) against the *original* table state, so a
+  follow-on spec referring to the renamed object by its new name
+  fails at apply time with `Error 1054 Unknown column …` (or
+  similar for indexes). To stay safe across all rename + follow-up
+  shapes the diff might emit, splitCombinableAlter rejects any
+  spec starting with `RENAME COLUMN` or `RENAME INDEX` — the
+  rename keeps its own ALTER even under `--bulk-alter`. (Whole-
+  table `RENAME TO new_table` lives in the `RenameStmts` bucket
+  upstream and never reaches the combiner.)
+- `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`.
+
+**`--bulk-alter` interacts with `--alter-algorithm` /
+`--alter-lock`.** When the two flags are used together, every spec
+in a combined ALTER shares one ALGORITHM= / LOCK= clause —
+MySQL applies it to the whole statement, not per-spec. The
+trailing-comma splice that `appendAlterHints` does still fires
+(combine first, then hint), so the syntax is correct, but the
+*operational* effect changes:
+
+- When every spec in the run *individually* qualifies for the
+  pinned algorithm, the combined ALTER inherits that
+  qualification and applies cleanly. (Whether a particular
+  ADD / MODIFY / DROP COLUMN qualifies for INSTANT depends on
+  exact MySQL 8.0.x version and spec details — column position,
+  presence of generated columns ahead, etc. — so per-spec
+  verification still belongs to the operator.)
+- A run that mixes an INSTANT-eligible spec (ADD COLUMN) with one
+  that requires INPLACE / COPY (e.g. DEFAULT CHARSET change,
+  generated-column add, certain MODIFY COLUMNs) becomes one
+  ALTER with the user-supplied ALGORITHM=INSTANT — MySQL
+  rejects it at apply time because the most-restrictive spec in
+  the bundle isn't INSTANT-compatible.
+- Without `--bulk-alter` the same two specs are two separate
+  ALTERs. `appendAlterHints` still appends `ALGORITHM=INSTANT` to
+  each one independently, so a spec that isn't INSTANT-eligible
+  still fails on its own statement — splitting alone doesn't
+  recover from an INSTANT mismatch. What it does recover is the
+  *all-or-nothing* failure shape of bulk-alter: with separate
+  ALTERs, each spec succeeds or fails individually, instead of
+  one combined statement aborting the whole run on the first
+  non-eligible spec.
+
+To recover from a combined `ALGORITHM=…` rejection:
+
+- **Loosen the algorithm pin.** Switch `--alter-algorithm=INSTANT`
+  to `INPLACE`, `COPY`, or drop the flag entirely so MySQL picks
+  per-spec defaults. This is the only fix that actually changes
+  what algorithm MySQL applies.
+- **Drop `--bulk-alter`** to split the run into per-spec ALTERs.
+  Each spec is then independently rejectable; the operator can
+  triage which one is non-INSTANT and apply it without the strict
+  hint. (Dropping bulk-alter alone, while keeping
+  `--alter-algorithm=INSTANT`, won't make any individual spec
+  more compatible — the hint still fires per ALTER.)
+
+Run `plan` first to see the combined statement and check each spec
+against MySQL's online-DDL matrix before opting in.
+
 ## Integer display widths drift; type-name casing doesn't
 
 **Display widths.** Writing `INT(11)`, `BIGINT(20)`, `TINYINT(4)`,

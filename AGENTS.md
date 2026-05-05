@@ -190,6 +190,38 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   for ALTER TABLE, space for CREATE INDEX) so the user only supplies
   the value (`INPLACE`, `NONE`, …); MySQL rejects unsupported
   combinations at apply time, so CI catches non-online migrations.
+- `--bulk-alter` (and matching `MYSCHEMA_BULK_ALTER` env var) folds
+  *consecutive* same-table single-spec `ALTER TABLE` statements into
+  one multi-spec ALTER. Default off, opt-in. **Combinable:** anything
+  the diff layer emits as `ALTER TABLE <ident> <single-spec>;` —
+  ADD / MODIFY / DROP COLUMN, DROP INDEX, ADD / DROP CONSTRAINT
+  (PK / CHECK), DEFAULT CHARSET / COLLATE, COMMENT, CONVERT TO
+  CHARACTER SET. Partition ops are *all* on the excluded list (no
+  partition shape that the diff currently emits is combinable).
+  **Excluded** (each acts as a run separator):
+  - FK ops — kept in their own `FKAddStmts` / `FKDropStmts` buckets
+    so cross-table ordering survives.
+  - Partition ops (REORGANIZE / ADD / DROP / COALESCE / TRUNCATE /
+    EXCHANGE PARTITION) — MySQL's grammar rejects the
+    trailing-comma multi-spec form for these clauses.
+  - **Index ADDs** — `diff/tables.go` emits secondary-index adds
+    (both on brand-new and modified tables) as standalone
+    `CREATE INDEX … ON t (…);` statements, not as
+    `ALTER TABLE … ADD KEY`. Different statement shape, never
+    folded. (Index *DROPs* still combine — they're ALTER TABLE.)
+  - **`RENAME COLUMN` / `RENAME INDEX`** — within one ALTER, MySQL
+    resolves spec-target identifiers (`MODIFY COLUMN <name>`,
+    `DROP INDEX <name>`, …) against the original table state, so
+    a follow-on spec referencing the renamed object by its new
+    name fails at apply time (`Error 1054 Unknown column …` for
+    the column case, the matching index error code for the index
+    case). Rename specs keep their own ALTER even under
+    `--bulk-alter`. See CAVEATS.md for the trap.
+  - CREATE / DROP / RENAME TABLE.
+
+  The combiner is order-preserving — it never reorders, so the diff's
+  own ordering invariants are not at risk. See CAVEATS.md "Bulk-alter
+  does not combine FK operations" for the FK rationale.
 - `--pre-sql` / `--pre-sql-file` (and matching `MYSCHEMA_PRE_SQL` /
   `MYSCHEMA_PRE_SQL_FILE` env vars) for plan and apply: SQL
   statement(s) to run on the connection right after connect() and

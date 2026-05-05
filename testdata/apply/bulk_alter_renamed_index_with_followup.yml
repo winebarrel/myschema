@@ -1,0 +1,43 @@
+# Coverage: --bulk-alter does NOT fold RENAME INDEX with surrounding
+# same-table specs. End-to-end counterpart to bulk_alter_renamed_column_with_followup.yml.
+# Without an apply-side pin, a refactor in the diff pipeline (or a
+# regression in splitCombinableAlter's RENAME INDEX guard) could
+# silently produce invalid combined ALTERs that the unit test alone
+# wouldn't catch — index renames flow from applyIndexRenames into
+# the same tableDiff.Stmts slice that --bulk-alter operates on.
+#
+# The combined form
+#
+#   ALTER TABLE posts RENAME INDEX old_idx TO idx_user, ADD COLUMN ...;
+#
+# would have the same MySQL evaluation-order risk as the column case
+# (spec-target identifiers resolved against the original table state),
+# so splitCombinableAlter rejects RENAME INDEX as a run separator.
+# This fixture pins that the rename and the column add stay as two
+# separate ALTERs and the round-trip closes.
+
+init: |
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY old_idx (user_id)
+  );
+
+desired: |
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      title VARCHAR(255),
+      PRIMARY KEY (id),
+      -- myschema:renamed-from old_idx
+      KEY idx_user (user_id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE posts RENAME INDEX old_idx TO idx_user;
+  ALTER TABLE posts ADD COLUMN title varchar(255) AFTER user_id;
+
+verify_no_drift: true

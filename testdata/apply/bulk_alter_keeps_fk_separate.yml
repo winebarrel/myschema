@@ -1,0 +1,45 @@
+# bulk_alter must NOT fold FK adds into a same-table column-change ALTER.
+# diff_all.go routes FK ops through dedicated FKAddStmts / FKDropStmts
+# buckets, so they never enter combineSameTableAlters. This fixture
+# pins that the FK add lands as its own ALTER even when bulk_alter is on
+# and even when it targets the same table that just got new columns —
+# so future refactors can't quietly merge buckets.
+#
+# Why this matters: a cross-table FK whose RefTable lives in a separate
+# CREATE TABLE in the same plan must run AFTER the parent table exists.
+# Mixing FK ops into the column-change bucket would lose that ordering
+# guarantee. See CAVEATS.md "Bulk-alter does not combine FK operations".
+
+init: |
+  CREATE TABLE parent (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+  CREATE TABLE child (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE parent (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+  CREATE TABLE child (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      parent_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY ix_parent (parent_id),
+      CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent (id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE child ADD COLUMN a varchar(64) AFTER id, ADD COLUMN b varchar(64) AFTER a, ADD COLUMN parent_id bigint NOT NULL AFTER b;
+  CREATE INDEX ix_parent ON child (parent_id);
+  ALTER TABLE child ADD CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent(id);
+
+verify_no_drift: true

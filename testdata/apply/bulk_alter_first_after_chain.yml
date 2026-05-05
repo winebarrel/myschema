@@ -1,0 +1,30 @@
+# Coverage: --bulk-alter folds `ADD COLUMN … FIRST` with a follow-on
+# `ADD COLUMN … AFTER <newcolumn>` (the AFTER targets the column the
+# preceding spec just added) into one ALTER. Spec ordering matters
+# inside one statement: `ADD COLUMN head_a INT FIRST, ADD COLUMN
+# head_b INT AFTER head_a` requires MySQL to resolve `AFTER head_a`
+# against the post-FIRST column list, which it does — pin the
+# round-trip so a future MySQL change or a regression in the
+# combiner can't silently break this shape.
+
+
+init: |
+  CREATE TABLE t (
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE t (
+      head_a INT,
+      head_b INT,
+      id INT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t ADD COLUMN head_a int FIRST, ADD COLUMN head_b int AFTER head_a;
+
+verify_no_drift: true

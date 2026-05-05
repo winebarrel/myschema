@@ -56,17 +56,31 @@ func (f *FilterOptions) AfterApply() error {
 	return nil
 }
 
-// AlterOption carries the MySQL online-DDL hints that get appended to
-// every generated `ALTER TABLE …` and `CREATE INDEX …` statement.
-// myschema absorbs the syntax mismatch between the two DDLs (ALTER
-// TABLE wants `, ALGORITHM=…, LOCK=…`; CREATE INDEX wants the same
-// clauses separated by spaces with no leading comma) so the user
-// supplies just the values. myschema does not validate which
-// algorithm / lock combination MySQL will accept for a given change —
-// apply lets MySQL reject unsupported combinations at execution time.
+// AlterOption groups the diff-time knobs that shape how plan / apply
+// emit `ALTER TABLE …` and `CREATE INDEX …` statements:
+//
+//   - AlterAlgorithm / AlterLock: MySQL online-DDL hints appended to
+//     every generated ALTER. myschema absorbs the syntax mismatch
+//     between the two DDLs (ALTER TABLE wants `, ALGORITHM=…, LOCK=…`;
+//     CREATE INDEX wants the same clauses separated by spaces with no
+//     leading comma) so the user supplies just the values. myschema
+//     does not validate which algorithm / lock combination MySQL will
+//     accept for a given change — apply lets MySQL reject
+//     unsupported combinations at execution time.
+//   - BulkAlter: opt-in folding of consecutive same-table single-spec
+//     ALTER TABLE statements into one multi-spec ALTER (FK ops,
+//     partition ops, RENAME COLUMN / INDEX, and standalone CREATE
+//     INDEX are excluded — see CAVEATS.md "Bulk-alter does not combine
+//     FK operations" for the full list and rationale, including the
+//     interaction with --alter-algorithm / --alter-lock).
 type AlterOption struct {
 	AlterAlgorithm string `env:"MYSCHEMA_ALTER_ALGORITHM" enum:",DEFAULT,INSTANT,INPLACE,COPY" default:"" help:"ALGORITHM= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, INSTANT, INPLACE, COPY (MySQL 8.0+)."`
 	AlterLock      string `env:"MYSCHEMA_ALTER_LOCK" enum:",DEFAULT,NONE,SHARED,EXCLUSIVE" default:"" help:"LOCK= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, NONE, SHARED, EXCLUSIVE."`
+	// BulkAlter folds consecutive same-table ALTER TABLE statements
+	// into one multi-spec ALTER. FK ops, partition ops, RENAME COLUMN /
+	// INDEX, and standalone CREATE INDEX are excluded — see CAVEATS.md
+	// for the rationale.
+	BulkAlter bool `env:"MYSCHEMA_BULK_ALTER" help:"Combine consecutive same-table ALTER TABLE statements into one multi-spec ALTER. FK / partition / RENAME COLUMN / RENAME INDEX / standalone CREATE INDEX excluded."`
 }
 
 // PreSQLOption carries a one-shot SQL payload that runs against the

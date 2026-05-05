@@ -1,0 +1,38 @@
+# Coverage: --bulk-alter combined with --alter-algorithm /
+# --alter-lock — apply-side counterpart to
+# testdata/plan/bulk_alter_combine_with_index_add_separate.yml.
+# The plan fixture pins how the rendered SQL looks; this one pins
+# that MySQL actually accepts the combined statement +
+# `, ALGORITHM=…, LOCK=…` trailing clauses (so a bad splice in
+# appendAlterHints can't reach users with a green plan but a
+# failing apply).
+#
+# Two same-table ADD COLUMNs fold into one ALTER, then
+# appendAlterHints appends `ALGORITHM=INPLACE, LOCK=NONE` once.
+# Both specs are INPLACE/NONE-eligible (column add on InnoDB),
+# so MySQL accepts the combined ALTER.
+#
+# verify_no_drift: true confirms the round-trip closes.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      email VARCHAR(255),
+      PRIMARY KEY (id)
+  );
+
+bulk_alter: true
+alter_algorithm: INPLACE
+alter_lock: NONE
+
+applied: |
+  ALTER TABLE users ADD COLUMN name varchar(64) AFTER id, ADD COLUMN email varchar(255) AFTER name, ALGORITHM=INPLACE, LOCK=NONE;
+
+verify_no_drift: true

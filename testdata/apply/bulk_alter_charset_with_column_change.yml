@@ -1,0 +1,35 @@
+# Coverage: --bulk-alter folds a DEFAULT CHARSET change with a
+# following column add into one ALTER:
+#
+#   ALTER TABLE t DEFAULT CHARSET=latin1, ADD COLUMN ...;
+#
+# diff_all.go emits tableCharsetCollationSQL into Stmts before
+# diffColumns appends the per-column changes, and bulk-alter folds
+# the run. CAVEATS.md ("Changing DEFAULT CHARSET on a table with
+# string columns") flags that table-default charset changes don't
+# rewrite per-column charset metadata in one apply — that two-apply
+# convergence is unchanged by bulk-alter (verify_no_drift: false
+# matches change_table_charset.yml's baseline). The fixture pins
+# that the combined first-apply ALTER applies cleanly.
+
+init: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4;
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      note VARCHAR(255),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=latin1;
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE t DEFAULT CHARSET=latin1, ADD COLUMN note varchar(255) AFTER name;
+
+verify_no_drift: false

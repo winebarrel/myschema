@@ -1,0 +1,41 @@
+# bulk_alter on the plan side: pins the formatted SQL directly so a
+# regression in render / fold ordering surfaces here (the apply
+# fixture only verifies that the round-trip closes — it can't catch a
+# rendering bug that still happens to apply cleanly).
+#
+# Four column adds + one secondary index add, all on the same table:
+#   - The four ADD COLUMNs fold into one multi-spec ALTER.
+#   - The secondary index add lands as a standalone CREATE INDEX
+#     (per CAVEATS.md "Bulk-alter does not combine FK operations" →
+#     "Secondary-index ADDs" — emitted as `CREATE INDEX … ON t (…);`,
+#     not as `ALTER TABLE … ADD KEY`), so it stays on its own line
+#     and breaks the run.
+#
+# Combined with --alter-algorithm / --alter-lock to also pin that
+# the hint splice still fires once per output statement (so the
+# combined ALTER carries one trailing `, ALGORITHM=…, LOCK=…`, not
+# four).
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      c VARCHAR(64),
+      email VARCHAR(255),
+      PRIMARY KEY (id),
+      KEY idx_email (email)
+  );
+
+bulk_alter: true
+alter_algorithm: INPLACE
+alter_lock: NONE
+
+plan: |
+  ALTER TABLE users ADD COLUMN a varchar(64) AFTER id, ADD COLUMN b varchar(64) AFTER a, ADD COLUMN c varchar(64) AFTER b, ADD COLUMN email varchar(255) AFTER c, ALGORITHM=INPLACE, LOCK=NONE;
+  CREATE INDEX idx_email ON users (email) ALGORITHM=INPLACE LOCK=NONE;
