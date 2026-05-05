@@ -1,0 +1,48 @@
+# Coverage: --bulk-alter folds DROP COLUMN with a DROP INDEX on the
+# same table into one ALTER. Counterpart to drop_one_of_two_index_columns.yml
+# (non-bulk baseline) which already documents the delicate semantics
+# here: when only *some* of an index's columns are dropped, MySQL
+# keeps the index (folded down to surviving columns), so the diff
+# layer still emits DROP INDEX and CREATE INDEX (rebuild) for the
+# desired narrower shape. Under bulk-alter the DROP COLUMN and
+# DROP INDEX fold into one ALTER while the CREATE INDEX stays
+# standalone (separate-bucket rule from the existing fixtures).
+#
+# The fold tests two MySQL invariants at once:
+#   - that `ALTER TABLE t DROP COLUMN a, DROP INDEX i;` is accepted
+#     when the index's *other* column survives the drop (so the
+#     index isn't auto-removed by step 1 the way replace_index_with_column_drop.yml
+#     covers).
+#   - that the CREATE INDEX rebuild then lands on the post-ALTER
+#     table state.
+#
+# verify_no_drift: true confirms the round-trip closes after the
+# combined ALTER + rebuild.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      a VARCHAR(64),
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i_combined (a, b)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      b VARCHAR(64),
+      PRIMARY KEY (id),
+      KEY i_combined (b)
+  );
+
+allow_drop:
+  - all
+
+bulk_alter: true
+
+applied: |
+  ALTER TABLE users DROP COLUMN a, DROP INDEX i_combined;
+  CREATE INDEX i_combined ON users (b);
+
+verify_no_drift: true
