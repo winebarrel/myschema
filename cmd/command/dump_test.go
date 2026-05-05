@@ -3,6 +3,7 @@ package command_test
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,7 +66,7 @@ CREATE TABLE posts (id BIGINT NOT NULL, PRIMARY KEY (id));
 `)
 	client := newTestClient(t)
 
-	dir := t.TempDir() + "/out"
+	dir := filepath.Join(t.TempDir(), "out")
 	var buf bytes.Buffer
 	cmd := &command.Dump{
 		DumpOptions: myschema.DumpOptions{SplitDir: dir},

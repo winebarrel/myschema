@@ -3,6 +3,7 @@ package myschema_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ CREATE TABLE posts (id INT NOT NULL, PRIMARY KEY (id));
 CREATE VIEW v_users AS SELECT id FROM users;
 `)
 
-	dir := t.TempDir() + "/out"
+	dir := filepath.Join(t.TempDir(), "out")
 	c := newClient(t)
 	r, err := c.Dump(ctx, &myschema.DumpOptions{
 		SplitDir: dir,
@@ -82,18 +83,18 @@ CREATE VIEW v_users AS SELECT id FROM users;
 	assert.Equal(t, 1, r.Count.Views)
 
 	for _, name := range []string{"users.sql", "posts.sql", "v_users.sql"} {
-		body, rerr := os.ReadFile(dir + "/" + name)
+		body, rerr := os.ReadFile(filepath.Join(dir, name))
 		require.NoError(t, rerr, "%s should exist", name)
 		assert.NotEmpty(t, body, "%s should be non-empty", name)
 	}
 
 	// Spot-check content shape so a future refactor can't quietly
 	// switch from TableToSQL / ViewToSQL to a different emitter.
-	users, err := os.ReadFile(dir + "/users.sql")
+	users, err := os.ReadFile(filepath.Join(dir, "users.sql"))
 	require.NoError(t, err)
 	assert.Contains(t, string(users), "CREATE TABLE users (")
 
-	view, err := os.ReadFile(dir + "/v_users.sql")
+	view, err := os.ReadFile(filepath.Join(dir, "v_users.sql"))
 	require.NoError(t, err)
 	assert.Contains(t, string(view), "CREATE OR REPLACE VIEW v_users")
 }
@@ -106,11 +107,11 @@ func TestDump_SplitCreatesDir(t *testing.T) {
 	testutil.SetupDB(t, ctx, conn, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
 
 	// Nested path under TempDir, neither directory exists yet.
-	dir := t.TempDir() + "/a/b/c"
+	dir := filepath.Join(t.TempDir(), "a", "b", "c")
 	c := newClient(t)
 	_, err := c.Dump(ctx, &myschema.DumpOptions{SplitDir: dir})
 	require.NoError(t, err)
-	body, err := os.ReadFile(dir + "/t.sql")
+	body, err := os.ReadFile(filepath.Join(dir, "t.sql"))
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "CREATE TABLE t (")
 }
@@ -125,22 +126,22 @@ func TestDump_SplitOverwritesExistingFiles(t *testing.T) {
 	testutil.SetupDB(t, ctx, conn, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)
 
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(dir+"/t.sql", []byte("STALE"), 0o600))
-	require.NoError(t, os.WriteFile(dir+"/orphan.sql", []byte("LEFT BEHIND"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "t.sql"), []byte("STALE"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "orphan.sql"), []byte("LEFT BEHIND"), 0o600))
 
 	c := newClient(t)
 	_, err := c.Dump(ctx, &myschema.DumpOptions{SplitDir: dir})
 	require.NoError(t, err)
 
 	// t.sql overwritten with fresh content.
-	got, err := os.ReadFile(dir + "/t.sql")
+	got, err := os.ReadFile(filepath.Join(dir, "t.sql"))
 	require.NoError(t, err)
 	assert.Contains(t, string(got), "CREATE TABLE t (")
 	assert.NotContains(t, string(got), "STALE")
 
 	// orphan.sql is left alone — split is mkdir-and-write, not
 	// rsync-style sync. Documented as operator responsibility.
-	orphan, err := os.ReadFile(dir + "/orphan.sql")
+	orphan, err := os.ReadFile(filepath.Join(dir, "orphan.sql"))
 	require.NoError(t, err)
 	assert.Equal(t, "LEFT BEHIND", string(orphan))
 }
@@ -166,10 +167,10 @@ CREATE TABLE legacy (id INT NOT NULL, PRIMARY KEY (id));
 	require.NoError(t, err)
 
 	for _, present := range []string{"users.sql", "posts.sql"} {
-		_, err := os.Stat(dir + "/" + present)
+		_, err := os.Stat(filepath.Join(dir, present))
 		assert.NoError(t, err, "%s should be written", present)
 	}
-	_, err = os.Stat(dir + "/legacy.sql")
+	_, err = os.Stat(filepath.Join(dir, "legacy.sql"))
 	assert.True(t, os.IsNotExist(err), "legacy.sql should NOT be written")
 }
 
@@ -196,9 +197,9 @@ CREATE VIEW v_users AS SELECT id FROM users;
 	_, err = c.Dump(ctx, &myschema.DumpOptions{SplitDir: dir})
 	require.NoError(t, err)
 
-	usersFile, err := os.ReadFile(dir + "/users.sql")
+	usersFile, err := os.ReadFile(filepath.Join(dir, "users.sql"))
 	require.NoError(t, err)
-	viewFile, err := os.ReadFile(dir + "/v_users.sql")
+	viewFile, err := os.ReadFile(filepath.Join(dir, "v_users.sql"))
 	require.NoError(t, err)
 
 	// Each per-object file ends with a trailing newline so
@@ -222,7 +223,7 @@ func TestDump_SplitEmptySchema(t *testing.T) {
 	conn := testutil.ConnectDB(t)
 	testutil.SetupDB(t, ctx, conn, "")
 
-	dir := t.TempDir() + "/out"
+	dir := filepath.Join(t.TempDir(), "out")
 	c := newClient(t)
 	_, err := c.Dump(ctx, &myschema.DumpOptions{SplitDir: dir})
 	require.NoError(t, err)
@@ -310,7 +311,7 @@ func TestDump_SplitPath_Valid(t *testing.T) {
 	dir := t.TempDir()
 	got, err := myschema.SplitPath(dir, "my_table$1")
 	require.NoError(t, err)
-	assert.Equal(t, dir+"/my_table$1.sql", got)
+	assert.Equal(t, filepath.Join(dir, "my_table$1.sql"), got)
 }
 
 // TestWriteDumpSplit_RejectsTableWithUnsafeName: defence-in-depth.
@@ -359,7 +360,7 @@ func emptyTable(name string) *model.Table {
 func TestWriteDumpSplit_TableWriteError(t *testing.T) {
 	dir := t.TempDir()
 	// Pre-create a *directory* at <dir>/t.sql so os.WriteFile fails.
-	require.NoError(t, os.MkdirAll(dir+"/t.sql", 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "t.sql"), 0o755))
 	tables := orderedmap.New[string, *model.Table]()
 	tables.Set("t", emptyTable("t"))
 	views := orderedmap.New[string, *model.View]()
@@ -373,7 +374,7 @@ func TestWriteDumpSplit_TableWriteError(t *testing.T) {
 // guard above but on the view branch.
 func TestWriteDumpSplit_ViewWriteError(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(dir+"/v.sql", 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "v.sql"), 0o755))
 	tables := orderedmap.New[string, *model.Table]()
 	views := orderedmap.New[string, *model.View]()
 	views.Set("v", &model.View{Name: "v", Definition: "SELECT 1"})
@@ -389,7 +390,7 @@ func TestWriteDumpSplit_ViewWriteError(t *testing.T) {
 func TestDump_SplitMkdirOverFile(t *testing.T) {
 	dir := t.TempDir()
 	// Create a regular file at the path we'll then ask --split to use.
-	clash := dir + "/not_a_dir"
+	clash := filepath.Join(dir, "not_a_dir")
 	require.NoError(t, os.WriteFile(clash, []byte("x"), 0o600))
 
 	ctx := context.Background()
