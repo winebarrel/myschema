@@ -24,7 +24,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Low — tests / docs / release
 
-- `getting-started.md`.
 - `CHANGELOG.md`.
 - Demo asciinema or gif (pistachio-style).
 - `.goreleaser.yml`.
