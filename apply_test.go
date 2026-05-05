@@ -190,15 +190,17 @@ func TestApply_PreSQLEmptyFile(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestApply_PreSQLStdinConflict pins the early-failure check that
-// catches the "both --pre-sql-file=- and desired `-` read stdin"
-// footgun: the second read would hit EOF and silently truncate
-// either the pre-SQL or the desired SQL. Validation runs before
-// any actual stdin read.
-func TestApply_PreSQLStdinConflict(t *testing.T) {
+// TestApply_PreSQLFileStdinRejected pins the outright rejection of
+// `--pre-sql-file=-` (stdin). The desired-SQL file args already
+// accept `-`; allowing it for pre-SQL too would let both inputs
+// fight over stdin (the second read would hit EOF and silently
+// truncate). Pre-SQL is small enough that --pre-sql / env covers
+// the no-real-file case, so on-disk paths are the only file shape
+// supported.
+func TestApply_PreSQLFileStdinRejected(t *testing.T) {
 	c := newClient(t)
 	_, err := c.Apply(context.Background(), &myschema.ApplyOptions{
-		Files:        []string{"-"},
+		Files:        []string{writeDesired(t, `CREATE TABLE t (id INT NOT NULL, PRIMARY KEY (id));`)},
 		PreSQLOption: myschema.PreSQLOption{PreSQLFile: "-"},
 	}, &bytes.Buffer{})
 	require.Error(t, err)

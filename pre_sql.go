@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"slices"
+	"os"
 	"strings"
 
 	"vitess.io/vitess/go/vt/sqlparser"
-
-	"github.com/winebarrel/myschema/parser"
 )
 
 // loadPreSQL resolves and validates the pre-SQL payload from
@@ -24,34 +22,30 @@ import (
 // not-set so `MYSCHEMA_PRE_SQL=` (empty / whitespace) doesn't trip the
 // mutually-exclusive check against a legitimate --pre-sql-file.
 //
-// File reads go through parser.ReadSQLFile so `--pre-sql-file=-`
-// reads from stdin, matching the convention the desired-SQL file
-// args already use.
-//
-// `desiredFiles` is the list of desired-SQL file paths the caller
-// will read AFTER loadPreSQL returns; if both pre-sql-file and a
-// desired file are `-` (stdin), the second read would hit EOF and
-// silently truncate. We fail fast with an explicit error so the
-// user catches the conflict at the CLI layer rather than seeing
-// "empty desired SQL" or "empty pre-SQL" in the wild.
-func loadPreSQL(opt PreSQLOption, desiredFiles []string) (string, error) {
+// stdin (`-`) is rejected for --pre-sql-file. The desired-SQL file
+// args already accept `-`, so allowing it here would let both
+// inputs fight over stdin (the second read would hit EOF and
+// silently truncate). Pre-SQL is small enough that env / inline
+// covers the no-real-file case; on-disk paths are the only file
+// shape worth supporting.
+func loadPreSQL(opt PreSQLOption) (string, error) {
 	preSQL := strings.TrimSpace(opt.PreSQL)
 	preFile := strings.TrimSpace(opt.PreSQLFile)
 	if preSQL != "" && preFile != "" {
 		return "", fmt.Errorf("pre-sql: --pre-sql and --pre-sql-file are mutually exclusive (got both)")
 	}
-	if preFile == "-" && slices.Contains(desiredFiles, "-") {
-		return "", fmt.Errorf("pre-sql: --pre-sql-file=- and a `-` desired file argument both read stdin; pick one")
+	if preFile == "-" {
+		return "", fmt.Errorf("pre-sql: --pre-sql-file=- (stdin) is not supported; use --pre-sql for inline payload or pass a file path")
 	}
 	if preSQL != "" {
 		return preSQL, nil
 	}
 	if preFile != "" {
-		data, err := parser.ReadSQLFile(preFile)
+		data, err := os.ReadFile(preFile)
 		if err != nil {
 			return "", fmt.Errorf("pre-sql: read %s: %w", preFile, err)
 		}
-		return data, nil
+		return string(data), nil
 	}
 	return "", nil
 }

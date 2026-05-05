@@ -33,7 +33,7 @@ func (c *Client) Apply(ctx context.Context, options *ApplyOptions, w io.Writer) 
 	// (both flags set, missing file) aren't masked by a downstream
 	// connection failure and so we don't open a DB connection just to
 	// throw it away.
-	preSQL, err := loadPreSQL(options.PreSQLOption, options.Files)
+	preSQL, err := loadPreSQL(options.PreSQLOption)
 	if err != nil {
 		return nil, err
 	}

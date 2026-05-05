@@ -206,10 +206,11 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   whatever SQL the operator passes without scrubbing, so a stray
   `USE other_db` (which would re-anchor the connection's current
   database) or destructive DML in pre-SQL is the operator's
-  responsibility — not validated. The one footgun myschema does
-  catch is `--pre-sql-file=-` combined with a `-` desired-file
-  argument: both would read stdin and the second read would silently
-  truncate, so we fail fast with an explicit error.
+  responsibility — not validated. `--pre-sql-file=-` (stdin) is
+  rejected outright: the desired-SQL file args already accept
+  `-`, so allowing it for pre-SQL too would let both inputs fight
+  over stdin. Use `--pre-sql` for inline payload or pass an
+  on-disk path.
 - CLI: `plan`, `apply`, `dump`
 - `-- myschema:renamed-from <old>` directive on tables, columns, and
   secondary indexes. Statement-level on `CREATE TABLE` for table

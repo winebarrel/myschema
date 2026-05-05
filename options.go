@@ -86,7 +86,7 @@ type PreSQLOption struct {
 	// stays in place to cover programmatic API callers (Apply /
 	// Plan invoked from Go without going through kong).
 	PreSQL     string `xor:"pre-sql" env:"MYSCHEMA_PRE_SQL" help:"SQL statement(s) to run on the connection before plan / apply (typically session SETs). Multi-statement input is split on ';'. Mutually exclusive with --pre-sql-file."`
-	PreSQLFile string `xor:"pre-sql" env:"MYSCHEMA_PRE_SQL_FILE" help:"Path to a file with SQL statement(s) to run on the connection before plan / apply. Mutually exclusive with --pre-sql."`
+	PreSQLFile string `xor:"pre-sql" env:"MYSCHEMA_PRE_SQL_FILE" help:"Path to a file with SQL statement(s) to run on the connection before plan / apply. Mutually exclusive with --pre-sql. stdin (-) is not supported; use --pre-sql for inline payload."`
 }
 
 // DropPolicy decides which DROP categories the diff is allowed to emit.
