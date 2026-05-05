@@ -10,6 +10,7 @@ import (
 	"github.com/winebarrel/myschema/diff"
 	"github.com/winebarrel/myschema/model"
 	"github.com/winebarrel/myschema/parser"
+	"github.com/winebarrel/orderedmap"
 )
 
 // allowAll / allowList helpers cut down the noise in test bodies.
@@ -805,4 +806,89 @@ func TestCanonicalComment(t *testing.T) {
 	got := diff.CanonicalComment(&val)
 	require.NotNil(t, got)
 	assert.Equal(t, "x", *got)
+}
+
+func TestUniqueKeyPartitionCoverGap(t *testing.T) {
+	mk := func(idxs ...*model.Index) *model.Table {
+		tbl := &model.Table{
+			Indexes: orderedmap.New[string, *model.Index](),
+		}
+		for _, i := range idxs {
+			tbl.Indexes.Set(i.Name, i)
+		}
+		return tbl
+	}
+	pk := func(cols ...string) *model.Index {
+		parts := make([]model.IndexPart, len(cols))
+		for i, c := range cols {
+			parts[i] = model.IndexPart{Column: c}
+		}
+		return &model.Index{Name: "PRIMARY", Primary: true, Parts: parts}
+	}
+	uniq := func(name string, cols ...string) *model.Index {
+		parts := make([]model.IndexPart, len(cols))
+		for i, c := range cols {
+			parts[i] = model.IndexPart{Column: c}
+		}
+		return &model.Index{Name: name, KeyType: model.IndexUnique, Parts: parts}
+	}
+
+	t.Run("no required columns short-circuits", func(t *testing.T) {
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(pk("id")), nil))
+	})
+	t.Run("PK covers required column", func(t *testing.T) {
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(pk("id", "yr")), []string{"yr"}))
+	})
+	t.Run("PK missing partition column", func(t *testing.T) {
+		got := diff.UniqueKeyPartitionCoverGap(mk(pk("id")), []string{"yr"})
+		assert.Contains(t, got, "PRIMARY KEY")
+		assert.Contains(t, got, "yr")
+	})
+	t.Run("UNIQUE missing partition column", func(t *testing.T) {
+		got := diff.UniqueKeyPartitionCoverGap(mk(pk("id"), uniq("u_email", "email")), []string{"yr"})
+		// PRIMARY is reported first because index iteration follows
+		// declaration order (PRIMARY was set first).
+		assert.Contains(t, got, "missing partition column")
+	})
+	t.Run("non-unique non-primary index ignored", func(t *testing.T) {
+		// A plain KEY (not unique, not primary) doesn't constrain
+		// partition coverage; only PRIMARY / UNIQUE matter.
+		idx := &model.Index{Name: "idx", Parts: []model.IndexPart{{Column: "id"}}}
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(idx), []string{"yr"}))
+	})
+	t.Run("case-insensitive column match", func(t *testing.T) {
+		// required is lower-cased upstream; index parts may carry
+		// any case from desired SQL. Match should fold both.
+		assert.Empty(t, diff.UniqueKeyPartitionCoverGap(mk(pk("ID", "YR")), []string{"yr"}))
+	})
+}
+
+func TestPartitionRequiredColumns(t *testing.T) {
+	t.Run("empty clause → nil", func(t *testing.T) {
+		got, err := diff.PartitionRequiredColumns("")
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+	t.Run("simple column reference", func(t *testing.T) {
+		got, err := diff.PartitionRequiredColumns("partition by range (yr) (partition p0 values less than (2021))")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"yr"}, got)
+	})
+	t.Run("function-wrapped column extracted", func(t *testing.T) {
+		// PARTITION BY RANGE (YEAR(dt)) — only `dt` matters; YEAR
+		// is a function name, not a column.
+		got, err := diff.PartitionRequiredColumns("partition by range (year(dt)) (partition p0 values less than (2021))")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"dt"}, got)
+	})
+	t.Run("multi-column dedup case-folded", func(t *testing.T) {
+		got, err := diff.PartitionRequiredColumns("partition by range columns (a, B, a) (partition p0 values less than (1, 2, 3))")
+		require.NoError(t, err)
+		// Order preserves first-occurrence; case folded; dedup.
+		assert.Equal(t, []string{"a", "b"}, got)
+	})
+	t.Run("invalid clause surfaces parse error", func(t *testing.T) {
+		_, err := diff.PartitionRequiredColumns("not a partition clause")
+		require.Error(t, err)
+	})
 }

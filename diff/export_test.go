@@ -27,4 +27,5 @@ var (
 	TableCommentSQL            = tableCommentSQL
 	CanonicalComment           = canonicalComment
 	UniqueKeyPartitionCoverGap = uniqueKeyPartitionCoverGap
+	PartitionRequiredColumns   = partitionRequiredColumns
 )
