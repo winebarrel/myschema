@@ -232,9 +232,13 @@ trailing-comma splice that `appendAlterHints` does still fires
 (combine first, then hint), so the syntax is correct, but the
 *operational* effect changes:
 
-- A run of two specs that would each apply INSTANT separately
-  (e.g. two `ADD COLUMN` adds) folded into one ALTER with
-  `--alter-algorithm=INSTANT` is fine — both qualify.
+- When every spec in the run *individually* qualifies for the
+  pinned algorithm, the combined ALTER inherits that
+  qualification and applies cleanly. (Whether a particular
+  ADD / MODIFY / DROP COLUMN qualifies for INSTANT depends on
+  exact MySQL 8.0.x version and spec details — column position,
+  presence of generated columns ahead, etc. — so per-spec
+  verification still belongs to the operator.)
 - A run that mixes an INSTANT-eligible spec (ADD COLUMN) with one
   that requires INPLACE / COPY (e.g. DEFAULT CHARSET change,
   generated-column add, certain MODIFY COLUMNs) becomes one
