@@ -598,3 +598,233 @@ CREATE TABLE comp (
 	assert.Equal(t, "CURRENT_TIMESTAMP", *updated.OnUpdate,
 		"OnUpdate must NOT include the trailing INVISIBLE token")
 }
+
+// TestColumnAttributeMatrix exercises composed-state combinations
+// of EXTRA tokens on a single row. loadColumns parses a shared
+// `extraUp` string with multiple branches (AUTO_INCREMENT,
+// ON UPDATE, INVISIBLE, GENERATED). Single-attribute tests covered
+// each branch in isolation; the PR #84 ON UPDATE × INVISIBLE bug
+// showed that combinations break when one branch's TrimPrefix
+// captures another branch's trailing token. Pin the remaining
+// pairs / triples here so the same bug class can't slip in for
+// other compositions.
+func TestColumnAttributeMatrix(t *testing.T) {
+	t.Run("AUTO_INCREMENT × INVISIBLE", func(t *testing.T) {
+		// EXTRA = "auto_increment INVISIBLE". Both branches must
+		// fire; the INVISIBLE strip must leave AUTO_INCREMENT
+		// detection intact.
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id BIGINT NOT NULL AUTO_INCREMENT INVISIBLE,
+    visible_pk BIGINT NOT NULL,
+    PRIMARY KEY (id, visible_pk)
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.AutoIncrement, "AUTO_INCREMENT must round-trip")
+		assert.True(t, id.Invisible, "INVISIBLE must round-trip alongside AUTO_INCREMENT")
+	})
+
+	t.Run("STORED GENERATED × INVISIBLE", func(t *testing.T) {
+		// EXTRA contains both the STORED GENERATED marker and
+		// INVISIBLE. The Stored detection uses
+		// `strings.Contains(extraUp, "STORED GENERATED")`; the
+		// INVISIBLE strip happens first, so the substring must
+		// survive after removing INVISIBLE.
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    a INT NOT NULL,
+    b INT NOT NULL,
+    total INT GENERATED ALWAYS AS (a * b) STORED INVISIBLE,
+    PRIMARY KEY (id)
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		total, _ := tbl.Columns.GetOk("total")
+		require.NotNil(t, total)
+		require.NotNil(t, total.Generated, "GENERATED expression must round-trip")
+		assert.True(t, total.Stored, "STORED flag must survive INVISIBLE strip")
+		assert.True(t, total.Invisible, "INVISIBLE flag must round-trip alongside STORED GENERATED")
+	})
+
+	t.Run("VIRTUAL GENERATED × COMMENT", func(t *testing.T) {
+		// COMMENT lives in COLUMN_COMMENT, not EXTRA, so the
+		// shared-extraUp risk doesn't apply directly — but the
+		// generation expression in EXTRA / GENERATION_EXPRESSION
+		// is one of the heaviest tokens on a column row, so pin
+		// that GENERATED + COMMENT both survive on the same
+		// column.
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    a INT NOT NULL,
+    doubled INT GENERATED ALWAYS AS (a * 2) VIRTUAL COMMENT 'twice a',
+    PRIMARY KEY (id)
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		d, _ := tbl.Columns.GetOk("doubled")
+		require.NotNil(t, d)
+		require.NotNil(t, d.Generated)
+		assert.False(t, d.Stored, "VIRTUAL must stay non-Stored")
+		require.NotNil(t, d.Comment)
+		assert.Equal(t, "twice a", *d.Comment)
+	})
+}
+
+// TestIndexAttributeMatrix exercises composed-state combinations
+// at the loadIndexes layer. Each index row carries multiple
+// metadata fields (UNIQUE/PRIMARY, USING type, INVISIBLE, COMMENT,
+// prefix length, multi-column accumulation). Single-token tests
+// existed; pin the combinations here so a future refactor of
+// `loadIndexes`' per-row state reduction can't silently drop one
+// flag while the others survive.
+func TestIndexAttributeMatrix(t *testing.T) {
+	t.Run("UNIQUE × INVISIBLE × COMMENT", func(t *testing.T) {
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_email (email) COMMENT 'unique email' INVISIBLE
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		idx, ok := tbl.Indexes.GetOk("uq_email")
+		require.True(t, ok)
+		assert.Equal(t, model.IndexUnique, idx.KeyType, "UNIQUE classification")
+		assert.True(t, idx.Invisible, "INVISIBLE flag")
+		require.NotNil(t, idx.Comment)
+		assert.Equal(t, "unique email", *idx.Comment)
+	})
+
+	t.Run("FULLTEXT × COMMENT", func(t *testing.T) {
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    body TEXT,
+    PRIMARY KEY (id),
+    FULLTEXT KEY ft_body (body) COMMENT 'fulltext search'
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		idx, ok := tbl.Indexes.GetOk("ft_body")
+		require.True(t, ok)
+		assert.Equal(t, model.IndexFulltext, idx.KeyType, "FULLTEXT classification")
+		require.NotNil(t, idx.Comment)
+		assert.Equal(t, "fulltext search", *idx.Comment)
+	})
+
+	t.Run("SPATIAL × prefix length", func(t *testing.T) {
+		// Spatial indexes use INDEX_TYPE = "SPATIAL"; columns are
+		// not prefix-lengthed in practice but MySQL accepts a
+		// (numeric) SUB_PART on b-tree indexes. Cover the most
+		// common SPATIAL path to pin the classification, then
+		// pair with a separate prefix-length test on a regular
+		// secondary index since SUB_PART on SPATIAL is rejected
+		// by MySQL.
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    geom GEOMETRY NOT NULL SRID 0,
+    PRIMARY KEY (id),
+    SPATIAL KEY sp_geom (geom)
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		idx, ok := tbl.Indexes.GetOk("sp_geom")
+		require.True(t, ok)
+		assert.Equal(t, model.IndexSpatial, idx.KeyType, "SPATIAL classification")
+	})
+
+	t.Run("prefix length × INVISIBLE", func(t *testing.T) {
+		// Per-part SUB_PART (prefix length) plus an index-level
+		// INVISIBLE: separate row metadata branches
+		// (per-part vs per-index) must both survive. Without
+		// this pin a future loadIndexes refactor that
+		// reorganised the per-index struct could drop one flag.
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    PRIMARY KEY (id),
+    KEY pref_name (name(10)) INVISIBLE
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		idx, ok := tbl.Indexes.GetOk("pref_name")
+		require.True(t, ok)
+		assert.True(t, idx.Invisible, "INVISIBLE flag")
+		require.Len(t, idx.Parts, 1)
+		assert.Equal(t, 10, idx.Parts[0].Length, "prefix length must round-trip")
+	})
+
+	t.Run("INVISIBLE on multi-column key", func(t *testing.T) {
+		// loadIndexes accumulates across multiple rows for one
+		// index (one row per column). The INVISIBLE flag is
+		// taken from the first row's IS_VISIBLE; the matching
+		// flag on subsequent rows must agree. Pin that the
+		// composition (multi-row accumulation × INVISIBLE) lands
+		// the flag once on the resulting Index, not duplicated
+		// or dropped depending on row order.
+		db := testutil.ConnectDB(t)
+		ctx := context.Background()
+		testutil.SetupDB(t, ctx, db, `
+CREATE TABLE t (
+    id INT NOT NULL,
+    a INT NOT NULL,
+    b INT NOT NULL,
+    PRIMARY KEY (id),
+    KEY ix_ab (a, b) INVISIBLE
+);
+`)
+		cat := catalog.NewCatalog(db, testutil.DefaultDB)
+		tables, err := cat.Tables(ctx)
+		require.NoError(t, err)
+		tbl, _ := tables.GetOk("myschema_test.t")
+		idx, ok := tbl.Indexes.GetOk("ix_ab")
+		require.True(t, ok)
+		assert.True(t, idx.Invisible)
+		require.Len(t, idx.Parts, 2)
+		assert.Equal(t, "a", idx.Parts[0].Column)
+		assert.Equal(t, "b", idx.Parts[1].Column)
+	})
+}
