@@ -1291,6 +1291,26 @@ func TestParseSQL_PartialDDLSurfacesAsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "STORAGE", "wrapped error should preserve vitess's diagnostic")
 }
 
+// TestParseSQL_PartialDDLAbortsBatch is the multi-statement
+// counterpart: with one bad statement in the middle of a batch,
+// the whole ParseSQL call must return an error rather than
+// returning a partial ParseResult that contains the good
+// statements before / after the failure. This was the realistic
+// half-apply risk: without ParseStrictDDL, the loop would
+// register `good_a`, swallow `bad`, register `good_c`, and
+// `apply` would run all three (the empty `CREATE TABLE bad ();`
+// erroring at MySQL while `good_a` was already applied).
+func TestParseSQL_PartialDDLAbortsBatch(t *testing.T) {
+	r, err := parser.ParseSQL(`
+CREATE TABLE good_a (id INT NOT NULL, PRIMARY KEY (id));
+CREATE TABLE bad   (id INT NOT NULL STORAGE DISK, PRIMARY KEY (id));
+CREATE TABLE good_c (id INT NOT NULL, PRIMARY KEY (id));
+`, "app")
+	require.Error(t, err, "one bad statement must abort the whole batch")
+	assert.Nil(t, r, "no partial ParseResult must leak when ParseSQL errors")
+	assert.Contains(t, err.Error(), "STORAGE")
+}
+
 func TestParseSQL_ValidateDirectivesError(t *testing.T) {
 	// An unknown directive prefix is rejected by ValidateDirectives
 	// before any vitess parse runs — pin the early-out path.
