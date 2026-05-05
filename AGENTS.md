@@ -211,6 +211,16 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   `-`, so allowing it for pre-SQL too would let both inputs fight
   over stdin. Use `--pre-sql` for inline payload or pass an
   on-disk path.
+- `--split=<dir>` for `dump`: writes one SQL file per table / view
+  into `<dir>` (mkdir -p), naming each `<object>.sql`. Tables and
+  views share the MySQL identifier namespace, so the flat layout
+  is unambiguous. Filters apply (`--include` / `--exclude`).
+  When set, the SQL body is omitted from stdout — only the
+  existing header summary plus a `-- Wrote N file(s) to <dir>`
+  completion notice is printed. Stale files from previous dumps
+  are NOT cleaned up; split is write-this-set, not rsync-style
+  sync, so the operator decides whether to wipe the directory
+  first.
 - CLI: `plan`, `apply`, `dump`
 - `-- myschema:renamed-from <old>` directive on tables, columns, and
   secondary indexes. Statement-level on `CREATE TABLE` for table
@@ -334,7 +344,7 @@ rather than declarative schema. Manage them out of band.)
   `foo` while applying to database `bar`. Today the DSN's database is
   the single source of truth; if you point it at `bar`, every table
   reference in the desired SQL must also use `bar`.
-- `--split` for `dump`, `--pre-sql` / `--concurrently-pre-sql`
+- `--concurrently-pre-sql`
 
 When extending: prefer adding YAML-driven tests under a `testdata/`
 tree over Go table tests when the scenario is purely SQL-input →

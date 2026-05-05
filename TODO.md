@@ -22,10 +22,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
 
-## Low — CLI ergonomics
-
-- `--split` for `dump` (one file per table / view).
-
 ## Low — tests / docs / release
 
 - YAML harness extended to parser and diff (currently Go table tests).
