@@ -1277,13 +1277,15 @@ func TestParseSQL_UnparseableInputErrors(t *testing.T) {
 // column attribute vitess parses into `cd.Type.Options.Invisible`
 // (`*bool`: nil = unspecified, false = VISIBLE, true = INVISIBLE).
 // `parseColumnDef` previously ignored the field and the attribute
-// silently dropped on round-trip. Pin the parsed-model shape so the
-// new wiring (parser → model → emitter → catalog → diff) stays
-// honest.
+// silently dropped on round-trip. Pin all three states so the new
+// wiring (parser → model → emitter → catalog → diff) stays honest
+// and the nil-vs-false distinction the code relies on can't quietly
+// regress.
 func TestParseColumnInvisible(t *testing.T) {
 	sql := `CREATE TABLE t (
     id INT NOT NULL,
-    visible_col INT,
+    unspec_col INT,
+    visible_col INT VISIBLE,
     hidden_col INT INVISIBLE,
     PRIMARY KEY (id)
 );`
@@ -1292,14 +1294,28 @@ func TestParseColumnInvisible(t *testing.T) {
 	tbl, _ := r.Tables.GetOk("app.t")
 	require.NotNil(t, tbl)
 
-	hidden, _ := tbl.Columns.GetOk("hidden_col")
-	require.NotNil(t, hidden)
-	assert.True(t, hidden.Invisible, "INVISIBLE column must set Column.Invisible=true")
-
-	// Other columns stay default (false).
-	visible, _ := tbl.Columns.GetOk("visible_col")
-	require.NotNil(t, visible)
-	assert.False(t, visible.Invisible, "non-INVISIBLE column must default to Invisible=false")
+	t.Run("INVISIBLE → Invisible=true", func(t *testing.T) {
+		hidden, _ := tbl.Columns.GetOk("hidden_col")
+		require.NotNil(t, hidden)
+		assert.True(t, hidden.Invisible)
+	})
+	t.Run("unspecified → Invisible=false (vitess sets *bool=nil)", func(t *testing.T) {
+		// Pins the `opts.Invisible != nil` branch: we must not
+		// dereference a nil *bool.
+		c, _ := tbl.Columns.GetOk("unspec_col")
+		require.NotNil(t, c)
+		assert.False(t, c.Invisible)
+	})
+	t.Run("explicit VISIBLE → Invisible=false (vitess sets *bool=false)", func(t *testing.T) {
+		// Pins the `*opts.Invisible` false-branch: vitess
+		// distinguishes "unspecified" (nil) from "VISIBLE keyword
+		// written" (false). Both collapse to the model's
+		// Invisible=false default since the round-trip only emits
+		// when Invisible=true.
+		c, _ := tbl.Columns.GetOk("visible_col")
+		require.NotNil(t, c)
+		assert.False(t, c.Invisible)
+	})
 }
 
 // TestParseSQL_PartialDDLSurfacesAsError pins the audit fix for

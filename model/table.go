@@ -121,11 +121,14 @@ func (t *Table) SQL() string {
 
 // ColumnDefSQL renders the post-name body of a column definition
 // (`<type> [CHARACTER SET …] [COLLATE …] [GENERATED …] [NOT NULL]
-// [DEFAULT …] [ON UPDATE …] [AUTO_INCREMENT] [COMMENT …]`) prefixed by
-// the column name formatted via Ident (back-tick quoted only when
-// required by MySQL syntax). Used by `(*Table).SQL()` for the
-// `CREATE TABLE` body and by `diff/tables.go` for `ALTER TABLE
-// ADD/MODIFY COLUMN`, so both contexts emit the same set of attributes.
+// [DEFAULT …] [ON UPDATE …] [AUTO_INCREMENT] [INVISIBLE] [COMMENT …]`)
+// prefixed by the column name formatted via Ident (back-tick quoted
+// only when required by MySQL syntax). Used by `(*Table).SQL()` for
+// the `CREATE TABLE` body and by `diff/tables.go` for
+// `ALTER TABLE ADD/MODIFY COLUMN`, so both contexts emit the same
+// set of attributes. The order matches MySQL's SHOW CREATE TABLE
+// output and is pinned by index-comparison assertions in
+// `model/table_test.go`.
 func ColumnDefSQL(col *Column) string { return columnDefSQL(col) }
 
 func columnDefSQL(col *Column) string {
