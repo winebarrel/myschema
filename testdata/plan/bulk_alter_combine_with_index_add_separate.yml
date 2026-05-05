@@ -6,8 +6,10 @@
 # Four column adds + one secondary index add, all on the same table:
 #   - The four ADD COLUMNs fold into one multi-spec ALTER.
 #   - The secondary index add lands as a standalone CREATE INDEX
-#     (diff/tables.go:728 — not an ALTER TABLE … ADD KEY), so it
-#     stays on its own line and breaks the run.
+#     (per CAVEATS.md "Bulk-alter does not combine FK operations" →
+#     "Secondary-index ADDs" — emitted as `CREATE INDEX … ON t (…);`,
+#     not as `ALTER TABLE … ADD KEY`), so it stays on its own line
+#     and breaks the run.
 #
 # Combined with --alter-algorithm / --alter-lock to also pin that
 # the hint splice still fires once per output statement (so the
