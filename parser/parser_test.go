@@ -129,6 +129,76 @@ CREATE TABLE posts (
 	assert.Equal(t, "CASCADE", fk.OnDelete)
 }
 
+// TestParseInlineColumnPrimaryKey: vitess parses `id INT PRIMARY KEY`
+// as a column with KeyOpt = ColKeyPrimary, distinct from a table-level
+// PRIMARY KEY (id) constraint. The parser must promote the inline form
+// to the same `t.Constraints["PRIMARY"]` + `t.Indexes["PRIMARY"]` shape
+// the table-level path produces, otherwise the PK silently drops on
+// apply (the regression that motivated this test). MySQL forces
+// NOT NULL on a PK column even when the user wrote just `PRIMARY KEY`,
+// so the column's NotNull flag must also be set — match the table-level
+// behaviour at parser.go:608.
+func TestParseInlineColumnPrimaryKey(t *testing.T) {
+	t.Run("explicit NOT NULL", func(t *testing.T) {
+		sql := `CREATE TABLE t (id INT NOT NULL PRIMARY KEY, name VARCHAR(64));`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		require.NotNil(t, tbl)
+
+		pk, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok, "inline PRIMARY KEY must produce a PRIMARY constraint")
+		assert.Equal(t, model.PrimaryKeyConstraint, pk.Type)
+		assert.Equal(t, []string{"id"}, pk.Columns)
+
+		idx, ok := tbl.Indexes.GetOk("PRIMARY")
+		require.True(t, ok, "inline PRIMARY KEY must produce a PRIMARY index")
+		assert.True(t, idx.Primary)
+
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull, "PK column must be NOT NULL")
+	})
+	t.Run("PRIMARY KEY without explicit NOT NULL forces NotNull", func(t *testing.T) {
+		// MySQL silently makes the column NOT NULL when it's a PK; the
+		// parser must mirror that so the dump round-trip stays stable.
+		sql := `CREATE TABLE t (id INT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull, "inline PK must force NotNull on its column")
+	})
+}
+
+// TestParseInlineColumnUnique: `email VARCHAR(255) UNIQUE` and the
+// `UNIQUE KEY` variant should both promote to a UNIQUE Index named
+// after the column (matching MySQL's auto-naming and the table-level
+// path's behaviour at parser.go:617). Without the promotion the
+// constraint silently drops on apply.
+func TestParseInlineColumnUnique(t *testing.T) {
+	for _, kw := range []string{"UNIQUE", "UNIQUE KEY"} {
+		t.Run(kw, func(t *testing.T) {
+			sql := `CREATE TABLE t (
+    id INT NOT NULL,
+    email VARCHAR(255) ` + kw + `,
+    PRIMARY KEY (id)
+);`
+			r, err := parser.ParseSQL(sql, "app")
+			require.NoError(t, err)
+			tbl, _ := r.Tables.GetOk("app.t")
+			require.NotNil(t, tbl)
+
+			idx, ok := tbl.Indexes.GetOk("email")
+			require.True(t, ok, "inline UNIQUE must produce a UNIQUE index named after the column")
+			assert.Equal(t, model.IndexUnique, idx.KeyType)
+			require.Len(t, idx.Parts, 1)
+			assert.Equal(t, "email", idx.Parts[0].Column)
+		})
+	}
+}
+
 func TestParseCreateIndex(t *testing.T) {
 	sql := `
 CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(64), PRIMARY KEY (id));

@@ -409,6 +409,23 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 				t.ForeignKeys.Set(fk.Name, fk)
 			}
 		}
+
+		// Inline column-level PRIMARY KEY / UNIQUE
+		// (`col INT PRIMARY KEY`, `col VARCHAR(64) UNIQUE`).
+		// vitess parses these as a column attribute (KeyOpt) rather
+		// than promoting them to a TableSpec.Indexes entry, so the
+		// table-level index loop below would never see them. Mirror
+		// the table-level behaviour from `addIndex`'s IndexTypePrimary
+		// / IndexTypeUnique cases here so the inline form round-trips
+		// cleanly. ColKey alone (a bare `KEY` attribute) is not valid
+		// MySQL column syntax, so don't handle it. ColKeySpatialKey /
+		// ColKeyFulltextKey aren't valid as column-level attributes
+		// either; left out for the same reason.
+		if cd.Type.Options != nil {
+			if err := applyInlineColumnKey(t, c.Name, cd.Type.Options.KeyOpt); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	for _, idx := range s.TableSpec.Indexes {
@@ -890,6 +907,59 @@ func applyAlterTable(tables *orderedmap.Map[string, *model.Table], s *sqlparser.
 
 func autoFKName(table, col string) string {
 	return table + "_ibfk_" + col
+}
+
+// applyInlineColumnKey promotes a column-level KeyOpt (vitess's
+// representation of inline `PRIMARY KEY` / `UNIQUE [KEY]` written
+// against a single column) to the same `Constraints` / `Indexes`
+// shape the table-level path produces. ColKeyNone is the common
+// case (no inline key); ColKey, ColKeySpatialKey, and
+// ColKeyFulltextKey aren't valid MySQL column-level attributes —
+// pass them through silently rather than failing the parse, since
+// the rest of the parser policy already prefers "ignore unmodelled
+// shapes" over hard errors.
+func applyInlineColumnKey(t *model.Table, colName string, k sqlparser.ColumnKeyOption) error {
+	switch k {
+	case sqlparser.ColKeyPrimary:
+		// Idempotent against a separate table-level PRIMARY KEY:
+		// if both are written, the column-level one wins because
+		// it's processed first; the table-level addIndex pass would
+		// hit the duplicate and the existing PRIMARY KEY equality
+		// check there would let it through. The user-error case
+		// (truly conflicting PK column lists) surfaces at apply
+		// time.
+		if _, ok := t.Constraints.GetOk("PRIMARY"); ok {
+			return nil
+		}
+		parts := []model.IndexPart{{Column: colName}}
+		def, _ := indexBodySQLFromParts(parts)
+		t.Constraints.Set("PRIMARY", &model.Constraint{
+			Name:       "PRIMARY",
+			Type:       model.PrimaryKeyConstraint,
+			Definition: def,
+			Columns:    []string{colName},
+		})
+		t.Indexes.Set("PRIMARY", &model.Index{
+			Name: "PRIMARY", Database: t.Database, Table: t.Name,
+			Primary: true, Parts: parts,
+		})
+		// MySQL silently forces NOT NULL on PK columns. Mirror that
+		// so the dump round-trip stays stable — same as the
+		// table-level path at parser.go's IndexTypePrimary case.
+		if col, ok := t.Columns.GetOk(colName); ok {
+			col.NotNull = true
+		}
+	case sqlparser.ColKeyUnique, sqlparser.ColKeyUniqueKey:
+		if _, dup := t.Indexes.GetOk(colName); dup {
+			return fmt.Errorf("duplicate index: %s on %s", colName, t.FQTN())
+		}
+		t.Indexes.Set(colName, &model.Index{
+			Name: colName, Database: t.Database, Table: t.Name,
+			KeyType: model.IndexUnique,
+			Parts:   []model.IndexPart{{Column: colName}},
+		})
+	}
+	return nil
 }
 
 func autoCheckName(table string, n int) string {
