@@ -530,3 +530,35 @@ CREATE TABLE attrs (
 	require.NotNil(t, updated.OnUpdate, "ON UPDATE must round-trip")
 	assert.Contains(t, *updated.OnUpdate, "CURRENT_TIMESTAMP")
 }
+
+// TestColumnInvisibleRoundTrip pins the catalog reader's INVISIBLE
+// detection (`information_schema.COLUMNS.EXTRA` contains
+// "INVISIBLE" for invisible columns on MySQL 8.0+). Without a
+// catalog-package test, the new branch in loadColumns shows as
+// uncovered in the per-package coverage profile even though the
+// integration YAML round-trip exercises it transitively.
+func TestColumnInvisibleRoundTrip(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE inv (
+    id BIGINT NOT NULL,
+    visible_col INT,
+    hidden_col INT INVISIBLE,
+    PRIMARY KEY (id)
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	tbl, ok := tables.GetOk("myschema_test.inv")
+	require.True(t, ok)
+
+	hidden, _ := tbl.Columns.GetOk("hidden_col")
+	require.NotNil(t, hidden)
+	assert.True(t, hidden.Invisible, "INVISIBLE column must round-trip from EXTRA")
+
+	visible, _ := tbl.Columns.GetOk("visible_col")
+	require.NotNil(t, visible)
+	assert.False(t, visible.Invisible, "non-INVISIBLE column must stay false")
+}

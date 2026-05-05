@@ -543,6 +543,13 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 		coll := strings.ToLower(opts.Collate)
 		c.Collation = &coll
 	}
+	// vitess uses `Invisible *bool` (nil = unspecified, false = VISIBLE,
+	// true = INVISIBLE). Only the true case is interesting to the model:
+	// VISIBLE is MySQL's default, so a nil / false stays Column.Invisible
+	// = false and emits nothing on round-trip.
+	if opts.Invisible != nil && *opts.Invisible {
+		c.Invisible = true
+	}
 	if opts.As != nil {
 		expr := sqlparser.String(opts.As)
 		c.Generated = &expr

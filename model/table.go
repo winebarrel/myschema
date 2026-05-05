@@ -165,6 +165,12 @@ func columnDefSQL(col *Column) string {
 	if col.AutoIncrement {
 		b.WriteString(" AUTO_INCREMENT")
 	}
+	// INVISIBLE goes after AUTO_INCREMENT and before COMMENT to match
+	// MySQL's SHOW CREATE TABLE order. VISIBLE is the default and never
+	// emitted; only the deviation surfaces.
+	if col.Invisible {
+		b.WriteString(" INVISIBLE")
+	}
 	if col.Comment != nil {
 		b.WriteString(" COMMENT ")
 		b.WriteString(QuoteLiteral(*col.Comment))

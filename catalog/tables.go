@@ -245,6 +245,13 @@ ORDER  BY ORDINAL_POSITION`
 		if strings.Contains(extraUp, "AUTO_INCREMENT") {
 			col.AutoIncrement = true
 		}
+		// MySQL 8.0+ surfaces invisible columns as the literal token
+		// `INVISIBLE` in EXTRA. Detect via Contains so we don't trip
+		// on adjacent extras (a column can be both AUTO_INCREMENT and
+		// INVISIBLE simultaneously, though uncommon).
+		if strings.Contains(extraUp, "INVISIBLE") {
+			col.Invisible = true
+		}
 		if strings.Contains(extraUp, "ON UPDATE ") {
 			ou := strings.TrimPrefix(extraUp, "DEFAULT_GENERATED ON UPDATE ")
 			ou = strings.TrimPrefix(ou, "ON UPDATE ")

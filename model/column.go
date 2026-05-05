@@ -14,6 +14,11 @@ type Column struct {
 	Collation     *string
 	CharacterSet  *string
 	Comment       *string
+	// Invisible mirrors MySQL 8.0+ `INVISIBLE` on a column. False means
+	// the column is visible (the default — nothing emitted). The catalog
+	// reader populates this from `information_schema.COLUMNS.EXTRA`,
+	// which surfaces "INVISIBLE" alongside other extras.
+	Invisible bool
 	// RenameFrom: previous column name from a `-- myschema:renamed-from`
 	// inline directive in CREATE TABLE. Drives ALTER TABLE … RENAME COLUMN
 	// in the diff. Always nil on the catalog side.

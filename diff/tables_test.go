@@ -458,6 +458,11 @@ func TestColumnEqual(t *testing.T) {
 		b.AutoIncrement = true
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
+	t.Run("invisible differs", func(t *testing.T) {
+		a, b := base(), base()
+		b.Invisible = true
+		assert.False(t, diff.ColumnEqual(a, b))
+	})
 	t.Run("generated expr differs", func(t *testing.T) {
 		a, b := base(), base()
 		a.Generated = new("a + 1")

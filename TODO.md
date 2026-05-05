@@ -22,17 +22,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
 
-- **Column-level `INVISIBLE` (MySQL 8.0+) is silently dropped.**
-  vitess parses it into `cd.Type.Options.Invisible` but
-  `parseColumnDef` doesn't read the field, so a `hidden INT
-  INVISIBLE` desired-side column round-trips as a regular
-  visible column. Drift never closes because the catalog reads
-  `information_schema.COLUMNS.EXTRA` (which has `INVISIBLE`)
-  while the parser side has nothing. Fix: surface
-  `Options.Invisible` on `model.Column`, emit `INVISIBLE` in
-  `columnDefSQL` when set, populate from `EXTRA` in the catalog
-  reader. Found during the PR #81 silent-drop audit.
-
 - **`SRID <n>` on spatial columns is silently dropped.** vitess
   parses it into `cd.Type.Options.SRID` (a `*Literal`) but
   `parseColumnDef` doesn't read it. AGENTS.md "In scope (v1)"

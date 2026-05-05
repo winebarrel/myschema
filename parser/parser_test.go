@@ -1273,6 +1273,35 @@ func TestParseSQL_UnparseableInputErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestParseColumnInvisible: `col INT INVISIBLE` (MySQL 8.0+) is a
+// column attribute vitess parses into `cd.Type.Options.Invisible`
+// (`*bool`: nil = unspecified, false = VISIBLE, true = INVISIBLE).
+// `parseColumnDef` previously ignored the field and the attribute
+// silently dropped on round-trip. Pin the parsed-model shape so the
+// new wiring (parser → model → emitter → catalog → diff) stays
+// honest.
+func TestParseColumnInvisible(t *testing.T) {
+	sql := `CREATE TABLE t (
+    id INT NOT NULL,
+    visible_col INT,
+    hidden_col INT INVISIBLE,
+    PRIMARY KEY (id)
+);`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	require.NotNil(t, tbl)
+
+	hidden, _ := tbl.Columns.GetOk("hidden_col")
+	require.NotNil(t, hidden)
+	assert.True(t, hidden.Invisible, "INVISIBLE column must set Column.Invisible=true")
+
+	// Other columns stay default (false).
+	visible, _ := tbl.Columns.GetOk("visible_col")
+	require.NotNil(t, visible)
+	assert.False(t, visible.Invisible, "non-INVISIBLE column must default to Invisible=false")
+}
+
 // TestParseSQL_PartialDDLSurfacesAsError pins the audit fix for
 // vitess's partial-DDL fallback: by default `Parser.Parse` swallows
 // syntax errors when the parser still has a partial AST handy

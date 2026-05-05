@@ -231,6 +231,22 @@ func TestColumnDefSQLVirtualGenerated(t *testing.T) {
 	assert.Contains(t, out, "GENERATED ALWAYS AS (a + b) VIRTUAL")
 }
 
+// TestColumnDefSQLInvisible: an invisible column emits the
+// `INVISIBLE` keyword; a visible column (default) does not. The
+// keyword sits between AUTO_INCREMENT and COMMENT to match MySQL's
+// SHOW CREATE TABLE order.
+func TestColumnDefSQLInvisible(t *testing.T) {
+	t.Run("invisible emits INVISIBLE", func(t *testing.T) {
+		c := &model.Column{Name: "x", TypeName: "int", Invisible: true}
+		assert.Contains(t, model.ColumnDefSQL(c), "INVISIBLE")
+	})
+	t.Run("visible (default) emits nothing", func(t *testing.T) {
+		c := &model.Column{Name: "x", TypeName: "int"}
+		assert.NotContains(t, model.ColumnDefSQL(c), "INVISIBLE")
+		assert.NotContains(t, model.ColumnDefSQL(c), "VISIBLE")
+	})
+}
+
 func TestTableFQTN(t *testing.T) {
 	tbl := &model.Table{Database: "shop", Name: "users"}
 	assert.Equal(t, "shop.users", tbl.FQTN())

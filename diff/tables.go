@@ -426,6 +426,9 @@ func columnEqual(a, b *model.Column) bool {
 	if !ptrEq(a.Collation, b.Collation) {
 		return false
 	}
+	if a.Invisible != b.Invisible {
+		return false
+	}
 	return true
 }
 
