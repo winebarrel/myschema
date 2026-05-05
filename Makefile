@@ -4,9 +4,8 @@
 MYSQL_HOST ?= 127.0.0.1
 MYSQL_PORT ?= 3306
 MYSQL_USER ?= root
-MYSQL_PWD  ?=
 MYSQL_DB   ?= myschema_test
-export MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PWD MYSQL_DB
+export MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_DB
 
 # Default DSN used by tests / scenario scripts. The trailing slash makes it
 # easy for tests to append the test DB name; the production CLI requires the
