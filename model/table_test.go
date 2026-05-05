@@ -272,13 +272,15 @@ func TestColumnDefSQLInvisible(t *testing.T) {
 // position with index-comparison so a future reorder of
 // `columnDefSQL` fails a specific edge here instead of silently
 // shipping wrong-order DDL. PR #84 pinned only INVISIBLE's slot;
-// extend the pin to the full chain (CHARSET → COLLATE → GENERATED →
-// NOT NULL → DEFAULT → ON UPDATE → AUTO_INCREMENT → INVISIBLE →
-// COMMENT). The constructed column intentionally combines
-// attributes MySQL would reject together (e.g. BIGINT + CHARACTER
-// SET, AUTO_INCREMENT + GENERATED) so a single column exercises
-// every formatter slot — this is a slot-ordering pin, not a
-// SHOW CREATE TABLE round-trip fixture.
+// extend the pin to the full chain (CHARSET → COLLATE → GENERATED
+// → STORED|VIRTUAL → NOT NULL → DEFAULT → ON UPDATE →
+// AUTO_INCREMENT → INVISIBLE → COMMENT). The constructed column
+// intentionally combines attributes MySQL would reject together
+// (e.g. BIGINT + CHARACTER SET, AUTO_INCREMENT + GENERATED) so a
+// single column exercises every formatter slot — this is a
+// slot-ordering pin, not a SHOW CREATE TABLE round-trip fixture.
+// VIRTUAL is exercised in a sibling sub-test below; the main pin
+// uses STORED.
 func TestColumnDefSQLFullOrdering(t *testing.T) {
 	cs := "utf8mb4"
 	coll := "utf8mb4_0900_ai_ci"
@@ -307,7 +309,7 @@ func TestColumnDefSQLFullOrdering(t *testing.T) {
 	out := model.ColumnDefSQL(c)
 
 	tokens := []string{
-		"CHARACTER SET", "COLLATE", "GENERATED ALWAYS AS",
+		"CHARACTER SET", "COLLATE", "GENERATED ALWAYS AS", "STORED",
 		"NOT NULL", "DEFAULT", "ON UPDATE", "AUTO_INCREMENT",
 		"INVISIBLE", "COMMENT",
 	}
@@ -320,6 +322,36 @@ func TestColumnDefSQLFullOrdering(t *testing.T) {
 		assert.Less(t, pos[i-1], pos[i],
 			"%q must precede %q (got %q)", tokens[i-1], tokens[i], out)
 	}
+	// `VIRTUAL` must not appear when `Stored: true`; otherwise a
+	// future emitter that prints both keywords would still pass the
+	// STORED-position assertion above.
+	assert.NotContains(t, out, "VIRTUAL")
+}
+
+// TestColumnDefSQLFullOrderingVirtual is the Stored=false sibling
+// of TestColumnDefSQLFullOrdering. A regression that flips
+// STORED↔VIRTUAL or moves the storage modifier out of its
+// post-GENERATED slot fails here.
+func TestColumnDefSQLFullOrderingVirtual(t *testing.T) {
+	gen := "id + 1"
+	c := &model.Column{
+		Name:      "n",
+		TypeName:  "bigint",
+		Generated: &gen,
+		Stored:    false,
+		NotNull:   true,
+	}
+	out := model.ColumnDefSQL(c)
+
+	gpos := strings.Index(out, "GENERATED ALWAYS AS")
+	vpos := strings.Index(out, "VIRTUAL")
+	npos := strings.Index(out, "NOT NULL")
+	require.NotEqual(t, -1, gpos)
+	require.NotEqual(t, -1, vpos)
+	require.NotEqual(t, -1, npos)
+	assert.Less(t, gpos, vpos, "VIRTUAL must follow GENERATED ALWAYS AS")
+	assert.Less(t, vpos, npos, "VIRTUAL must precede NOT NULL")
+	assert.NotContains(t, out, "STORED")
 }
 
 // TestConstraintInlineSQLCheckEnforcedOrdering pins the
