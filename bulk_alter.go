@@ -125,9 +125,14 @@ func splitCombinableAlter(stmt string) (ident, spec string, hasSemi bool, ok boo
 	if !hasPrefixFold(s, pos, "ALTER TABLE ") {
 		return "", "", false, false
 	}
-	// partitionOpInsertPos inspects the ORIGINAL stmt (with `;`) so the
-	// shared helper's offsets stay sane; a partition op anywhere after
-	// the table name disqualifies the whole stmt.
+	// partitionOpInsertPos returns the offset of a partition keyword
+	// only when it sits *immediately* after the table name (the same
+	// position appendAlterHints uses for splicing). That's exactly what
+	// we want: the diff layer emits one alter_specification per
+	// statement, so any partition op the diff produces lands in that
+	// position. Reuse the helper here on the original stmt (the
+	// trailing `;` keeps its offsets sane) — a partition op there
+	// disqualifies the stmt from combine.
 	if partitionOpInsertPos(stmt) > 0 {
 		return "", "", false, false
 	}

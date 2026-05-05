@@ -68,9 +68,10 @@ type AlterOption struct {
 	AlterAlgorithm string `env:"MYSCHEMA_ALTER_ALGORITHM" enum:",DEFAULT,INSTANT,INPLACE,COPY" default:"" help:"ALGORITHM= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, INSTANT, INPLACE, COPY (MySQL 8.0+)."`
 	AlterLock      string `env:"MYSCHEMA_ALTER_LOCK" enum:",DEFAULT,NONE,SHARED,EXCLUSIVE" default:"" help:"LOCK= clause appended to every generated ALTER TABLE / CREATE INDEX. One of DEFAULT, NONE, SHARED, EXCLUSIVE."`
 	// BulkAlter folds consecutive same-table ALTER TABLE statements
-	// into one multi-spec ALTER. FK ops, partition ops, and standalone
-	// CREATE INDEX are excluded — see CAVEATS.md for the rationale.
-	BulkAlter bool `env:"MYSCHEMA_BULK_ALTER" help:"Combine consecutive same-table ALTER TABLE statements into one multi-spec ALTER. FK / partition / standalone CREATE INDEX excluded."`
+	// into one multi-spec ALTER. FK ops, partition ops, RENAME COLUMN /
+	// INDEX, and standalone CREATE INDEX are excluded — see CAVEATS.md
+	// for the rationale.
+	BulkAlter bool `env:"MYSCHEMA_BULK_ALTER" help:"Combine consecutive same-table ALTER TABLE statements into one multi-spec ALTER. FK / partition / RENAME COLUMN / RENAME INDEX / standalone CREATE INDEX excluded."`
 }
 
 // PreSQLOption carries a one-shot SQL payload that runs against the

@@ -195,8 +195,9 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   one multi-spec ALTER. Default off, opt-in. **Combinable:** anything
   the diff layer emits as `ALTER TABLE <ident> <single-spec>;` —
   ADD / MODIFY / DROP COLUMN, DROP INDEX, ADD / DROP CONSTRAINT
-  (PK / CHECK), DEFAULT CHARSET / COLLATE, COMMENT, and the
-  partition shapes that aren't on the excluded list below.
+  (PK / CHECK), DEFAULT CHARSET / COLLATE, COMMENT, CONVERT TO
+  CHARACTER SET. Partition ops are *all* on the excluded list (no
+  partition shape that the diff currently emits is combinable).
   **Excluded** (each acts as a run separator):
   - FK ops — kept in their own `FKAddStmts` / `FKDropStmts` buckets
     so cross-table ordering survives.
