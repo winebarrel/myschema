@@ -75,7 +75,9 @@ desired-side file even if the database already has tables:
 myschema dump > desired.sql
 ```
 
-The output is plain `CREATE TABLE` / `CREATE VIEW` statements.
+The output is the canonical desired-side shape: `CREATE TABLE` /
+`CREATE VIEW` plus standalone `CREATE INDEX` for each secondary
+index and standalone `ALTER TABLE … ADD CONSTRAINT` for each FK.
 Drop the header comment line if you prefer (it's just a summary;
 not parsed back in).
 
@@ -122,15 +124,35 @@ A few rules worth knowing up front (the rest are in
 myschema plan desired.sql
 ```
 
-Output is the DDL myschema would run, with `-- skipped:` comments
-for anything blocked by the drop policy:
+Output is the DDL myschema would run. The header line shows the
+*current* catalog counts (the diff body that follows is what would
+change them), and `-- skipped:` lines surface anything the drop
+policy blocked:
 
 ```sql
--- Plan: 0 → 2 table(s), 0 view(s)
-CREATE TABLE users (...);
-CREATE TABLE posts (...);
-ALTER TABLE posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id);
+-- Plan for database app (0 table(s), 0 view(s))
+CREATE TABLE users (
+    id bigint NOT NULL AUTO_INCREMENT,
+    email varchar(255) NOT NULL,
+    name varchar(64),
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX users_email_key ON users (email);
+CREATE TABLE posts (
+    id bigint NOT NULL AUTO_INCREMENT,
+    user_id bigint NOT NULL,
+    title varchar(255) NOT NULL,
+    body text,
+    PRIMARY KEY (id)
+);
+CREATE INDEX idx_posts_user ON posts (user_id);
+ALTER TABLE posts ADD CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id);
 ```
+
+Note that the secondary index (`users_email_key`) and the FK come
+out as standalone statements, not inline inside `CREATE TABLE` —
+the diff layer emits them separately for ordering reasons.
 
 Run it:
 
@@ -142,7 +164,8 @@ A second `plan` should report no changes:
 
 ```sh
 myschema plan desired.sql
-# -- No changes.
+# -- Plan for database app (2 table(s), 0 view(s))
+# -- No changes
 ```
 
 That round-trip — `dump → edit → plan → apply → re-plan empty` —
@@ -151,13 +174,23 @@ is the core workflow.
 ## 6. Iterate: drops are opt-in
 
 myschema refuses destructive operations by default. Removing the
-`name` column from `users` and re-running plan shows what would
-happen and what it skipped:
+`name` column from `users` and re-running plan suppresses the drop
+and reports what was held back:
 
 ```sh
 myschema plan desired.sql
-# ALTER TABLE users DROP COLUMN name;        ← suppressed
+# -- Plan for database app (2 table(s), 0 view(s))
 # -- skipped: ALTER TABLE users DROP COLUMN name;
+# -- No changes
+```
+
+The unsuppressed `ALTER TABLE … DROP COLUMN name;` only appears in
+the plan once you opt in:
+
+```sh
+myschema plan --allow-drop=column desired.sql
+# -- Plan for database app (2 table(s), 0 view(s))
+# ALTER TABLE users DROP COLUMN name;
 ```
 
 To allow specific drop categories:
@@ -183,9 +216,9 @@ wildcard.
 | `--pre-sql 'SET FOREIGN_KEY_CHECKS=0;'` | run session-level SQL before the diff |
 | `--split=<dir>` (dump only) | one SQL file per table/view |
 
-Every flag has a matching `MYSCHEMA_*` env var — useful in CI
-where the DSN already lives in env. Run `myschema <cmd> --help`
-for the full list.
+Most flags have a matching `MYSCHEMA_*` env var — useful in CI
+where the DSN already lives in env. (`--split` is the exception;
+it's CLI-only.) Run `myschema <cmd> --help` for the full list.
 
 ## 8. Directives in desired SQL
 

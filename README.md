@@ -82,7 +82,8 @@ myschema apply --pre-sql 'SET FOREIGN_KEY_CHECKS=0;' desired.sql
 - Directives in desired SQL: `-- myschema:renamed-from`,
   `-- myschema:convert-charset`, `-- myschema:execute`.
 
-Every flag has a matching `MYSCHEMA_*` env var.
+Most flags have a matching `MYSCHEMA_*` env var (`--split` is
+CLI-only).
 
 ## Requirements
 
