@@ -111,9 +111,9 @@ func TestApplyYAML(t *testing.T) {
 // path handling). Inline-pre-SQL coverage moved to YAML fixtures
 // under testdata/apply/pre_sql_*.yml.
 
-// TestApply_PreSQLFile loads pre-SQL from a file path through
-// parser.ReadSQLFile (so `-` for stdin works too in principle, not
-// exercised here).
+// TestApply_PreSQLFile loads pre-SQL from an on-disk file via
+// os.ReadFile. stdin (`-`) is rejected upstream by loadPreSQL —
+// see TestApply_PreSQLFileStdinRejected for that pin.
 func TestApply_PreSQLFile(t *testing.T) {
 	ctx := context.Background()
 	conn := testutil.ConnectDB(t)
