@@ -170,6 +170,52 @@ func TestParseInlineColumnPrimaryKey(t *testing.T) {
 		require.NotNil(t, id)
 		assert.True(t, id.NotNull, "inline PK must force NotNull on its column")
 	})
+	t.Run("AUTO_INCREMENT combines with inline PRIMARY KEY", func(t *testing.T) {
+		// `BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY` is one of the
+		// most common real-world shapes for surrogate-key tables. It
+		// should produce a PK constraint and preserve AUTO_INCREMENT
+		// on the column — both attributes are independent in vitess
+		// (KeyOpt and Autoincrement live on different fields), so the
+		// promotion must not clobber AutoIncrement.
+		sql := `CREATE TABLE t (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+
+		_, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok, "inline PK must produce PRIMARY constraint")
+
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull)
+		assert.True(t, id.AutoIncrement, "AUTO_INCREMENT must survive PK promotion")
+	})
+	t.Run("two inline PRIMARY KEYs: first column wins", func(t *testing.T) {
+		// `CREATE TABLE t (a INT PRIMARY KEY, b INT PRIMARY KEY)` is
+		// invalid MySQL (multiple PRIMARY KEYs), but vitess parses it
+		// without an error — every column carries ColKeyPrimary
+		// independently. applyInlineColumnKey's idempotent skip drops
+		// the second promotion so the parsed model stays well-shaped:
+		// the first column wins, MySQL still rejects at apply time.
+		// Pin the precedence here so a refactor that flips the order
+		// (or removes the skip) surfaces a regression in CI rather
+		// than at apply.
+		sql := `CREATE TABLE t (a INT PRIMARY KEY, b INT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+
+		pk, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok)
+		assert.Equal(t, []string{"a"}, pk.Columns, "first column with inline PK wins")
+
+		// Both columns get NotNull forced — the first by its own
+		// promotion, the second is unaffected by the skip and stays
+		// at whatever NOT NULL vitess parsed (here, the implicit
+		// nullable default for INT). Don't over-pin the second
+		// column's NotNull flag; the relevant assertion is that
+		// the PK columns list contains only `a`.
+	})
 }
 
 // TestParseInlineColumnUnique: `email VARCHAR(255) UNIQUE` and the

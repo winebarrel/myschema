@@ -952,6 +952,14 @@ func applyInlineColumnKey(t *model.Table, colName string, k sqlparser.ColumnKeyO
 			col.NotNull = true
 		}
 	case sqlparser.ColKeyUnique, sqlparser.ColKeyUniqueKey:
+		// Duplicate-index guard. Defensive — unreachable in the
+		// current architecture: the column loop runs before the
+		// table-level Indexes loop, and duplicate column names are
+		// already rejected upstream (see "duplicate column" above),
+		// so `t.Indexes[colName]` cannot be set when this case
+		// fires. Kept for symmetry with addIndex's IndexTypeUnique
+		// branch and to fail closed if a future refactor changes the
+		// pass order.
 		if _, dup := t.Indexes.GetOk(colName); dup {
 			return fmt.Errorf("duplicate index: %s on %s", colName, t.FQTN())
 		}
