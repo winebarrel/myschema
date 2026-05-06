@@ -429,10 +429,11 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 		// table-level index loop below would never see them. Mirror
 		// the table-level behaviour from `addIndex`'s IndexTypePrimary
 		// / IndexTypeUnique cases here so the inline form round-trips
-		// cleanly. ColKey alone (a bare `KEY` attribute) is not valid
-		// MySQL column syntax, so don't handle it. ColKeySpatialKey /
-		// ColKeyFulltextKey aren't valid as column-level attributes
-		// either; left out for the same reason.
+		// cleanly. ColKey (bare `KEY`) is silently dropped for now —
+		// MySQL accepts it as a synonym for PRIMARY KEY, but the
+		// promotion path is a separate change. ColKeySpatialKey /
+		// ColKeyFulltextKey are unreachable: vitess's own grammar
+		// rejects the column-level shapes with a syntax error.
 		if cd.Type.Options != nil {
 			if err := applyInlineColumnKey(t, c.Name, cd.Type.Options.KeyOpt); err != nil {
 				return nil, err
@@ -932,11 +933,19 @@ func autoFKName(table, col string) string {
 // representation of inline `PRIMARY KEY` / `UNIQUE [KEY]` written
 // against a single column) to the same `Constraints` / `Indexes`
 // shape the table-level path produces. ColKeyNone is the common
-// case (no inline key); ColKey, ColKeySpatialKey, and
-// ColKeyFulltextKey aren't valid MySQL column-level attributes —
-// pass them through silently rather than failing the parse, since
-// the rest of the parser policy already prefers "ignore unmodelled
-// shapes" over hard errors.
+// case (no inline key). The remaining enum values fall through:
+//   - `ColKey` (bare `KEY` column-level): MySQL accepts this as a
+//     synonym for `PRIMARY KEY`, but myschema's promotion path
+//     for it is a separate change — silently drop for now.
+//   - `ColKeySpatialKey` / `ColKeyFulltextKey`: vitess's own
+//     grammar rejects the column-level shapes
+//     (`col GEOMETRY SPATIAL KEY`, `col TEXT FULLTEXT KEY`) with
+//     a syntax error long before applyInlineColumnKey is reached,
+//     so these arms are unreachable from any valid SQL input.
+//     MySQL refuses the same shapes for the same reason. The
+//     enum values exist in vitess as defensive carry-over; we
+//     leave them as no-ops rather than adding errors for an
+//     unreachable path.
 func applyInlineColumnKey(t *model.Table, colName string, k sqlparser.ColumnKeyOption) error {
 	switch k {
 	case sqlparser.ColKeyPrimary:
