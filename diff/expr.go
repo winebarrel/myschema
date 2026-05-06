@@ -57,16 +57,20 @@ func canonicalExpr(s string) (string, bool) {
 	return lowerOutsideStringLiterals(sqlparser.String(stripped)), true
 }
 
-// lowerOutsideStringLiterals lower-cases every byte except the
-// content of single-quoted string literals. Naïve `strings.ToLower`
+// lowerOutsideStringLiterals lower-cases ASCII A–Z bytes except
+// inside single-quoted string literals. Naïve `strings.ToLower`
 // would canonicalise `DEFAULT 'X'` and `DEFAULT 'x'` to the same
 // string, hiding a real case-sensitive value change. Function names,
 // keywords, and unquoted identifiers still need lowering because
-// vitess preserves their case from the input. The state machine
-// tracks the in-literal flag and respects both backslash escapes
-// (`\'`) and the SQL-standard doubled-apostrophe escape (two
-// consecutive `'` characters meaning one literal apostrophe) so
-// the literal boundaries are recognised correctly.
+// vitess preserves their case from the input. ASCII-only is
+// deliberate: SQL keywords and identifiers vitess restores into
+// canonicalExpr's input are pure ASCII, so a Unicode-aware
+// `strings.ToLower` would just be slower without changing the
+// outcome. The state machine tracks the in-literal flag and
+// respects both backslash escapes (`\'`) and the SQL-standard
+// doubled-apostrophe escape (two consecutive `'` characters
+// meaning one literal apostrophe) so the literal boundaries are
+// recognised correctly.
 func lowerOutsideStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

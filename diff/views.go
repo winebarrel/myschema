@@ -22,8 +22,9 @@ type ViewDiffResult struct {
 
 // DiffViews compares two view maps and emits CREATE OR REPLACE / DROP VIEW
 // statements. database is the default DB used to canonicalise SELECT bodies
-// for comparison (so an unqualified `FROM users` in desired matches a
-// catalog-side qualified form FROM `mydb`.`users` ).
+// for comparison: an unqualified `FROM users` in desired matches a
+// catalog-side qualified form (FROM `mydb`.`users`) after both go
+// through the canonicaliser.
 //
 // Order discipline:
 //   - Creates / replaces are emitted in topological order of view-on-view
