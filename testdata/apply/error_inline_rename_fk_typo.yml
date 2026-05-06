@@ -1,0 +1,47 @@
+# Pins the typo-guard error path for the inline FK
+# `-- myschema:renamed-from` directive. MySQL has no
+# RENAME FOREIGN KEY, so the diff still emits DROP+ADD even when
+# the directive is honoured — the directive's only observable
+# effect at apply time is the typo guard. Without this fixture, a
+# regression that drops inline-FK directive recognition would still
+# pass `inline_rename_all_kinds.yml` because the emitted DDL is
+# identical with or without recognition.
+#
+# Here `old_fk_typo` does not exist on the catalog side, so the
+# guard must fire. If recognition broke, the directive would be
+# silently ignored and the diff would just DROP the catalog's
+# `old_fk` and ADD `fk_user`, with no error.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_user (user_id),
+      CONSTRAINT old_fk FOREIGN KEY (user_id) REFERENCES users (id)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_user (user_id),
+      -- myschema:renamed-from old_fk_typo
+      CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users (id)
+  );
+
+allow_drop:
+  - all
+
+error: "source foreign key"

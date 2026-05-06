@@ -1,0 +1,33 @@
+# Pins the typo-guard error path for the inline CHECK
+# `-- myschema:renamed-from` directive. MySQL has no
+# RENAME CONSTRAINT, so the diff still emits DROP+ADD even when
+# the directive is honoured — the directive's only observable
+# effect at apply time is the typo guard. Without this fixture, a
+# regression that drops inline-CHECK directive recognition would
+# still pass `inline_rename_all_kinds.yml` because the emitted DDL
+# is identical with or without recognition.
+#
+# Here `old_chk_typo` does not exist on the catalog side, so the
+# guard must fire. If recognition broke, the directive would be
+# silently ignored and the diff would just DROP the catalog's
+# `old_chk` and ADD `chk_id`, with no error.
+
+init: |
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      CONSTRAINT old_chk CHECK (id > 0)
+  );
+
+desired: |
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from old_chk_typo
+      CONSTRAINT chk_id CHECK (id > 0)
+  );
+
+allow_drop:
+  - all
+
+error: "source constraint"

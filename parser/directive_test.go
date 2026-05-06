@@ -361,6 +361,60 @@ func TestExtractInlineRenamesForeignKey(t *testing.T) {
 	assert.Empty(t, got.Unsupported)
 }
 
+// TestExtractInlineRenamesAllKindsInOneTable composes column /
+// index / CHECK constraint / FK rename directives in a single
+// CREATE TABLE body. Each kind must route to its own bucket
+// without competing — a regression in the line-classifier (e.g.
+// dropping the leading-CONSTRAINT recognition) would surface here
+// as one of the buckets being empty or misrouted. Length checks
+// also pin "exactly one" per bucket, so a duplicating bug
+// (directive routed to its own bucket *and* an unrelated one)
+// fails the test.
+func TestExtractInlineRenamesAllKindsInOneTable(t *testing.T) {
+	got := parser.ExtractInlineRenames(`CREATE TABLE posts (
+    id BIGINT NOT NULL,
+    -- myschema:renamed-from old_user_id
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    PRIMARY KEY (id),
+    -- myschema:renamed-from old_idx
+    KEY idx_user (user_id),
+    -- myschema:renamed-from old_fk
+    CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users (id),
+    -- myschema:renamed-from old_chk
+    CONSTRAINT chk_user CHECK (user_id > 0)
+);`)
+	assert.Equal(t, "old_user_id", got.Columns["user_id"])
+	assert.Equal(t, "old_idx", got.Indexes["idx_user"])
+	assert.Equal(t, "old_fk", got.ForeignKeys["fk_user"])
+	assert.Equal(t, "old_chk", got.Constraints["chk_user"])
+	assert.Len(t, got.Columns, 1, "no extra column entries")
+	assert.Len(t, got.Indexes, 1, "no extra index entries")
+	assert.Len(t, got.ForeignKeys, 1, "no extra FK entries")
+	assert.Len(t, got.Constraints, 1, "no extra constraint entries")
+	assert.Empty(t, got.Unsupported)
+}
+
+// TestExtractInlineRenamesColumnAndIndexShareName: a column named
+// `email` AND an index also named `email` (the user spelled the
+// index name explicitly here — `UNIQUE KEY email (email)`) can
+// both carry rename directives. The classifier must route each to
+// its own bucket so the column doesn't claim the index's directive
+// (or vice versa) when their names happen to collide.
+func TestExtractInlineRenamesColumnAndIndexShareName(t *testing.T) {
+	got := parser.ExtractInlineRenames(`CREATE TABLE users (
+    id BIGINT NOT NULL,
+    -- myschema:renamed-from old_addr
+    email VARCHAR(255) NOT NULL,
+    PRIMARY KEY (id),
+    -- myschema:renamed-from old_uq_email
+    UNIQUE KEY email (email)
+);`)
+	assert.Equal(t, "old_addr", got.Columns["email"], "column directive routes to Columns")
+	assert.Equal(t, "old_uq_email", got.Indexes["email"], "index directive routes to Indexes")
+	assert.Empty(t, got.Unsupported)
+}
+
 func TestExtractInlineRenamesPrimaryKeyIsUnsupported(t *testing.T) {
 	got := parser.ExtractInlineRenames(`CREATE TABLE t (
     id INT NOT NULL,

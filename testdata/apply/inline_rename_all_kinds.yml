@@ -1,0 +1,78 @@
+# Pins inline `-- myschema:renamed-from` directives across all
+# four supported kinds in one CREATE TABLE: column, index, FK,
+# CHECK constraint. Each directive must route to its own bucket
+# (Columns / Indexes / ForeignKeys / Constraints) so a
+# KEY-named-after-its-column doesn't compete for the column
+# rename's directive, and so on.
+#
+# What this fixture actually pins at the apply layer:
+#   - column directive  → emits ALTER TABLE … RENAME COLUMN
+#   - index directive   → emits ALTER TABLE … RENAME INDEX
+#   - FK directive      → DROP+ADD (MySQL has no RENAME FOREIGN KEY)
+#   - CHECK directive   → DROP+ADD (MySQL has no RENAME CONSTRAINT)
+# The FK and CHECK directives are *not* observable in the emitted
+# DDL — diffForeignKeys / diffConstraints emit the same DROP+ADD
+# whether or not RenameFrom is set, because their only role is the
+# typo guard. To prove the FK / CHECK directives are actually
+# recognized, the apply-level coverage lives in:
+#   - error_inline_rename_fk_typo.yml    (typo guard fires for FK)
+#   - error_inline_rename_check_typo.yml (typo guard fires for CHECK)
+# and at the parser level, the bucket routing is pinned by
+# parser/directive_test.go::TestExtractInlineRenamesAllKindsInOneTable
+# with per-bucket length checks.
+#
+# Caveat: the CHECK references `id` (not the renamed `user_id`)
+# because MySQL refuses to RENAME COLUMN that's referenced by an
+# active CHECK constraint, and the diff layer's pass-order
+# currently emits the column rename before the CHECK drop. See
+# TODO.md "CHECK referencing renamed column blocks rename" for
+# the open case.
+
+init: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      old_user_id BIGINT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      KEY old_idx (old_user_id),
+      CONSTRAINT old_fk FOREIGN KEY (old_user_id) REFERENCES users (id),
+      CONSTRAINT old_chk CHECK (id > 0)
+  );
+
+desired: |
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+  CREATE TABLE posts (
+      id BIGINT NOT NULL,
+      -- myschema:renamed-from old_user_id
+      user_id BIGINT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id),
+      -- myschema:renamed-from old_idx
+      KEY idx_user (user_id),
+      -- myschema:renamed-from old_fk
+      CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users (id),
+      -- myschema:renamed-from old_chk
+      CONSTRAINT chk_id CHECK (id > 0)
+  );
+
+allow_drop:
+  - all
+
+applied: |
+  ALTER TABLE posts DROP FOREIGN KEY old_fk;
+  ALTER TABLE posts RENAME COLUMN old_user_id TO user_id;
+  ALTER TABLE posts RENAME INDEX old_idx TO idx_user;
+  ALTER TABLE posts DROP CHECK old_chk;
+  ALTER TABLE posts ADD CONSTRAINT chk_id CHECK (id > 0);
+  ALTER TABLE posts ADD CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id);
+
+verify_no_drift: true
