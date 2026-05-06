@@ -138,3 +138,10 @@ CLI-only).
   events, sequences).
 - [`PARTITIONING.md`](PARTITIONING.md) — partition-diff scope and
   limits.
+
+## Related projects
+
+- [pistachio](https://github.com/winebarrel/pistachio) — declarative
+  schema management for PostgreSQL.
+- [ridgepole](https://github.com/ridgepole/ridgepole) — DB schema
+  management using a Rails DSL.
