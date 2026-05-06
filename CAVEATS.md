@@ -194,11 +194,11 @@ hence column cannot be dropped or renamed.
 This is a hard MySQL rule with **no server-side bypass**:
 `SET foreign_key_checks=0` does not help (FK and CHECK are
 unrelated), and even a `DROP CHECK` → `RENAME COLUMN` →
-`ADD CHECK (old_name …)` sequence is rejected by MySQL with
-`Error 1054 Unknown column 'old_name' in 'check constraint
-expression'` — MySQL does not auto-rewrite CHECK bodies on
-rename either. The user has to spell out the new column name
-in the new CHECK body.
+`ADD CONSTRAINT chk_x CHECK (old_name …)` sequence is rejected
+by MySQL with `Error 1054 Unknown column 'old_name' in 'check
+constraint expression'` — MySQL does not auto-rewrite CHECK
+bodies on rename either. The user has to spell out the new
+column name in the new CHECK body.
 
 **myschema's behaviour.** The diff layer emits column renames
 before the CHECK diff, so a `-- myschema:renamed-from old_name`
