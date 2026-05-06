@@ -92,10 +92,13 @@ output, so the first `apply` is a no-op.
 a column specification (e.g. `user_id BIGINT REFERENCES
 users(id)`) errors at parse time:
 
-The exact error string (single line, wrapped here for display) is:
+The error is wrapped by `parseCreateTable` with the table /
+column context, so the user sees the full form (single line,
+wrapped here for display):
 
 ```
-inline column-level REFERENCES is silently ignored by MySQL (see
+table <db>.<table>: column <col>: inline column-level REFERENCES
+is silently ignored by MySQL (see
 https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html);
 declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY
 (col) REFERENCES other(col)` clause instead
@@ -123,7 +126,10 @@ problems made that a footgun rather than a kindness:
   MySQL's auto-name for any FK that DID exist on the catalog
   side from external tools (`<table>_ibfk_<n>`, numeric), so a
   user importing an externally-managed schema saw a one-shot
-  no-op DROP+ADD on first plan.
+  redundant DROP+ADD on first plan — semantically equivalent
+  end-state, but the actual `DROP FOREIGN KEY` + `ADD
+  CONSTRAINT` still runs and pays the lock / rebuild cost MySQL
+  charges for any FK reshape.
 
 Rejecting the shape outright is honest and trivially fixable —
 move the clause to its proper place:
@@ -162,12 +168,15 @@ consequences:
 - Importing an externally-created schema where the catalog
   already has `<table>_ibfk_<n>` and writing the desired SQL
   with an unnamed `FOREIGN KEY (...)` produces a one-shot
-  no-op DROP+ADD on the first plan: the diff sees one FK with
-  the catalog's numeric name and another with the parser's
-  column-shaped name. After that first apply the names align
-  and re-plans are empty.
+  redundant DROP+ADD on the first plan: the diff sees one FK
+  with the catalog's numeric name and another with the
+  parser's column-shaped name. The end state is functionally
+  equivalent, but the `DROP FOREIGN KEY` + `ADD CONSTRAINT`
+  still runs (real DDL — locks the table briefly and re-checks
+  every existing row against the FK) before names align. From
+  the second plan onward re-plans are empty.
 
-If the one-shot drift is a problem, write the FK with an
+If that one-shot reshape is a problem, write the FK with an
 explicit `CONSTRAINT fk_xxx` name (or run `myschema dump >
 desired.sql` first — `dump` emits the catalog's actual name
 verbatim, so the round-trip closes immediately).
