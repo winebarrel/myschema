@@ -492,18 +492,19 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 		return c, nil
 	}
 
-	// MySQL parses but ignores inline column-level REFERENCES — the
-	// dev.mysql.com docs (ansi-diff-foreign-keys) call it "a memo or
-	// comment". A previous version of myschema rescued the clause by
-	// promoting it to an explicit-named ALTER TABLE ADD CONSTRAINT,
-	// but that diverged from MySQL's semantics: the user thought
-	// they'd written a working FK, and the rescue's auto-name
-	// (`<table>_ibfk_<col>`) drifted against MySQL's auto-name
-	// (`<table>_ibfk_<n>`) for any catalog state created outside
-	// myschema. Reject the shape outright so the desired SQL spells
-	// out the table-level form the user actually wants.
+	// MySQL parses but ignores inline column-level REFERENCES — see
+	// https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html
+	// which calls the clause "a memo or comment". A previous version
+	// of myschema rescued it by promoting to an explicit-named
+	// ALTER TABLE ADD CONSTRAINT, but that diverged from MySQL's
+	// semantics: the user thought they'd written a working FK, and
+	// the rescue's auto-name (`<table>_ibfk_<col>`) drifted against
+	// MySQL's auto-name (`<table>_ibfk_<n>`) for any catalog state
+	// created outside myschema. Reject the shape outright so the
+	// desired SQL spells out the table-level form the user actually
+	// wants.
 	if opts.Reference != nil {
-		return nil, fmt.Errorf("inline column-level REFERENCES is silently ignored by MySQL (see dev.mysql.com docs ansi-diff-foreign-keys); declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY (col) REFERENCES other(col)` clause instead")
+		return nil, fmt.Errorf("inline column-level REFERENCES is silently ignored by MySQL (see https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html); declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY (col) REFERENCES other(col)` clause instead")
 	}
 
 	if opts.Null != nil && !*opts.Null {

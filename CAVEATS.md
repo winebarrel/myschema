@@ -92,14 +92,18 @@ output, so the first `apply` is a no-op.
 a column specification (e.g. `user_id BIGINT REFERENCES
 users(id)`) errors at parse time:
 
+The exact error string (single line, wrapped here for display) is:
+
 ```
-inline column-level REFERENCES is silently ignored by MySQL …;
+inline column-level REFERENCES is silently ignored by MySQL (see
+https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html);
 declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY
 (col) REFERENCES other(col)` clause instead
 ```
 
 **Why.** The MySQL 8.0 reference manual
-(`ansi-diff-foreign-keys.html`) states:
+([ansi-diff-foreign-keys.html](https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html))
+states:
 
 > MySQL parses but ignores "inline `REFERENCES` specifications"
 > (as defined in the SQL standard) where the references are
