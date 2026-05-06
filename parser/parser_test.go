@@ -226,6 +226,74 @@ func TestParseInlineColumnPrimaryKey(t *testing.T) {
 	})
 }
 
+// TestParseInlineColumnBareKeyIsPrimaryKey: MySQL accepts inline
+// column-level `KEY` (bare, no `PRIMARY` prefix) as a synonym for
+// `PRIMARY KEY`. Probed:
+//
+//	CREATE TABLE t1 (id INT KEY);
+//	-- SHOW CREATE TABLE t1:
+//	-- CREATE TABLE `t1` (
+//	--   `id` int NOT NULL,
+//	--   PRIMARY KEY (`id`)
+//	-- )
+//
+// Two columns each with bare `KEY` errors with
+// `Multiple primary key defined`, confirming the synonym semantics.
+//
+// Earlier myschema silently dropped the declaration: the user's
+// PK never reached the model, so the emitted DDL had no PRIMARY
+// KEY and no NOT NULL on the column. Pin both the promotion and
+// the post-fix shape so the silent-drop regression cannot return.
+func TestParseInlineColumnBareKeyIsPrimaryKey(t *testing.T) {
+	t.Run("bare KEY promotes to PRIMARY", func(t *testing.T) {
+		sql := `CREATE TABLE t (id INT KEY, name VARCHAR(64));`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		require.NotNil(t, tbl)
+
+		pk, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok, "inline bare KEY must produce a PRIMARY constraint")
+		assert.Equal(t, model.PrimaryKeyConstraint, pk.Type)
+		assert.Equal(t, []string{"id"}, pk.Columns)
+
+		idx, ok := tbl.Indexes.GetOk("PRIMARY")
+		require.True(t, ok, "inline bare KEY must produce a PRIMARY index")
+		assert.True(t, idx.Primary)
+
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		assert.True(t, id.NotNull, "bare-KEY PK column must be forced NOT NULL")
+	})
+	t.Run("bare KEY with DEFAULT preserves DEFAULT", func(t *testing.T) {
+		// Independent attributes on the same column should survive
+		// the PK promotion — same shape as the AUTO_INCREMENT × PK
+		// regression test above, just with DEFAULT on the
+		// `parseColumnDef` side.
+		sql := `CREATE TABLE t (id INT KEY DEFAULT 1);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		id, _ := tbl.Columns.GetOk("id")
+		require.NotNil(t, id)
+		require.NotNil(t, id.Default)
+		assert.Equal(t, "1", *id.Default, "DEFAULT must survive bare-KEY PK promotion")
+	})
+	t.Run("bare KEY shares precedence with PRIMARY KEY", func(t *testing.T) {
+		// Mirror "two inline PRIMARY KEYs: first column wins" but
+		// across the two synonyms — `KEY` first, `PRIMARY KEY`
+		// second. The first promotion wins (idempotent skip in the
+		// second), MySQL still rejects at apply time as Error 1068.
+		sql := `CREATE TABLE t (a INT KEY, b INT PRIMARY KEY);`
+		r, err := parser.ParseSQL(sql, "app")
+		require.NoError(t, err)
+		tbl, _ := r.Tables.GetOk("app.t")
+		pk, ok := tbl.Constraints.GetOk("PRIMARY")
+		require.True(t, ok)
+		assert.Equal(t, []string{"a"}, pk.Columns, "first column with inline KEY wins over a later PRIMARY KEY")
+	})
+}
+
 // TestParseInlineColumnUnique: `email VARCHAR(255) UNIQUE` and the
 // `UNIQUE KEY` variant should both promote to a UNIQUE Index named
 // after the column (matching MySQL's auto-naming and the table-level

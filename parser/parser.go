@@ -415,10 +415,11 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 		// table-level index loop below would never see them. Mirror
 		// the table-level behaviour from `addIndex`'s IndexTypePrimary
 		// / IndexTypeUnique cases here so the inline form round-trips
-		// cleanly. ColKey alone (a bare `KEY` attribute) is not valid
-		// MySQL column syntax, so don't handle it. ColKeySpatialKey /
-		// ColKeyFulltextKey aren't valid as column-level attributes
-		// either; left out for the same reason.
+		// cleanly. Bare column-level `KEY` is treated as a PRIMARY
+		// KEY synonym to match MySQL's behaviour; see
+		// applyInlineColumnKey's doc for the full enum mapping
+		// (including which vitess enum values are unreachable from
+		// valid SQL).
 		if cd.Type.Options != nil {
 			if err := applyInlineColumnKey(t, c.Name, cd.Type.Options.KeyOpt); err != nil {
 				return nil, err
@@ -932,15 +933,29 @@ func autoFKName(table, col string) string {
 // applyInlineColumnKey promotes a column-level KeyOpt (vitess's
 // representation of inline `PRIMARY KEY` / `UNIQUE [KEY]` written
 // against a single column) to the same `Constraints` / `Indexes`
-// shape the table-level path produces. ColKeyNone is the common
-// case (no inline key); ColKey, ColKeySpatialKey, and
-// ColKeyFulltextKey aren't valid MySQL column-level attributes —
-// pass them through silently rather than failing the parse, since
-// the rest of the parser policy already prefers "ignore unmodelled
-// shapes" over hard errors.
+// shape the table-level path produces.
+//
+//   - `ColKeyNone`: the common case (no inline key) — fall through.
+//   - `ColKeyPrimary`, `ColKey` (bare `KEY`): both promote to a
+//     PRIMARY constraint. MySQL accepts `col INT KEY` as a synonym
+//     for `col INT PRIMARY KEY` (creates a real PRIMARY KEY,
+//     forces NOT NULL on the column, errors with "Multiple primary
+//     key defined" if two columns each carry it). Without this
+//     promotion, the user's PK declaration silently disappears
+//     from myschema's model — emitted DDL would have no PRIMARY
+//     KEY and no NOT NULL on the column.
+//   - `ColKeyUnique` / `ColKeyUniqueKey`: promote to a UNIQUE
+//     index named after the column.
+//   - `ColKeySpatialKey` / `ColKeyFulltextKey`: unreachable from
+//     valid SQL — vitess's own grammar rejects the column-level
+//     shapes (`col GEOMETRY SPATIAL KEY`, `col TEXT FULLTEXT
+//     KEY`) with a syntax error. MySQL refuses the same shapes.
+//     The enum values exist in vitess but no real input produces
+//     them, so we leave the arms unhandled rather than adding
+//     errors for an unreachable path.
 func applyInlineColumnKey(t *model.Table, colName string, k sqlparser.ColumnKeyOption) error {
 	switch k {
-	case sqlparser.ColKeyPrimary:
+	case sqlparser.ColKeyPrimary, sqlparser.ColKey:
 		// Skip if a table-level PRIMARY KEY was already promoted —
 		// not strictly necessary since addIndex's IndexTypePrimary
 		// case unconditionally overwrites Constraints["PRIMARY"] /
