@@ -181,6 +181,96 @@ explicit `CONSTRAINT fk_xxx` name (or run `myschema dump >
 desired.sql` first — `dump` emits the catalog's actual name
 verbatim, so the round-trip closes immediately).
 
+## Renaming a column referenced by a CHECK constraint
+
+**Problem.** MySQL refuses `ALTER TABLE … RENAME COLUMN` when an
+active CHECK constraint references the column being renamed:
+
+```
+Error 3959: Check constraint 'X' uses column 'Y',
+hence column cannot be dropped or renamed.
+```
+
+This is a hard MySQL rule with **no server-side bypass**:
+`SET foreign_key_checks=0` does not help (FK and CHECK are
+unrelated), and even a `DROP CHECK` → `RENAME COLUMN` →
+`ADD CONSTRAINT chk_x CHECK (old_name …)` sequence is rejected
+by MySQL with `Error 1054 Unknown column 'old_name' in 'check
+constraint expression'` — MySQL does not auto-rewrite CHECK
+bodies on rename either. The user has to spell out the new
+column name in the new CHECK body.
+
+**myschema's behaviour.** The diff layer emits column renames
+before the CHECK diff, so a `-- myschema:renamed-from old_name`
+directive on a column referenced by an existing CHECK produces
+a plan that fails at apply time:
+
+```sql
+ALTER TABLE t RENAME COLUMN old_name TO new_name; -- fails here
+ALTER TABLE t DROP CHECK chk_x;
+ALTER TABLE t ADD CONSTRAINT chk_x CHECK (new_name >= 0);
+```
+
+The `DROP CHECK` is **not** suppressed by missing
+`--allow-drop=constraint`: `diffConstraints` only suppresses a
+DROP when the constraint is removed entirely from desired
+(`!ok` branch in the loop), and here the constraint is present
+on both sides — same name `chk_x`, different body — so the
+diff treats it as a changed constraint and emits DROP+ADD
+unconditionally. The plan above is what every user sees,
+allow-drop or not. Apply still fails at line 1 with
+`Error 3959`.
+
+**Workaround.** Drop the CHECK manually against the live
+database **before** running `myschema apply`, then let myschema
+re-add it with the new body:
+
+```sh
+mysql -u $USER -h $HOST $DB \
+    -e 'ALTER TABLE t DROP CHECK chk_x;'
+
+MYSCHEMA_DSN=... ./myschema apply desired.sql
+```
+
+Desired-side SQL still carries the rename directive **and**
+the new column name in the CHECK body — MySQL has no
+auto-rewrite, so the user always has to spell out the new name:
+
+```sql
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    -- myschema:renamed-from old_name
+    new_name INT NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_x CHECK (new_name >= 0)
+);
+```
+
+After the manual drop, myschema's diff sees no CHECK on the
+catalog side, so the plan shrinks to one rename + one add — and
+both succeed because the CHECK is no longer blocking the column.
+
+**Don't reach for `-- myschema:execute` here.** `execute` blocks
+run **after** every other DDL bucket (see
+"`-- myschema:execute` is the only escape hatch for unmodelled
+objects" below), so a `DROP CHECK` inside an execute block would
+fire after the failing `RENAME COLUMN` and never get the chance
+to clear the path. The pre-step has to be genuinely out of band.
+
+**Why myschema doesn't auto-fix this.** myschema already
+auto-rewrites column references inside index parts, FK column
+lists, and PRIMARY KEY columns after a rename, but CHECK
+definitions are stored as opaque expression text rather than
+structured column lists. Auto-rewriting embedded references
+inside arbitrary CHECK expressions would mean parsing every
+CHECK body through vitess, walking the AST, and round-tripping
+the rewritten form back into `Constraint.Definition`. The
+expression-rewrite complexity isn't justified by how rare this
+case is in practice — the user's manual `DROP CHECK` step is a
+minute of work, and the diff layer would have to grow new
+ordering logic anyway to handle the dropped-then-re-added shape
+safely.
+
 ## Foreign keys to tables in another database are passed through, not managed
 
 **Behaviour.** A foreign key whose target lives in a different
