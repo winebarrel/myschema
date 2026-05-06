@@ -377,6 +377,46 @@ parent table exists with the required columns / unique key
 *before* any plan that references it lands. Use `dump` to
 verify the child-side FK survived the round trip.
 
+## Table-level storage and encryption options are not managed
+
+**Behaviour.** myschema's `applyTableOption` reads only `ENGINE`,
+`CHARSET`, `COLLATE`, `COMMENT`, and `AUTO_INCREMENT` off the
+desired-side `CREATE TABLE`. The other options that affect
+on-disk layout / encryption posture are **silently dropped**
+from the desired model and never round-trip:
+
+- `ROW_FORMAT={COMPACT|DYNAMIC|COMPRESSED|REDUNDANT}` — InnoDB
+  on-disk row format.
+- `KEY_BLOCK_SIZE=N` — page size for compressed InnoDB tables.
+- `COMPRESSION='ZLIB|LZ4|NONE'` — InnoDB transparent compression.
+- `ENCRYPTION='Y|N'` — InnoDB transparent encryption.
+
+A desired schema that spells these out parses cleanly but plan /
+apply ignores them; the catalog reader doesn't surface them
+either, so they're not used in the diff. Tables created with
+the option(s) outside myschema still get an unrelated
+`MODIFY COLUMN` / `ALTER TABLE …` plan as usual — myschema just
+won't add or change the storage / encryption clause itself.
+
+**Why myschema doesn't manage them.** All four are
+operationally significant but each ALTER triggers a full table
+rebuild (`ALGORITHM=COPY`-class), and `ENCRYPTION` additionally
+requires a server-side keyring plugin to be configured before
+`ENCRYPTION='Y'` is accepted. Test environments without the
+keyring plugin can't exercise the round-trip end-to-end. Rather
+than ship half-coverage (parser-only, no e2e on
+`ENCRYPTION`), myschema treats the whole family as out of
+scope and documents the gap.
+
+**What to do instead.** Manage these options out-of-band:
+either run the `ALTER TABLE` by hand against the live database,
+or wrap the change in a `-- myschema:execute` block whose
+guard SQL polls `information_schema.TABLES.ROW_FORMAT` /
+`CREATE_OPTIONS` so the apply is idempotent. `dump` ignores
+the options too — the dump output is *not* a faithful
+reproduction of a table that was created with these options
+elsewhere.
+
 ## Bulk-alter does not combine FK operations
 
 **Behaviour.** `--bulk-alter` (default off) folds *consecutive*

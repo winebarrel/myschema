@@ -22,23 +22,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
 
-- **Table-level storage / encryption options are silently
-  dropped.** `applyTableOption` only handles `ENGINE`, `CHARSET`,
-  `COLLATE`, `COMMENT`, `AUTO_INCREMENT`. Real production
-  attributes that affect on-disk layout / encryption posture
-  silently drop on the desired side and continue to drift on
-  every plan:
-  - `ROW_FORMAT={COMPACT|DYNAMIC|COMPRESSED|REDUNDANT}` —
-    affects InnoDB on-disk layout.
-  - `KEY_BLOCK_SIZE=N` — page size for compressed InnoDB tables.
-  - `COMPRESSION='ZLIB|LZ4|...'` — InnoDB transparent
-    compression (8.0+).
-  - `ENCRYPTION='Y|N'` — InnoDB transparent encryption (8.0+).
-  Decide which are in scope, then add them to `model.Table`,
-  `applyTableOption`, the catalog reader, and `Table.SQL()`.
-  `ROW_FORMAT` and `ENCRYPTION` are the most operationally
-  significant. Found during the PR #81 audit.
-
 - **Index-level `KEY_BLOCK_SIZE=N` is silently dropped.** vitess
   parses it but myschema's index loader (`addIndex`) doesn't
   read it, and `Index.SQL()` doesn't emit it. Same shape as the
