@@ -25,8 +25,8 @@
 # because MySQL refuses to RENAME COLUMN that's referenced by an
 # active CHECK constraint, and the diff layer's pass-order
 # currently emits the column rename before the CHECK drop. See
-# TODO.md "CHECK referencing renamed column blocks rename" for
-# the open case.
+# CAVEATS.md "Renaming a column referenced by a CHECK constraint"
+# for the documented limitation and the out-of-band workaround.
 
 init: |
   CREATE TABLE users (

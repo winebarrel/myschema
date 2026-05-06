@@ -203,13 +203,21 @@ column name in the new CHECK body.
 **myschema's behaviour.** The diff layer emits column renames
 before the CHECK diff, so a `-- myschema:renamed-from old_name`
 directive on a column referenced by an existing CHECK produces
-a plan that fails at apply time:
+a plan that fails at apply time. With `--allow-drop=constraint`
+(or `--allow-drop=all`), all three statements appear:
 
 ```sql
-ALTER TABLE t RENAME COLUMN old_name TO new_name; -- ① fails here
+ALTER TABLE t RENAME COLUMN old_name TO new_name; -- fails here
 ALTER TABLE t DROP CHECK chk_x;
 ALTER TABLE t ADD CONSTRAINT chk_x CHECK (new_name >= 0);
 ```
+
+Without a `constraint` drop allowance, `diffConstraints`
+suppresses the `DROP CHECK` and the user only sees the failing
+`RENAME COLUMN` plus a `-- skipped: ALTER TABLE t DROP CHECK
+chk_x;` comment in the disallowed-drops section. The underlying
+MySQL Error 3959 is the same either way — the rename is what
+fails.
 
 **Workaround.** Drop the CHECK manually against the live
 database **before** running `myschema apply`, then let myschema
@@ -258,7 +266,7 @@ the rewritten form back into `Constraint.Definition`. The
 expression-rewrite complexity isn't justified by how rare this
 case is in practice — the user's manual `DROP CHECK` step is a
 minute of work, and the diff layer would have to grow new
-ordering logic anyway to handle the dropped-then-readded shape
+ordering logic anyway to handle the dropped-then-re-added shape
 safely.
 
 ## Foreign keys to tables in another database are passed through, not managed
