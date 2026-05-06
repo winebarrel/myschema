@@ -66,6 +66,23 @@ func TestDecodeGenerationExpr(t *testing.T) {
 			`a + b * 2`,
 			`a + b * 2`,
 		},
+		{
+			// Multiple string literals in one expression — every
+			// occurrence of \\ → \ and \' → ' must be decoded, not
+			// just the first. This is what catalog stores for a
+			// body like CONCAT(a, ' / ', b, ' - ', c).
+			"multiple literals in one expression",
+			`concat(` + "`a`" + `,_utf8mb4\' / \',` + "`b`" + `,_utf8mb4\' - \',` + "`c`" + `)`,
+			`concat(` + "`a`" + `,_utf8mb4' / ',` + "`b`" + `,_utf8mb4' - ',` + "`c`" + `)`,
+		},
+		{
+			// Empty literal: catalog stores an empty string in the
+			// body as `\'\'` (delimiter + delimiter, no body).
+			// Decode must produce a SQL-valid empty literal `''`.
+			"empty literal between delimiters",
+			`concat(` + "`a`" + `,_utf8mb4\'\',` + "`b`" + `)`,
+			`concat(` + "`a`" + `,_utf8mb4'',` + "`b`" + `)`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

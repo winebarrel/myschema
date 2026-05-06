@@ -66,6 +66,22 @@ func TestEqualExpr(t *testing.T) {
 			"concat(`a`,_utf8mb4' y ',`b`)",
 			false,
 		},
+		{
+			// Multiple string literals in one expression — strip
+			// must walk the whole AST, not just the first literal.
+			"multiple literals each with introducer",
+			"CONCAT(a, ' / ', b, ' - ', c)",
+			"concat(`a`,_utf8mb4' / ',`b`,_utf8mb4' - ',`c`)",
+			true,
+		},
+		{
+			// Nested function calls — introducers can sit at any
+			// depth in the tree.
+			"nested function call with introducer",
+			"CONCAT(UPPER(CONCAT(a, ' ', b)), c)",
+			"concat(upper(concat(`a`,_utf8mb4' ',`b`)),`c`)",
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,6 +110,25 @@ func TestEqualCheckDef(t *testing.T) {
 		{"different exprs", "CHECK (a > 0)", "CHECK (b > 0)", false},
 		{"NOT ENFORCED suffix", "CHECK (a > 0) NOT ENFORCED", "CHECK (a > 0) not enforced", true},
 		{"suffix differs", "CHECK (a > 0) NOT ENFORCED", "CHECK (a > 0) ENFORCED", false},
+
+		// CHECK constraint expressions flow through canonicalExpr
+		// just like generated bodies, so the introducer strip
+		// applies here too. CAVEATS calls this out as the broader
+		// scope of the trade-off — pin the behaviour with both a
+		// "introducer absorbed" case and a "different introducers
+		// equal by design" case.
+		{
+			"introducer absorbed (plain vs _utf8mb4)",
+			"CHECK (status = 'open')",
+			"CHECK (status = _utf8mb4'open')",
+			true,
+		},
+		{
+			"different introducers compare equal (documented limitation)",
+			"CHECK (status = _latin1'open')",
+			"CHECK (status = _utf8mb4'open')",
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
