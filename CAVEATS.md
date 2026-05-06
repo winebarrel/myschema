@@ -211,15 +211,22 @@ ALTER TABLE t DROP CHECK chk_x;
 ALTER TABLE t ADD CONSTRAINT chk_x CHECK (new_name >= 0);
 ```
 
-**Workaround.** Run the `DROP CHECK` by hand before invoking
-`myschema apply`, either as a stand-alone statement against the
-live database or via a `-- myschema:execute` block in the
-desired-side SQL:
+**Workaround.** Drop the CHECK manually against the live
+database **before** running `myschema apply`, then let myschema
+re-add it with the new body:
+
+```sh
+mysql -u $USER -h $HOST $DB \
+    -e 'ALTER TABLE t DROP CHECK chk_x;'
+
+MYSCHEMA_DSN=... ./myschema apply desired.sql
+```
+
+Desired-side SQL still carries the rename directive **and**
+the new column name in the CHECK body — MySQL has no
+auto-rewrite, so the user always has to spell out the new name:
 
 ```sql
--- myschema:execute SELECT 1 FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'chk_x'
-ALTER TABLE t DROP CHECK chk_x;
-
 CREATE TABLE t (
     id BIGINT NOT NULL,
     -- myschema:renamed-from old_name
@@ -229,13 +236,16 @@ CREATE TABLE t (
 );
 ```
 
-The `execute` block runs before the regular diff buckets, so
-the CHECK is gone by the time the rename runs; the diff then
-re-adds the CHECK with the new column name as part of the
-normal constraint pass. (CHECK body inside the desired
-`CREATE TABLE` must reference the new column name regardless
-— MySQL has no auto-rewrite, so the user always has to spell
-out the new name.)
+After the manual drop, myschema's diff sees no CHECK on the
+catalog side, so the plan shrinks to one rename + one add — and
+both succeed because the CHECK is no longer blocking the column.
+
+**Don't reach for `-- myschema:execute` here.** `execute` blocks
+run **after** every other DDL bucket (see
+"`-- myschema:execute` is the only escape hatch for unmodelled
+objects" below), so a `DROP CHECK` inside an execute block would
+fire after the failing `RENAME COLUMN` and never get the chance
+to clear the path. The pre-step has to be genuinely out of band.
 
 **Why myschema doesn't auto-fix this.** myschema already
 auto-rewrites column references inside index parts, FK column
