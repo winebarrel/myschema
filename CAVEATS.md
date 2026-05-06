@@ -411,66 +411,80 @@ CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
 `varchar`, etc. don't trigger drift — both sides are lower-cased
 before comparison. Write whichever you find readable.
 
-## Generated column expression bodies must match MySQL's canonical form
+## Generated column expression bodies: prefix string literals with the charset introducer
 
-**Rule.** The expression inside `GENERATED ALWAYS AS (...)` in
-your desired SQL must match the form MySQL stores in
-`information_schema.COLUMNS.GENERATION_EXPRESSION` after its own
-canonicalisation. If you handwrite a generated column body in a
-different shape, the diff will fire a no-op `MODIFY COLUMN` on
-**every** plan and `apply` never converges.
+**Rule.** Any string literal inside `GENERATED ALWAYS AS (...)`
+in your desired SQL must carry the same charset introducer
+(`_utf8mb4`, `_latin1`, …) that MySQL stored on the catalog
+side. Without the introducer the diff fires a no-op
+`MODIFY COLUMN` on **every** plan and `apply` never converges.
 
-**What MySQL canonicalises.** Try writing
-`GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED` against
-a fresh table. `SHOW CREATE TABLE` returns the full clause as
+**Why this is the only thing you need to worry about.** Both
+the parser-side expression and the catalog-side
+`information_schema.COLUMNS.GENERATION_EXPRESSION` get fed
+through `diff/expr.go::canonicalExpr`, which parses each side
+with vitess and returns
+`strings.ToLower(sqlparser.String(...))`. That symmetric pass
+absorbs most of MySQL's canonicalisation:
+
+- Function names — both sides lower-cased.
+- Whitespace around commas / operators — both sides re-rendered
+  by vitess, so `, ' '` and `,' '` round-trip equal.
+- Identifier back-ticks — both sides go through vitess's
+  reserved-word table, so `` `email` `` (catalog) and `email`
+  (handwritten) both come out the same way.
+
+What survives the symmetric pass is the **charset introducer**.
+vitess preserves it across parse → restore: a desired-side
+literal `' '` round-trips as `' '`, and a catalog-side literal
+`_utf8mb4' '` round-trips as `_utf8mb4 ' '`. The two stay
+distinguishable, so the diff fires.
+
+**About the introducer itself.** It's the session's
+`character_set_connection` *at CREATE time* — **not** the
+column's or table's `CHARACTER SET`. A connection that ran
+`SET NAMES latin1` before the `CREATE TABLE` produces
+`_latin1' '` even on a utf8mb4 table; default MySQL 8.0
+connections give `_utf8mb4'`. `mysqldump
+--default-character-set=latin1` and any code that touches
+`SET NAMES` can produce a different prefix.
+
+**Concrete example.** Apply once with a handwritten
+`CONCAT(email, ' ', name)`:
 
 ```sql
 GENERATED ALWAYS AS (concat(`email`,_utf8mb4' ',`name`)) STORED
 ```
 
-— and `information_schema.COLUMNS.GENERATION_EXPRESSION` returns
-just the expression body (the part inside the parentheses,
-``concat(`email`,_utf8mb4' ',`name`)``), which is what myschema
-actually compares against. The systematic transformations:
+is what MySQL stores (default utf8mb4 connection). The
+desired-side `' '` and the catalog-side `_utf8mb4' '` differ
+even after canonicalisation, so the next plan fires:
 
-1. **Function names → lower-case.** `CONCAT` → `concat`.
-2. **All identifiers → back-tick-quoted**, regardless of whether
-   the name is a reserved word. `email` → `` `email` ``.
-3. **String literals → prefixed with a charset introducer**, e.g.
-   `' '` → `_utf8mb4' '`. The introducer is the session's
-   `character_set_connection` *at CREATE TIME* — **not** the
-   column's or table's `CHARACTER SET`. A connection that ran
-   `SET NAMES latin1` before the `CREATE TABLE` produces
-   `_latin1' '`. Default MySQL 8.0 connections give `_utf8mb4'`,
-   but `mysqldump --default-character-set=latin1` and any code
-   path that touches `SET NAMES` can produce a different prefix.
-4. **Whitespace around commas / operators → tightened.** `, ' '`
-   becomes `,_utf8mb4' '` (no leading space).
+```sql
+ALTER TABLE t MODIFY COLUMN full_label varchar(330)
+  GENERATED ALWAYS AS (CONCAT(email, ' ', `name`)) STORED;
+```
 
-What myschema actually compares: the **vitess-restored** form of
-the desired-side expression (parser stores `sqlparser.String(opts.As)`,
-which re-renders the parsed AST and is not the user's original
-text — whitespace and some identifier quoting may be rewritten by
-vitess) against the **catalog-side** `GENERATION_EXPRESSION`
-verbatim from MySQL. vitess's restoration handles a few of the
-items above (function-name casing, vitess-reserved-word identifier
-back-ticking) but not the rest (every-identifier back-ticking,
-charset introducers, whitespace tightening). The two
-normalisations aren't equivalent, so the two sides disagree by
-design unless the desired SQL is already in MySQL's canonical
-form.
+— forever.
 
-**Recommendation: don't handwrite generated-column expressions.**
-Run `myschema dump > desired.sql` against the live database
-(after applying once with whatever expression you wrote) and
-edit from there. `dump` emits exactly what MySQL stored, so the
-round-trip closes on the next plan.
+**Fix (recommended): use `dump`.** Run
+`myschema dump > desired.sql` against the live database after
+the first apply. `dump` emits what MySQL stored, introducer
+included, so the next plan converges immediately.
 
-If you really need to handwrite, mirror what `SHOW CREATE TABLE`
-would emit: lowercase function names, every identifier
-back-ticked, every string literal prefixed with the
-`character_set_connection` introducer, and no whitespace around
-commas or operators.
+**Fix (handwritten).** Prefix every string literal in the
+generated body with the connection's introducer:
+
+```sql
+-- Drift loop:
+full_label VARCHAR(330) GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED
+
+-- Converges (default connection charset utf8mb4):
+full_label VARCHAR(330) GENERATED ALWAYS AS (CONCAT(email, _utf8mb4' ', name)) STORED
+```
+
+Generated bodies that contain no string literals (e.g.
+`(score * 2)`, `(price + tax)`) are not affected.
 
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 
