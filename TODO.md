@@ -56,27 +56,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   table-level item above but for compressed indexes. Found
   during the PR #81 audit.
 
-## Medium — test coverage gaps
-
-The PR #84 postmortem audit closed five of its six items via PRs
-\#86–#90; this one item was scoped out of the kitchen-sink fixture
-because the specific shapes need direct unit tests, not a DDL
-that happens to round-trip.
-
-- **`parseCreateTable` column-loop interactions.** `parseColumnDef`
-  reads `cd.Type.Options.{KeyOpt, Invisible, …}` independently,
-  but the loop in `parseCreateTable` calls `applyInlineColumnKey`
-  on the same column. Open combinations:
-  - inline `UNIQUE × DEFAULT 'x'`
-  - inline `PRIMARY KEY × CHECK (col > 0)` (column-level CHECK
-    that vitess promotes to a table-level constraint — the
-    promotion path interacts with the PK promotion path)
-  Estimated 2–3 parser tests, a couple hours. (The original
-  third combination, `inline REFERENCES × NOT NULL × ON UPDATE`,
-  was eliminated by PR #92 — inline column-level `REFERENCES`
-  now errors at parse time, so that interaction shape is no
-  longer reachable.)
-
 ## Low — tests / docs / release
 
 - `CHANGELOG.md`.

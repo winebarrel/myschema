@@ -181,6 +181,38 @@ explicit `CONSTRAINT fk_xxx` name (or run `myschema dump >
 desired.sql` first — `dump` emits the catalog's actual name
 verbatim, so the round-trip closes immediately).
 
+## Inline column-level CHECK is rejected by the parser
+
+**Behaviour.** MySQL accepts inline column-level CHECK syntax —
+`id INT CHECK (id > 0)`, `id INT NOT NULL CHECK (id > 0)`,
+`id INT PRIMARY KEY CHECK (id > 0)` — and stores the constraint
+under an auto-generated name `<table>_chk_<n>`. **vitess does
+not** parse the column-level form: every variant fails with
+`syntax error near 'CHECK'`. myschema therefore rejects the
+shape at parse time, surfacing vitess's error wrapped by
+`ParseSQL` as `failed to parse SQL: syntax error …`.
+
+**Workaround.** Move the CHECK out of the column spec into a
+table-level constraint clause:
+
+```sql
+-- Reject (vitess parse error):
+CREATE TABLE t (
+    id INT PRIMARY KEY CHECK (id > 0)
+);
+
+-- Accept (table-level, named or unnamed):
+CREATE TABLE t (
+    id INT,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_id_positive CHECK (id > 0)
+);
+```
+
+`myschema dump` always emits CHECK constraints in the
+table-level form, so importing an existing schema via `dump >
+desired.sql` is unaffected.
+
 ## Renaming a column referenced by a CHECK constraint
 
 **Problem.** MySQL refuses `ALTER TABLE … RENAME COLUMN` when an

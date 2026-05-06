@@ -321,6 +321,38 @@ func TestParseInlineColumnUnique(t *testing.T) {
 	}
 }
 
+// TestParseInlineColumnUniqueWithDefault pins the composed-state
+// path where a single column carries both an inline UNIQUE
+// (handled in `applyInlineColumnKey`) and a DEFAULT (handled in
+// `parseColumnDef`). The two attributes live on different vitess
+// fields and are processed by independent code paths, so a
+// refactor that touches one shouldn't disturb the other — this
+// regression-pins the current "both survive" behaviour. From the
+// PR #84 postmortem audit's "parseCreateTable column-loop
+// interactions" item.
+func TestParseInlineColumnUniqueWithDefault(t *testing.T) {
+	sql := `CREATE TABLE t (
+    id INT NOT NULL,
+    email VARCHAR(64) UNIQUE DEFAULT 'guest',
+    PRIMARY KEY (id)
+);`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.t")
+	require.NotNil(t, tbl)
+
+	email, ok := tbl.Columns.GetOk("email")
+	require.True(t, ok)
+	require.NotNil(t, email.Default, "inline DEFAULT must reach the model")
+	assert.Equal(t, "'guest'", *email.Default)
+
+	idx, ok := tbl.Indexes.GetOk("email")
+	require.True(t, ok, "inline UNIQUE must produce a UNIQUE index named after the column")
+	assert.Equal(t, model.IndexUnique, idx.KeyType)
+	require.Len(t, idx.Parts, 1)
+	assert.Equal(t, "email", idx.Parts[0].Column)
+}
+
 func TestParseCreateIndex(t *testing.T) {
 	sql := `
 CREATE TABLE users (id BIGINT NOT NULL, name VARCHAR(64), PRIMARY KEY (id));
