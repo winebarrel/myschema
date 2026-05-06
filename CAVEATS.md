@@ -417,6 +417,28 @@ the options too — the dump output is *not* a faithful
 reproduction of a table that was created with these options
 elsewhere.
 
+## Index-level `KEY_BLOCK_SIZE=N` is silently dropped
+
+**Behaviour.** vitess parses an index-level `KEY_BLOCK_SIZE=N`
+clause (e.g. `KEY idx_val (val) KEY_BLOCK_SIZE=4`) on the
+desired side, but myschema's index loader doesn't read it and
+`Index.SQL()` doesn't emit it. The clause disappears on the
+round-trip through the model.
+
+**Why this isn't a bug.** MySQL itself silently drops the clause
+for InnoDB indexes — the per-index `KEY_BLOCK_SIZE` is a MyISAM
+legacy and has no effect on InnoDB. Probed against MySQL 8.0:
+neither `information_schema.STATISTICS` (which has no
+`KEY_BLOCK_SIZE` column) nor `SHOW CREATE TABLE` reflects the
+value back. So myschema dropping it matches MySQL's own
+behaviour; there's nothing to round-trip.
+
+The **table-level** `KEY_BLOCK_SIZE=N` (set on the whole
+compressed table, not on a single index) is also unmanaged —
+see "Table-level storage and encryption options are not
+managed" above. MyISAM tables that genuinely use the per-index
+form are out of scope (myschema targets InnoDB on MySQL 8.0+).
+
 ## Bulk-alter does not combine FK operations
 
 **Behaviour.** `--bulk-alter` (default off) folds *consecutive*

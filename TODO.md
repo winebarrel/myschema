@@ -22,12 +22,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
 
-- **Index-level `KEY_BLOCK_SIZE=N` is silently dropped.** vitess
-  parses it but myschema's index loader (`addIndex`) doesn't
-  read it, and `Index.SQL()` doesn't emit it. Same shape as the
-  table-level item above but for compressed indexes. Found
-  during the PR #81 audit.
-
 ## Low — tests / docs / release
 
 - `CHANGELOG.md`.
