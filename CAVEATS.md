@@ -181,6 +181,76 @@ explicit `CONSTRAINT fk_xxx` name (or run `myschema dump >
 desired.sql` first — `dump` emits the catalog's actual name
 verbatim, so the round-trip closes immediately).
 
+## Renaming a column referenced by a CHECK constraint
+
+**Problem.** MySQL refuses `ALTER TABLE … RENAME COLUMN` when an
+active CHECK constraint references the column being renamed:
+
+```
+Error 3959: Check constraint 'X' uses column 'Y',
+hence column cannot be dropped or renamed.
+```
+
+This is a hard MySQL rule with **no server-side bypass**:
+`SET foreign_key_checks=0` does not help (FK and CHECK are
+unrelated), and even a `DROP CHECK` → `RENAME COLUMN` →
+`ADD CHECK (old_name …)` sequence is rejected by MySQL with
+`Error 1054 Unknown column 'old_name' in 'check constraint
+expression'` — MySQL does not auto-rewrite CHECK bodies on
+rename either. The user has to spell out the new column name
+in the new CHECK body.
+
+**myschema's behaviour.** The diff layer emits column renames
+before the CHECK diff, so a `-- myschema:renamed-from old_name`
+directive on a column referenced by an existing CHECK produces
+a plan that fails at apply time:
+
+```sql
+ALTER TABLE t RENAME COLUMN old_name TO new_name; -- ① fails here
+ALTER TABLE t DROP CHECK chk_x;
+ALTER TABLE t ADD CONSTRAINT chk_x CHECK (new_name >= 0);
+```
+
+**Workaround.** Run the `DROP CHECK` by hand before invoking
+`myschema apply`, either as a stand-alone statement against the
+live database or via a `-- myschema:execute` block in the
+desired-side SQL:
+
+```sql
+-- myschema:execute SELECT 1 FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'chk_x'
+ALTER TABLE t DROP CHECK chk_x;
+
+CREATE TABLE t (
+    id BIGINT NOT NULL,
+    -- myschema:renamed-from old_name
+    new_name INT NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_x CHECK (new_name >= 0)
+);
+```
+
+The `execute` block runs before the regular diff buckets, so
+the CHECK is gone by the time the rename runs; the diff then
+re-adds the CHECK with the new column name as part of the
+normal constraint pass. (CHECK body inside the desired
+`CREATE TABLE` must reference the new column name regardless
+— MySQL has no auto-rewrite, so the user always has to spell
+out the new name.)
+
+**Why myschema doesn't auto-fix this.** myschema already
+auto-rewrites column references inside index parts, FK column
+lists, and PRIMARY KEY columns after a rename, but CHECK
+definitions are stored as opaque expression text rather than
+structured column lists. Auto-rewriting embedded references
+inside arbitrary CHECK expressions would mean parsing every
+CHECK body through vitess, walking the AST, and round-tripping
+the rewritten form back into `Constraint.Definition`. The
+expression-rewrite complexity isn't justified by how rare this
+case is in practice — the user's manual `DROP CHECK` step is a
+minute of work, and the diff layer would have to grow new
+ordering logic anyway to handle the dropped-then-readded shape
+safely.
+
 ## Foreign keys to tables in another database are passed through, not managed
 
 **Behaviour.** A foreign key whose target lives in a different

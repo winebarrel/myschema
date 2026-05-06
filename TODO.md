@@ -56,23 +56,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   table-level item above but for compressed indexes. Found
   during the PR #81 audit.
 
-- **CHECK constraint referencing a renamed column blocks the
-  rename.** When desired changes a column with a `--
-  myschema:renamed-from` directive AND the catalog has a CHECK
-  constraint referencing that column, the diff emits:
-  1. RENAME COLUMN (from Stmts bucket via applyColumnRenames)
-  2. DROP CHECK (later in Stmts via diffConstraints)
-  3. ADD CONSTRAINT (replacement CHECK)
-  MySQL 8.0+ rejects step 1 with `Error 3959 Check constraint 'X'
-  uses column 'Y', hence column cannot be dropped or renamed`
-  because the CHECK is still active when the rename runs. Fix:
-  either (a) introduce a dedicated CHECK-drop bucket that runs
-  before column renames (mirroring the FK-drop bucket which
-  already handles this), or (b) defer the rename until after
-  CHECK drops within the same `Stmts` slice. Discovered while
-  composing the inline_rename_all_kinds.yml fixture; the fixture
-  works around it by referencing a different column in the CHECK.
-
 ## Medium — test coverage gaps
 
 The PR #84 postmortem audit closed five of its six items via PRs
