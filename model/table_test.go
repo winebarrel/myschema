@@ -268,6 +268,118 @@ func TestColumnDefSQLInvisible(t *testing.T) {
 	})
 }
 
+// TestColumnDefSQLFullOrdering pins every emitted attribute's
+// position with index-comparison so a future reorder of
+// `columnDefSQL` fails a specific edge here instead of silently
+// shipping wrong-order DDL. PR #84 pinned only INVISIBLE's slot;
+// extend the pin to the full chain (CHARSET → COLLATE → GENERATED
+// → STORED|VIRTUAL → NOT NULL → DEFAULT → ON UPDATE →
+// AUTO_INCREMENT → INVISIBLE → COMMENT). The constructed column
+// intentionally combines attributes MySQL would reject together
+// (e.g. BIGINT + CHARACTER SET, AUTO_INCREMENT + GENERATED) so a
+// single column exercises every formatter slot — this is a
+// slot-ordering pin, not a SHOW CREATE TABLE round-trip fixture.
+// VIRTUAL is exercised in a sibling sub-test below; the main pin
+// uses STORED.
+func TestColumnDefSQLFullOrdering(t *testing.T) {
+	cs := "utf8mb4"
+	coll := "utf8mb4_0900_ai_ci"
+	def := "0"
+	gen := "id + 1"
+	comment := "audit"
+
+	// AUTO_INCREMENT and a generated column are mutually exclusive
+	// in MySQL but `columnDefSQL` is a pure formatter — it doesn't
+	// validate semantic combinations, just emits whatever fields
+	// are set. Set both so the ordering pin covers their slots.
+	c := &model.Column{
+		Name:          "n",
+		TypeName:      "bigint",
+		CharacterSet:  &cs,
+		Collation:     &coll,
+		Generated:     &gen,
+		Stored:        true,
+		NotNull:       true,
+		Default:       &def,
+		OnUpdate:      &def,
+		AutoIncrement: true,
+		Invisible:     true,
+		Comment:       &comment,
+	}
+	out := model.ColumnDefSQL(c)
+
+	tokens := []string{
+		"CHARACTER SET", "COLLATE", "GENERATED ALWAYS AS", "STORED",
+		"NOT NULL", "DEFAULT", "ON UPDATE", "AUTO_INCREMENT",
+		"INVISIBLE", "COMMENT",
+	}
+	pos := make([]int, len(tokens))
+	for i, tok := range tokens {
+		pos[i] = strings.Index(out, tok)
+		require.NotEqual(t, -1, pos[i], "%q must appear in %q", tok, out)
+	}
+	for i := 1; i < len(tokens); i++ {
+		assert.Less(t, pos[i-1], pos[i],
+			"%q must precede %q (got %q)", tokens[i-1], tokens[i], out)
+	}
+	// `VIRTUAL` must not appear when `Stored: true`; otherwise a
+	// future emitter that prints both keywords would still pass the
+	// STORED-position assertion above.
+	assert.NotContains(t, out, "VIRTUAL")
+}
+
+// TestColumnDefSQLFullOrderingVirtual is the Stored=false sibling
+// of TestColumnDefSQLFullOrdering. A regression that flips
+// STORED↔VIRTUAL or moves the storage modifier out of its
+// post-GENERATED slot fails here.
+func TestColumnDefSQLFullOrderingVirtual(t *testing.T) {
+	gen := "id + 1"
+	c := &model.Column{
+		Name:      "n",
+		TypeName:  "bigint",
+		Generated: &gen,
+		Stored:    false,
+		NotNull:   true,
+	}
+	out := model.ColumnDefSQL(c)
+
+	gpos := strings.Index(out, "GENERATED ALWAYS AS")
+	vpos := strings.Index(out, "VIRTUAL")
+	npos := strings.Index(out, "NOT NULL")
+	require.NotEqual(t, -1, gpos)
+	require.NotEqual(t, -1, vpos)
+	require.NotEqual(t, -1, npos)
+	assert.Less(t, gpos, vpos, "VIRTUAL must follow GENERATED ALWAYS AS")
+	assert.Less(t, vpos, npos, "VIRTUAL must precede NOT NULL")
+	assert.NotContains(t, out, "STORED")
+}
+
+// TestConstraintInlineSQLCheckEnforcedOrdering pins the
+// `CHECK (…) NOT ENFORCED` order on the inline CHECK constraint
+// emitter. There's only one variable suffix, so the pin is short:
+// the keyword block must appear before the trailing
+// `NOT ENFORCED`.
+func TestConstraintInlineSQLCheckEnforcedOrdering(t *testing.T) {
+	tbl := emptyTable("shop", "products")
+	tbl.Columns.Set("id", &model.Column{Name: "id", TypeName: "bigint", NotNull: true})
+	tbl.Columns.Set("price", &model.Column{Name: "price", TypeName: "int"})
+	tbl.Constraints.Set("PRIMARY", &model.Constraint{
+		Name: "PRIMARY", Type: model.PrimaryKeyConstraint,
+		Definition: "(id)", Columns: []string{"id"},
+	})
+	tbl.Constraints.Set("chk_price", &model.Constraint{
+		Name: "chk_price", Type: model.CheckConstraint,
+		Definition: "CHECK (price > 0)", Enforced: false,
+	})
+	out := tbl.SQL()
+	check := strings.Index(out, "CHECK (price > 0)")
+	notEnforced := strings.Index(out, "NOT ENFORCED")
+	require.NotEqual(t, -1, check)
+	require.NotEqual(t, -1, notEnforced)
+	assert.Less(t, check, notEnforced,
+		"NOT ENFORCED must follow the CHECK keyword body")
+}
+
 func TestTableFQTN(t *testing.T) {
 	tbl := &model.Table{Database: "shop", Name: "users"}
 	assert.Equal(t, "shop.users", tbl.FQTN())

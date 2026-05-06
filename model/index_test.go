@@ -1,9 +1,11 @@
 package model_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/winebarrel/myschema/model"
 )
 
@@ -92,6 +94,37 @@ func TestIndexSQL(t *testing.T) {
 		}
 		assert.Contains(t, idx.SQL(), "COMMENT 'primary lookup'")
 	})
+}
+
+// TestIndexSQLAttributeOrdering pins the order of trailing
+// attributes (USING → INVISIBLE → COMMENT) by index comparison so
+// a future reorder of Index.SQL() fails this test instead of
+// silently shipping wrong-order DDL. The single-attribute tests
+// above use Contains and are order-blind. Built parallel to the
+// columnDefSQL ordering pin in model/table_test.go.
+func TestIndexSQLAttributeOrdering(t *testing.T) {
+	c := "primary lookup"
+	idx := &model.Index{
+		Name:      "i",
+		Database:  "shop",
+		Table:     "users",
+		Parts:     []model.IndexPart{{Column: "id"}},
+		IndexType: "BTREE",
+		Invisible: true,
+		Comment:   &c,
+	}
+	out := idx.SQL()
+
+	tokens := []string{"USING", "INVISIBLE", "COMMENT"}
+	pos := make([]int, len(tokens))
+	for i, tok := range tokens {
+		pos[i] = strings.Index(out, tok)
+		require.NotEqual(t, -1, pos[i], "%q must appear in %q", tok, out)
+	}
+	for i := 1; i < len(tokens); i++ {
+		assert.Less(t, pos[i-1], pos[i],
+			"%q must precede %q (got %q)", tokens[i-1], tokens[i], out)
+	}
 }
 
 func TestIndexPartSQL(t *testing.T) {
