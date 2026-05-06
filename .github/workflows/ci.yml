@@ -20,11 +20,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - mysql_label: "8.0"
+          - mysql_label: "8"
             mysql_service: mysql8
             mysql_port: 3306
             upload_codecov: true
-          - mysql_label: "9.4"
+          - mysql_label: "9"
             mysql_service: mysql9
             mysql_port: 3307
             upload_codecov: false
