@@ -9,13 +9,12 @@ reads the current state from `information_schema`, diffs the two,
 and emits — or applies — the DDL that brings current → desired.
 
 ```sh
-go install github.com/winebarrel/myschema/cmd/myschema@latest
-
 export MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/app'
-myschema dump > desired.sql       # capture current schema
-$EDITOR desired.sql               # describe the schema you want
-myschema plan desired.sql         # preview the DDL
-myschema apply desired.sql        # run it
+
+myschema dump > desired.sql  # capture current schema
+vi desired.sql               # describe the schema you want
+myschema plan desired.sql    # preview the DDL
+myschema apply desired.sql   # run it
 ```
 
 The `dump → edit → plan → apply → re-plan empty` round-trip is
@@ -38,10 +37,25 @@ Download the latest binary from [Releases](https://github.com/winebarrel/myschem
 
 ## Usage
 
-Set the DSN once via env (or pass `--dsn=…` on every command):
+```
+Usage: myschema --dsn=STRING <command> [flags]
 
-```sh
-export MYSCHEMA_DSN='root@tcp(127.0.0.1:3306)/app'
+Flags:
+  -h, --help               Show context-sensitive help.
+  -d, --dsn=STRING         MySQL DSN including database name (e.g. root@tcp(127.0.0.1:3306)/mydb). See
+                           https://github.com/go-sql-driver/mysql#dsn-data-source-name ($MYSCHEMA_DSN)
+      --password=STRING    MySQL password (overrides DSN) ($MYSCHEMA_PASSWORD).
+      --version
+
+Commands:
+  apply --dsn=STRING <files> ... [flags]
+    Apply schema changes to the database.
+
+  plan --dsn=STRING <files> ... [flags]
+    Print the schema diff SQL without applying it.
+
+  dump --dsn=STRING [flags]
+    Dump the current database schema as SQL.
 ```
 
 ### `dump` — serialize the live schema
