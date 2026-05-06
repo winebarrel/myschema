@@ -421,10 +421,17 @@ different shape, the diff will fire a no-op `MODIFY COLUMN` on
 **every** plan and `apply` never converges.
 
 **What MySQL canonicalises.** Try writing
-`GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED` against a
-fresh table — `SHOW CREATE TABLE` returns it as
-``concat(`email`,_utf8mb4' ',`name`)``. The systematic
-transformations:
+`GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED` against
+a fresh table. `SHOW CREATE TABLE` returns the full clause as
+
+```
+GENERATED ALWAYS AS (concat(`email`,_utf8mb4' ',`name`)) STORED
+```
+
+— and `information_schema.COLUMNS.GENERATION_EXPRESSION` returns
+just the expression body (the part inside the parentheses,
+``concat(`email`,_utf8mb4' ',`name`)``), which is what myschema
+actually compares against. The systematic transformations:
 
 1. **Function names → lower-case.** `CONCAT` → `concat`.
 2. **All identifiers → back-tick-quoted**, regardless of whether
@@ -456,8 +463,8 @@ round-trip closes on the next plan.
 If you really need to handwrite, mirror what `SHOW CREATE TABLE`
 would emit: lowercase function names, every identifier
 back-ticked, every string literal prefixed with the
-`character_set_connection` introducer, no whitespace around
-commas.
+`character_set_connection` introducer, and no whitespace around
+commas or operators.
 
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 
