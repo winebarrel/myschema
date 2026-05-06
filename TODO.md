@@ -22,6 +22,3 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
 
-## Low — tests / docs / release
-
-- Renovate / dependabot config.
