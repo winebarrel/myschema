@@ -9,4 +9,5 @@ var (
 	NullIfMatchesTableDefault          = nullIfMatchesTableDefault
 	NormalizeRefOpt                    = normalizeRefOpt
 	NormalizeMatch                     = normalizeMatch
+	DecodeGenerationExpr               = decodeGenerationExpr
 )

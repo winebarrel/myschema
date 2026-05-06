@@ -1,0 +1,37 @@
+# A generated column whose body contains a string literal used to
+# drift on every plan: the catalog stores the body in MySQL's
+# escape-encoded form (`\'` for the literal's delimiting quotes,
+# `_utf8mb4` introducer, etc.), vitess can't parse that form, so
+# `equalExprPtr` fell back to byte equality and `MODIFY COLUMN`
+# fired forever.
+#
+# Two-step fix lives in:
+#   - catalog/tables.go::decodeGenerationExpr (turns `\'` back into
+#     `'` so vitess can parse)
+#   - diff/expr.go::stripIntroducers (drops the `_utf8mb4` introducer
+#     from both sides during canonicalisation)
+#
+# This fixture pins the round-trip so a regression in either step
+# surfaces as a YAML failure instead of as silent drift in the wild.
+
+init: |
+
+desired: |
+  CREATE TABLE t (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL,
+      name VARCHAR(64) NOT NULL,
+      full_label VARCHAR(330) GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED,
+      PRIMARY KEY (id)
+  );
+
+applied: |
+  CREATE TABLE t (
+      id bigint NOT NULL AUTO_INCREMENT,
+      email varchar(255) NOT NULL,
+      name varchar(64) NOT NULL,
+      full_label varchar(330) GENERATED ALWAYS AS (CONCAT(email, ' ', `name`)) STORED,
+      PRIMARY KEY (id)
+  );
+
+verify_no_drift: true

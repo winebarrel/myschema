@@ -35,6 +35,62 @@ func TestNormalizeRefOpt(t *testing.T) {
 	}
 }
 
+// TestDecodeGenerationExpr pins the two-pass MySQL escape decode used
+// before passing `information_schema.COLUMNS.GENERATION_EXPRESSION`
+// to vitess. Without the decode, vitess refuses the catalog form
+// with a syntax error, equalExprPtr falls back to byte equality, and
+// every plan fires a no-op MODIFY COLUMN. Encodings probed against
+// MySQL 8.0 (`SELECT HEX(GENERATION_EXPRESSION) FROM
+// information_schema.COLUMNS …`).
+func TestDecodeGenerationExpr(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{
+			"plain string literal — only delimiters need decoding",
+			`concat(` + "`name`" + `,_utf8mb4\' x \',` + "`name`" + `)`,
+			`concat(` + "`name`" + `,_utf8mb4' x ',` + "`name`" + `)`,
+		},
+		{
+			"backslash in body — \\\\ collapses to one \\, then delimiter \\' becomes '",
+			`_utf8mb4\'\\\\\'`,
+			`_utf8mb4'\\'`,
+		},
+		{
+			"apostrophe in body — \\\\\\' collapses to \\'; outer \\' becomes '",
+			`_utf8mb4\'\\\'\'`,
+			`_utf8mb4'\''`,
+		},
+		{
+			"no escapes — pass-through",
+			`a + b * 2`,
+			`a + b * 2`,
+		},
+		{
+			// Multiple string literals in one expression — every
+			// occurrence of \\ → \ and \' → ' must be decoded, not
+			// just the first. This is what catalog stores for a
+			// body like CONCAT(a, ' / ', b, ' - ', c).
+			"multiple literals in one expression",
+			`concat(` + "`a`" + `,_utf8mb4\' / \',` + "`b`" + `,_utf8mb4\' - \',` + "`c`" + `)`,
+			`concat(` + "`a`" + `,_utf8mb4' / ',` + "`b`" + `,_utf8mb4' - ',` + "`c`" + `)`,
+		},
+		{
+			// Empty literal: catalog stores an empty string in the
+			// body as `\'\'` (delimiter + delimiter, no body).
+			// Decode must produce a SQL-valid empty literal `''`.
+			"empty literal between delimiters",
+			`concat(` + "`a`" + `,_utf8mb4\'\',` + "`b`" + `)`,
+			`concat(` + "`a`" + `,_utf8mb4'',` + "`b`" + `)`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, catalog.DecodeGenerationExpr(tt.in))
+		})
+	}
+}
+
 func TestNormalizeMatch(t *testing.T) {
 	assert.Equal(t, "", catalog.NormalizeMatch(""), "empty stays empty")
 	assert.Equal(t, "", catalog.NormalizeMatch("NONE"), "NONE collapses to empty")

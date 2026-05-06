@@ -411,6 +411,59 @@ CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
 `varchar`, etc. don't trigger drift — both sides are lower-cased
 before comparison. Write whichever you find readable.
 
+## Generated column expression bodies that contain string literals
+
+**Default behaviour: drift-free.** myschema canonicalises both the
+desired-side body (vitess parse → restore) and the catalog-side
+body (`information_schema.COLUMNS.GENERATION_EXPRESSION` → MySQL
+escape decode → vitess parse → restore) before comparison, then
+strips charset introducers (`_utf8mb4`, `_latin1`, …) on both
+sides. So a desired-side `CONCAT(email, ' ', name)` round-trips
+clean against the catalog body MySQL stores —
+
+```
+concat(`email`,_utf8mb4\' \',`name`)
+```
+
+— and re-plans are empty.
+
+**Limitation: charset-introducer-only changes are invisible
+across the entire diff.** The strip lives in
+`diff/expr.go::canonicalExpr`, which is the shared canonicaliser
+for **every** SQL expression comparison: column DEFAULT, ON
+UPDATE, CHECK, and generated bodies all flow through it. A
+deliberate change like `DEFAULT _latin1'foo'` →
+`DEFAULT _utf8mb4'foo'` (or the same shape inside a CHECK
+expression, or inside a generated body) is therefore invisible
+to the diff. If you need to pin a specific charset for a
+literal in any of these expression slots, manage that change
+out-of-band — run the `ALTER TABLE` by hand, or use
+`-- myschema:execute`.
+
+The trade-off is intentional: introducer-only differences are
+vanishingly rare in practice, and an introducer mismatch on the
+catalog side (where MySQL inserts the connection charset by
+default) was the source of a no-op `MODIFY COLUMN` /
+`ALTER TABLE` reshape on every plan for the common case.
+
+**Limitation: literals containing `'` or `\` aren't fully
+round-tripped on generated columns.** myschema's escape-decoder
+(`catalog.decodeGenerationExpr`) translates MySQL's storage
+form (`\\` for one backslash, `\'` for one apostrophe) back
+into SQL-standard form before vitess parses it, but the
+encoding rule is ambiguous in pathological cases — if a
+literal contains both quotes and backslashes in non-trivial
+mixes, the decoded form may not match the parser side and
+you'll see persistent drift. The escape hatch is
+`myschema dump > desired.sql` — `dump` emits the **decoded**
+form (what the catalog reader produced after running
+`decodeGenerationExpr` over the raw
+`GENERATION_EXPRESSION`), so feeding the dump straight back
+into the parser closes the round-trip even when the raw
+catalog bytes wouldn't have parsed. Generated bodies whose
+literals are simple ASCII (`' '`, `' x '`, `'-'`, `' / '`)
+round-trip cleanly with no special handling.
+
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 
 **Behaviour.** `model.Column.TypeName` holds the rendered type

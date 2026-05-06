@@ -7,12 +7,32 @@ import (
 )
 
 // canonicalExpr parses s as a SQL expression and returns vitess's
-// canonical string form. Used to compare DEFAULT, ON UPDATE, and CHECK
-// expressions across the parser side and the catalog side, neither of
-// which produce byte-identical output for semantically equal SQL.
+// canonical string form. Used to compare DEFAULT, ON UPDATE, CHECK,
+// and GENERATED expressions across the parser side and the catalog
+// side, neither of which produce byte-identical output for
+// semantically equal SQL.
 //
-// Returns the original string and false if parsing fails so callers can
-// fall back to byte equality.
+// Charset introducers (`_utf8mb4'foo'`, `_latin1'bar'`) on string
+// literals are stripped before comparison. MySQL canonicalises
+// generated-column bodies by prefixing every string literal with the
+// session's `character_set_connection` introducer at CREATE time, so
+// a desired-side body like `CONCAT(a, ' ', b)` round-trips on the
+// catalog side as `concat(a, _utf8mb4' ', b)` and the diff would
+// otherwise fire `MODIFY COLUMN` on every plan. Stripping the
+// introducer from both sides closes the loop.
+//
+// **Scope.** The strip applies to *every* expression comparison
+// that flows through this helper — DEFAULT, ON UPDATE, CHECK, and
+// GENERATED — because they all share `canonicalExpr`. A deliberate
+// introducer-only change in any of those slots (e.g.
+// `DEFAULT _latin1'foo'` → `DEFAULT _utf8mb4'foo'`) is therefore
+// invisible to the diff. The trade-off is documented in CAVEATS.md
+// "Generated column expression bodies that contain string literals"
+// → "charset-introducer-only changes are invisible across the
+// entire diff."
+//
+// Returns the original string and false if parsing fails so callers
+// can fall back to byte equality.
 func canonicalExpr(s string) (string, bool) {
 	p, err := sqlparser.New(sqlparser.Options{})
 	if err != nil {
@@ -30,7 +50,95 @@ func canonicalExpr(s string) (string, bool) {
 	if !ok {
 		return s, false
 	}
-	return strings.ToLower(sqlparser.String(ae.Expr)), true
+	stripped, ok := stripIntroducers(ae.Expr)
+	if !ok {
+		return s, false
+	}
+	return lowerOutsideStringLiterals(sqlparser.String(stripped)), true
+}
+
+// lowerOutsideStringLiterals applies Unicode-aware `strings.ToLower`
+// to every byte except the content of single-quoted string literals.
+// Naïve `strings.ToLower` over the whole string would canonicalise
+// `DEFAULT 'X'` and `DEFAULT 'x'` to the same value, hiding a real
+// case-sensitive change. ASCII-only lowering would miss case
+// differences in non-ASCII identifiers (e.g. a Greek-α table name
+// versus its uppercase form), which the existing test corpus does
+// exercise. Outside-literal segments are gathered, lower-cased
+// through `strings.ToLower`, and emitted; literal segments pass
+// through byte-for-byte.
+//
+// The literal-tracking state machine respects both backslash escapes
+// (`\'`) and the SQL-standard doubled-apostrophe escape (two
+// consecutive `'` characters meaning one literal apostrophe) so the
+// boundaries are recognised correctly. Byte-by-byte scanning is safe
+// for multi-byte UTF-8: the marker bytes `'` (0x27) and `\` (0x5C)
+// never appear in the continuation bytes of a UTF-8 multi-byte
+// sequence.
+func lowerOutsideStringLiterals(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	var seg strings.Builder
+	flush := func() {
+		if seg.Len() > 0 {
+			b.WriteString(strings.ToLower(seg.String()))
+			seg.Reset()
+		}
+	}
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c != '\'' {
+			seg.WriteByte(c)
+			i++
+			continue
+		}
+		flush()
+		// Opening quote — copy verbatim and walk to the matching close.
+		b.WriteByte(c)
+		i++
+		for i < len(s) {
+			c2 := s[i]
+			b.WriteByte(c2)
+			i++
+			if c2 == '\\' && i < len(s) {
+				// Backslash escape — copy the escaped byte verbatim.
+				b.WriteByte(s[i])
+				i++
+				continue
+			}
+			if c2 == '\'' {
+				// Either closing quote or a doubled-quote escape (`''`).
+				if i < len(s) && s[i] == '\'' {
+					b.WriteByte(s[i])
+					i++
+					continue
+				}
+				break
+			}
+		}
+	}
+	flush()
+	return b.String()
+}
+
+// stripIntroducers walks the expression and replaces every
+// `*sqlparser.IntroducerExpr` with its inner expression so the charset
+// introducer doesn't survive into the canonical string. Returns
+// (rewritten, true) on success, falling back to (original, false) only
+// if the rewrite somehow returns a non-Expr — defensive.
+func stripIntroducers(expr sqlparser.Expr) (sqlparser.Expr, bool) {
+	rewritten := sqlparser.Rewrite(expr, func(c *sqlparser.Cursor) bool {
+		if intro, ok := c.Node().(*sqlparser.IntroducerExpr); ok {
+			c.Replace(intro.Expr)
+		}
+		return true
+	}, nil)
+	out, ok := rewritten.(sqlparser.Expr)
+	if !ok {
+		return expr, false
+	}
+	return out, true
 }
 
 // equalExpr compares two SQL expression strings semantically by passing

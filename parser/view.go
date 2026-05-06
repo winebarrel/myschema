@@ -60,12 +60,12 @@ func restoreSelectLower(node sqlparser.SQLNode) (string, error) {
 //   - parse the SELECT body
 //   - rewrite the AST: drop schema/table qualifiers from column refs, drop
 //     redundant `AS col` aliases, unwrap any extra parentheses
-//   - restore via vitess (lowercase keywords) and ReplaceAll spaces inside
-//     the rendered output
+//   - restore via vitess and lowercase the rendered output so case
+//     differences in keywords / identifiers don't fire spurious diffs
 //
 // Without this, the catalog form
-// (`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\“) wouldn't compare
-// equal to the parser form (`select \`c\` from \`t\“).
+// ( select `db`.`t`.`c` AS `c` from `db`.`t` ) wouldn't compare
+// equal to the parser form ( select `c` from `t` ).
 func NormalizeViewDefinition(def, defaultDB string) (string, error) {
 	if def == "" {
 		return "", nil
