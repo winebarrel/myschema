@@ -57,34 +57,43 @@ func canonicalExpr(s string) (string, bool) {
 	return lowerOutsideStringLiterals(sqlparser.String(stripped)), true
 }
 
-// lowerOutsideStringLiterals lower-cases ASCII A–Z bytes except
-// inside single-quoted string literals. Naïve `strings.ToLower`
-// would canonicalise `DEFAULT 'X'` and `DEFAULT 'x'` to the same
-// string, hiding a real case-sensitive value change. Function names,
-// keywords, and unquoted identifiers still need lowering because
-// vitess preserves their case from the input. ASCII-only is
-// deliberate: SQL keywords and identifiers vitess restores into
-// canonicalExpr's input are pure ASCII, so a Unicode-aware
-// `strings.ToLower` would just be slower without changing the
-// outcome. The state machine tracks the in-literal flag and
-// respects both backslash escapes (`\'`) and the SQL-standard
-// doubled-apostrophe escape (two consecutive `'` characters
-// meaning one literal apostrophe) so the literal boundaries are
-// recognised correctly.
+// lowerOutsideStringLiterals applies Unicode-aware `strings.ToLower`
+// to every byte except the content of single-quoted string literals.
+// Naïve `strings.ToLower` over the whole string would canonicalise
+// `DEFAULT 'X'` and `DEFAULT 'x'` to the same value, hiding a real
+// case-sensitive change. ASCII-only lowering would miss case
+// differences in non-ASCII identifiers (e.g. a Greek-α table name
+// versus its uppercase form), which the existing test corpus does
+// exercise. Outside-literal segments are gathered, lower-cased
+// through `strings.ToLower`, and emitted; literal segments pass
+// through byte-for-byte.
+//
+// The literal-tracking state machine respects both backslash escapes
+// (`\'`) and the SQL-standard doubled-apostrophe escape (two
+// consecutive `'` characters meaning one literal apostrophe) so the
+// boundaries are recognised correctly. Byte-by-byte scanning is safe
+// for multi-byte UTF-8: the marker bytes `'` (0x27) and `\` (0x5C)
+// never appear in the continuation bytes of a UTF-8 multi-byte
+// sequence.
 func lowerOutsideStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
+	var seg strings.Builder
+	flush := func() {
+		if seg.Len() > 0 {
+			b.WriteString(strings.ToLower(seg.String()))
+			seg.Reset()
+		}
+	}
 	i := 0
 	for i < len(s) {
 		c := s[i]
 		if c != '\'' {
-			if c >= 'A' && c <= 'Z' {
-				c += 'a' - 'A'
-			}
-			b.WriteByte(c)
+			seg.WriteByte(c)
 			i++
 			continue
 		}
+		flush()
 		// Opening quote — copy verbatim and walk to the matching close.
 		b.WriteByte(c)
 		i++
@@ -109,6 +118,7 @@ func lowerOutsideStringLiterals(s string) string {
 			}
 		}
 	}
+	flush()
 	return b.String()
 }
 

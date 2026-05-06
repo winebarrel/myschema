@@ -122,6 +122,28 @@ func TestEqualExpr(t *testing.T) {
 			`concat(a, 'O''Brien')`,
 			true,
 		},
+		{
+			// Non-ASCII identifier: a Greek-α column name written
+			// in upper-case on one side and lower-case on the
+			// other must canonicalise to the same string. The
+			// outside-literal segment goes through Unicode-aware
+			// strings.ToLower, so the case fold catches non-ASCII
+			// letters too. Back-ticked because vitess only accepts
+			// non-ASCII identifiers in quoted form.
+			"non-ASCII identifier case difference is folded",
+			"`tΑble`",
+			"`tαble`",
+			true,
+		},
+		{
+			// Non-ASCII content INSIDE a string literal must
+			// survive byte-for-byte — folding it would hide a real
+			// case-sensitive value change.
+			"non-ASCII literal content case-preserved",
+			`'Α'`,
+			`'α'`,
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
