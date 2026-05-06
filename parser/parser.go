@@ -564,7 +564,7 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 	if opts.SRID != nil {
 		n, err := strconv.ParseUint(opts.SRID.Val, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("column %s: SRID %q is not a valid uint32: %w", c.Name, opts.SRID.Val, err)
+			return nil, fmt.Errorf("SRID %q is not a valid uint32: %w", opts.SRID.Val, err)
 		}
 		v := uint32(n)
 		c.SRID = &v

@@ -445,6 +445,20 @@ CREATE TABLE places (
 	assert.Nil(t, unset.SRID, "no SRID clause must leave Column.SRID == nil")
 }
 
+// TestParseColumnSRIDOverflow: vitess accepts arbitrary integer
+// text in the SRID literal, but `Column.SRID` is *uint32 so a
+// value over uint32 max must error at parse time. MySQL would
+// reject the same SQL at apply, so erroring here surfaces the
+// problem to the user via plan output instead of a server
+// round-trip.
+func TestParseColumnSRIDOverflow(t *testing.T) {
+	sql := `CREATE TABLE t (id INT, g GEOMETRY SRID 4294967296);` // uint32 max + 1
+	_, err := parser.ParseSQL(sql, "app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SRID")
+	assert.Contains(t, err.Error(), "uint32")
+}
+
 // TestParseColumnDefaultNullSkipped pins the parser-side fix for
 // the "TIMESTAMP NULL DEFAULT NULL drift" gap: an explicit
 // `DEFAULT NULL` (vitess hands it back as *sqlparser.NullVal) must
