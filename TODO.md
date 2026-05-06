@@ -81,16 +81,18 @@ because the specific shapes need direct unit tests, not a DDL
 that happens to round-trip.
 
 - **`parseCreateTable` column-loop interactions.** `parseColumnDef`
-  reads `cd.Type.Options.{Reference, KeyOpt, Invisible, …}`
-  independently, but the loop in `parseCreateTable` calls
-  `applyInlineColumnKey` and `buildFK` on the *same* column. Open
-  combinations:
+  reads `cd.Type.Options.{KeyOpt, Invisible, …}` independently,
+  but the loop in `parseCreateTable` calls `applyInlineColumnKey`
+  on the same column. Open combinations:
   - inline `UNIQUE × DEFAULT 'x'`
-  - inline `REFERENCES × NOT NULL × ON UPDATE`
   - inline `PRIMARY KEY × CHECK (col > 0)` (column-level CHECK
     that vitess promotes to a table-level constraint — the
     promotion path interacts with the PK promotion path)
-  Estimated 3–5 parser tests, a few hours.
+  Estimated 2–3 parser tests, a couple hours. (The original
+  third combination, `inline REFERENCES × NOT NULL × ON UPDATE`,
+  was eliminated by PR #92 — inline column-level `REFERENCES`
+  now errors at parse time, so that interaction shape is no
+  longer reachable.)
 
 ## Low — tests / docs / release
 
