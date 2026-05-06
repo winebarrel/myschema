@@ -41,11 +41,10 @@
 #     the COMMENT-on-an-index path. UNIQUE-with-COMMENT
 #     specifically is pinned by TestIndexAttributeMatrix's
 #     `UNIQUE × INVISIBLE × COMMENT` sub-test in catalog.
-#   - inline column-level `REFERENCES` — MySQL auto-names the FK
-#     numerically (`<table>_ibfk_1`) while the parser auto-names it
-#     column-shaped (`<table>_ibfk_<col>`); the round-trip drifts.
-#     An explicit named CONSTRAINT is used instead. See TODO.md for
-#     the open auto-naming issue.
+#   - inline column-level `REFERENCES` — rejected at parse time
+#     (MySQL silently ignores the shape; see CAVEATS.md "Inline
+#     column-level REFERENCES is rejected"). An explicit named
+#     CONSTRAINT is used instead.
 #
 # Pattern:
 #   init = desired = full schema, applied = "" (no-op).

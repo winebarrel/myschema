@@ -86,6 +86,101 @@ against the live database first and use that output as your starting
 point — every implicit FK covering index will be materialised in the
 output, so the first `apply` is a no-op.
 
+## Inline column-level REFERENCES is rejected
+
+**Behaviour.** Inline column-level `REFERENCES` written as part of
+a column specification (e.g. `user_id BIGINT REFERENCES
+users(id)`) errors at parse time:
+
+The error is wrapped by `parseCreateTable` with the table /
+column context, so the user sees the full form (single line,
+wrapped here for display):
+
+```
+table <db>.<table>: column <col>: inline column-level REFERENCES
+is silently ignored by MySQL (see
+https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html);
+declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY
+(col) REFERENCES other(col)` clause instead
+```
+
+**Why.** The MySQL 8.0 reference manual
+([ansi-diff-foreign-keys.html](https://dev.mysql.com/doc/refman/8.0/en/ansi-diff-foreign-keys.html))
+states:
+
+> MySQL parses but ignores "inline `REFERENCES` specifications"
+> (as defined in the SQL standard) where the references are
+> defined as part of the column specification. … Defining a
+> column to use a `REFERENCES tbl_name(col_name)` clause has no
+> actual effect and serves only as a memo or comment …
+
+Earlier myschema versions tried to *rescue* the inline form by
+promoting it to an explicit-named `ALTER TABLE … ADD CONSTRAINT
+… FOREIGN KEY (…)`, which let the FK actually exist. Two
+problems made that a footgun rather than a kindness:
+
+- The user thinks they wrote a working FK; in reality MySQL
+  alone wouldn't have created one. myschema's own desired-side
+  SQL diverged from "what MySQL would do with this same SQL."
+- The rescued FK's auto-name (`<table>_ibfk_<col>`) didn't match
+  MySQL's auto-name for any FK that DID exist on the catalog
+  side from external tools (`<table>_ibfk_<n>`, numeric), so a
+  user importing an externally-managed schema saw a one-shot
+  redundant DROP+ADD on first plan — semantically equivalent
+  end-state, but the actual `DROP FOREIGN KEY` + `ADD
+  CONSTRAINT` still runs and pays the lock / rebuild cost MySQL
+  charges for any FK reshape.
+
+Rejecting the shape outright is honest and trivially fixable —
+move the clause to its proper place:
+
+```sql
+-- Reject:
+CREATE TABLE posts (
+    user_id BIGINT NOT NULL REFERENCES users (id),
+    ...
+);
+
+-- Accept (table-level, named):
+CREATE TABLE posts (
+    user_id BIGINT NOT NULL,
+    ...,
+    CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+-- Accept (table-level, unnamed):
+CREATE TABLE posts (
+    user_id BIGINT NOT NULL,
+    ...,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+```
+
+**Note on the unnamed table-level form.** When MySQL itself
+creates an unnamed `FOREIGN KEY (...)` it picks
+`<table>_ibfk_<n>` (numeric, declaration-order). myschema's
+parser instead picks `<table>_ibfk_<first_col>`. Two
+consequences:
+
+- Within a myschema-managed flow (`apply` from scratch, or
+  `dump → apply`) the parser's name is what ends up in the
+  catalog, and re-plans are clean.
+- Importing an externally-created schema where the catalog
+  already has `<table>_ibfk_<n>` and writing the desired SQL
+  with an unnamed `FOREIGN KEY (...)` produces a one-shot
+  redundant DROP+ADD on the first plan: the diff sees one FK
+  with the catalog's numeric name and another with the
+  parser's column-shaped name. The end state is functionally
+  equivalent, but the `DROP FOREIGN KEY` + `ADD CONSTRAINT`
+  still runs (real DDL — locks the table briefly and re-checks
+  every existing row against the FK) before names align. From
+  the second plan onward re-plans are empty.
+
+If that one-shot reshape is a problem, write the FK with an
+explicit `CONSTRAINT fk_xxx` name (or run `myschema dump >
+desired.sql` first — `dump` emits the catalog's actual name
+verbatim, so the round-trip closes immediately).
+
 ## Foreign keys to tables in another database are passed through, not managed
 
 **Behaviour.** A foreign key whose target lives in a different
