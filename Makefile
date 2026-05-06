@@ -34,7 +34,7 @@ test:
 # test-mysql9 runs the full integration suite against the MySQL 9.x
 # compose service on port 3307. Both MYSQL_PORT and MYSCHEMA_TEST_DSN
 # are overridden explicitly so a caller with MYSCHEMA_TEST_DSN already
-# set in the environment doesn't accidentally hit the 8.0 instance.
+# set in the environment doesn't accidentally hit the 8.x instance.
 .PHONY: test-mysql9
 test-mysql9:
 	$(MAKE) test MYSQL_PORT=3307 \

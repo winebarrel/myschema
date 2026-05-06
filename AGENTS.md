@@ -15,18 +15,18 @@ the catalog side is read with `database/sql` +
 
 ## Requirements
 
-**MySQL 8.0+ is required.** myschema's catalog reader assumes
+**MySQL 8+ is required.** myschema's catalog reader assumes
 features that don't exist on 5.7:
 
-- `information_schema.CHECK_CONSTRAINTS` (8.0.16+) — without it,
+- `information_schema.CHECK_CONSTRAINTS` — without it,
   CHECK constraints round-trip empty.
-- `information_schema.STATISTICS.IS_VISIBLE` (8.0+) — the catalog
+- `information_schema.STATISTICS.IS_VISIBLE` — the catalog
   query references this column unconditionally; on 5.7 the index
   load fails.
-- `ALTER TABLE … RENAME COLUMN` (8.0+) — emitted for the
+- `ALTER TABLE … RENAME COLUMN` — emitted for the
   `-- myschema:renamed-from` directive on columns; rejected on 5.7.
 
-CI runs against MySQL 8.0 (default) and MySQL 9.4 (forward-compat,
+CI runs against MySQL 8 (default) and MySQL 9 (forward-compat,
 see `make test-mysql9`). Older versions are not tested; some
 schemas may happen to work, but features that touch the gaps above
 will fail.
@@ -87,7 +87,7 @@ make test-mysql9
 ```
 
 `make clean-schema-mysql9` resets the `myschema_test` DB on the 9.x
-instance the same way `clean-schema` does for 8.0.
+instance the same way `clean-schema` does for 8.x.
 
 ## Project layout
 
@@ -169,7 +169,7 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   inline column-level PK / UNIQUE — including the bare `KEY` form
   that MySQL treats as a `PRIMARY KEY` synonym, AUTO_INCREMENT,
   DEFAULT, ON UPDATE, COMMENT, generated columns, column-level
-  INVISIBLE on MySQL 8.0+). Inline column-level `REFERENCES` is
+  INVISIBLE on MySQL 8+). Inline column-level `REFERENCES` is
   **rejected** at parse time — MySQL silently ignores that shape
   (see CAVEATS.md "Inline column-level REFERENCES is rejected"),
   so accepting it would mislead the user into thinking they had
@@ -267,9 +267,9 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
   rename; inline (line above the column / index) inside the
   parenthesised body for column / index rename. Drives
   `ALTER TABLE … RENAME TO` (5.x+), `ALTER TABLE … RENAME COLUMN`
-  (8.0+ only), and `ALTER TABLE … RENAME INDEX` (5.7+). The project
-  baseline is MySQL 8.0 because of INVISIBLE indexes and CHECK
-  constraints elsewhere in the codebase, so the 8.0-only RENAME
+  (8+ only), and `ALTER TABLE … RENAME INDEX` (5.7+). The project
+  baseline is MySQL 8 because of INVISIBLE indexes and CHECK
+  constraints elsewhere in the codebase, so the 8-only RENAME
   COLUMN sits inside that same envelope; on a 5.x server only
   RENAME COLUMN would be rejected. Index parts referencing renamed
   columns are rewritten in place — including child-side FK Columns,
@@ -453,7 +453,7 @@ SQL-output.
   before comparison so casing differences (`BIGINT` vs `bigint`)
   don't trigger spurious diffs. Integer display widths (`INT(11)`)
   *do* drift — desired-side parser keeps the width, catalog
-  strips it on MySQL 8.0+. ZEROFILL is the exception (MySQL keeps
+  strips it on MySQL 8+. ZEROFILL is the exception (MySQL keeps
   the width). User-facing rules and rationale live in CAVEATS.md
   "Integer display widths drift; type-name casing doesn't".
 - Foreign keys live in `Table.ForeignKeys`, not in `Constraints`. The diff

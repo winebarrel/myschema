@@ -80,7 +80,7 @@ myschema apply --pre-sql 'SET FOREIGN_KEY_CHECKS=0;' desired.sql
 
 ## Features
 
-- Tables, columns (incl. INVISIBLE on MySQL 8.0+), primary /
+- Tables, columns (incl. INVISIBLE on MySQL 8+), primary /
   unique / check constraints, foreign keys, secondary indexes
   (with prefix length, DESC, INVISIBLE), generated columns,
   partitions (RANGE / LIST / HASH / KEY).
@@ -105,10 +105,10 @@ CLI-only).
 
 ## Requirements
 
-- **MySQL 8.0+.** The catalog reader uses
-  `information_schema.CHECK_CONSTRAINTS` (8.0.16+),
-  `STATISTICS.IS_VISIBLE` (8.0+), and emits
-  `ALTER TABLE … RENAME COLUMN` (8.0+). MySQL 5.7 isn't supported.
+- **MySQL 8+.** The catalog reader uses
+  `information_schema.CHECK_CONSTRAINTS`,
+  `STATISTICS.IS_VISIBLE`, and emits
+  `ALTER TABLE … RENAME COLUMN`. MySQL 5.7 isn't supported.
 - Go 1.26+ to build from source.
 
 ## Documentation
