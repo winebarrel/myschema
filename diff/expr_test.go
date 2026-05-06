@@ -24,6 +24,48 @@ func TestEqualExpr(t *testing.T) {
 		{"spacing around operator", "a > 0", "a>0", true},
 		{"unparseable falls back to byte equality", "garbage )(", "garbage )(", true},
 		{"unparseable mismatch", "garbage )(", "different (", false},
+
+		// Charset introducer stripping. MySQL's GENERATION_EXPRESSION
+		// canonicalises every string literal in a generated body to
+		// `_<connection_charset>'…'`; the parser side has no
+		// introducer because the user wrote a plain literal. Without
+		// the strip the diff would fire MODIFY COLUMN on every plan
+		// for a no-op shape change.
+		{
+			"introducer absorbed (plain vs _utf8mb4)",
+			"CONCAT(email, ' ', name)",
+			"concat(`email`,_utf8mb4' ',`name`)",
+			true,
+		},
+		{
+			"introducer absorbed (plain vs _latin1)",
+			"CONCAT(a, ' x ', b)",
+			"concat(`a`,_latin1' x ',`b`)",
+			true,
+		},
+		{
+			"both sides explicit, same introducer → equal",
+			"CONCAT(a, _latin1' x ', b)",
+			"concat(`a`,_latin1' x ',`b`)",
+			true,
+		},
+		{
+			// Trade-off documented in CAVEATS — the strip makes a
+			// deliberate `_latin1` → `_utf8mb4` literal-charset
+			// change look identical. The diff sees this as no-op.
+			"different introducers compare equal (documented limitation)",
+			"CONCAT(a, _latin1' x ', b)",
+			"concat(`a`,_utf8mb4' x ',`b`)",
+			true,
+		},
+		{
+			// Differing actual literal value still diffs even if
+			// introducers cancel out.
+			"different literal payload still diffs",
+			"CONCAT(a, _utf8mb4' x ', b)",
+			"concat(`a`,_utf8mb4' y ',`b`)",
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

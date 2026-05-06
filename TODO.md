@@ -56,18 +56,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   table-level item above but for compressed indexes. Found
   during the PR #81 audit.
 
-- **Generated-column expression drifts when the body references a
-  vitess-keyword identifier.** `GENERATED ALWAYS AS (CONCAT(email,
-  ' ', name)) STORED` round-trips as
-  ``CONCAT(email, ' ', `name`)`` because vitess `String()` on a
-  `ColName` back-ticks any identifier in its keyword list (`name`
-  is one). Catalog stores the back-ticked form via SHOW CREATE
-  TABLE, parser doesn't, so re-plan emits a no-op `MODIFY COLUMN`
-  every time. Workaround: rename the column to a non-keyword
-  identifier. Fix: normalise expression bodies through one
-  formatter on both sides (or strip uniformly-safe back-ticks
-  before compare). Found during the kitchen-sink fixture work.
-
 - **CHECK constraint referencing a renamed column blocks the
   rename.** When desired changes a column with a `--
   myschema:renamed-from` directive AND the catalog has a CHECK

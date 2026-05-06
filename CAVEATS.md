@@ -411,6 +411,39 @@ CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
 `varchar`, etc. don't trigger drift — both sides are lower-cased
 before comparison. Write whichever you find readable.
 
+## Generated column expression bodies that contain string literals
+
+**Default behaviour: drift-free.** myschema canonicalises both the
+desired-side body (vitess parse → restore) and the catalog-side body
+(`information_schema.COLUMNS.GENERATION_EXPRESSION` → MySQL escape
+decode → vitess parse → restore) before comparison, then strips
+charset introducers (`_utf8mb4`, `_latin1`, …) on both sides. So a
+desired-side `CONCAT(email, ' ', name)` round-trips clean against a
+catalog body of `concat(\`email\`,_utf8mb4\\\' \\\',\`name\`)` —
+re-plans are empty.
+
+**Limitation: charset-introducer-only changes are invisible.** The
+strip is **symmetric and unconditional**, so a deliberate
+`CONCAT(a, _latin1' ', b)` ↔ `CONCAT(a, _utf8mb4' ', b)` change
+in a generated body looks identical to myschema's diff. If you
+need to pin a specific charset for a literal in a generated
+expression, manage that change out-of-band (run the `ALTER TABLE`
+by hand, or use `-- myschema:execute`).
+
+**Limitation: literals containing `'` or `\` aren't fully
+round-tripped.** myschema's escape-decoder
+(`catalog.decodeGenerationExpr`) translates MySQL's storage form
+(`\\\\` for one backslash, `\\\'` for one apostrophe) back into
+SQL-standard form before vitess parses it, but the encoding rule
+is ambiguous in pathological cases — if your literal contains
+both quotes and backslashes in non-trivial mixes, the decoded
+form may not match the parser side and you'll see persistent
+drift. The escape hatch is `myschema dump > desired.sql` — `dump`
+emits the catalog-side form straight back, so the round-trip
+closes immediately. Generated bodies whose literals are simple
+ASCII (`' '`, `' x '`, `'-'`, `' / '`) round-trip cleanly with
+no special handling.
+
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 
 **Behaviour.** `model.Column.TypeName` holds the rendered type

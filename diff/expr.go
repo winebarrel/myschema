@@ -7,12 +7,26 @@ import (
 )
 
 // canonicalExpr parses s as a SQL expression and returns vitess's
-// canonical string form. Used to compare DEFAULT, ON UPDATE, and CHECK
-// expressions across the parser side and the catalog side, neither of
-// which produce byte-identical output for semantically equal SQL.
+// canonical string form. Used to compare DEFAULT, ON UPDATE, CHECK,
+// and GENERATED expressions across the parser side and the catalog
+// side, neither of which produce byte-identical output for
+// semantically equal SQL.
 //
-// Returns the original string and false if parsing fails so callers can
-// fall back to byte equality.
+// Charset introducers (`_utf8mb4'foo'`, `_latin1'bar'`) on string
+// literals are stripped before comparison. MySQL canonicalises
+// generated-column bodies by prefixing every string literal with the
+// session's `character_set_connection` introducer at CREATE time, so
+// a desired-side body like `CONCAT(a, ' ', b)` round-trips on the
+// catalog side as `concat(a, _utf8mb4' ', b)` and the diff would
+// otherwise fire `MODIFY COLUMN` on every plan. Stripping the
+// introducer from both sides closes the loop. The trade-off is
+// documented in CAVEATS.md "Charset introducer differences in
+// generated bodies are not detected" — a deliberate
+// `_latin1` → `_utf8mb4` change in a generated body looks identical
+// to myschema after this strip.
+//
+// Returns the original string and false if parsing fails so callers
+// can fall back to byte equality.
 func canonicalExpr(s string) (string, bool) {
 	p, err := sqlparser.New(sqlparser.Options{})
 	if err != nil {
@@ -30,7 +44,30 @@ func canonicalExpr(s string) (string, bool) {
 	if !ok {
 		return s, false
 	}
-	return strings.ToLower(sqlparser.String(ae.Expr)), true
+	stripped, ok := stripIntroducers(ae.Expr)
+	if !ok {
+		return s, false
+	}
+	return strings.ToLower(sqlparser.String(stripped)), true
+}
+
+// stripIntroducers walks the expression and replaces every
+// `*sqlparser.IntroducerExpr` with its inner expression so the charset
+// introducer doesn't survive into the canonical string. Returns
+// (rewritten, true) on success, falling back to (original, false) only
+// if the rewrite somehow returns a non-Expr — defensive.
+func stripIntroducers(expr sqlparser.Expr) (sqlparser.Expr, bool) {
+	rewritten := sqlparser.Rewrite(expr, func(c *sqlparser.Cursor) bool {
+		if intro, ok := c.Node().(*sqlparser.IntroducerExpr); ok {
+			c.Replace(intro.Expr)
+		}
+		return true
+	}, nil)
+	out, ok := rewritten.(sqlparser.Expr)
+	if !ok {
+		return expr, false
+	}
+	return out, true
 }
 
 // equalExpr compares two SQL expression strings semantically by passing

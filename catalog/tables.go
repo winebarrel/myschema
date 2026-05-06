@@ -261,7 +261,7 @@ ORDER  BY ORDINAL_POSITION`
 			col.OnUpdate = &ou
 		}
 		if genExpr != "" {
-			ge := genExpr
+			ge := decodeGenerationExpr(genExpr)
 			col.Generated = &ge
 			col.Stored = strings.Contains(extraUp, "STORED GENERATED")
 		}
@@ -618,4 +618,36 @@ func normalizeMatch(s string) string {
 		return ""
 	}
 	return strings.ToUpper(s)
+}
+
+// decodeGenerationExpr translates MySQL's escape encoding for the
+// `information_schema.COLUMNS.GENERATION_EXPRESSION` field back into a
+// vitess-parseable form. MySQL stores generated bodies with every
+// `\` doubled to `\\` and every `'` (string-literal delimiter or
+// content) preceded by `\`, so a source clause
+// `CONCAT(name, ' x ', name)` round-trips as
+// “concat(`name`,_utf8mb4\' x \',`name`)“. vitess refuses the
+// `\'`-as-delimiter form ("syntax error near '\\'"), and without
+// decoding `equalExprPtr` falls back to byte equality and fires a
+// no-op MODIFY COLUMN on every plan.
+//
+// Decoding is two passes: `\\` → `\` first (so a doubled backslash
+// becomes one literal backslash), then `\'` → `'` (so an escaped
+// apostrophe becomes a plain one). Order matters: doing `\'` first
+// would over-double a literal `\` whose encoded form is `\\\\`.
+//
+// Verified against the three real-world shapes (probed against
+// MySQL 8.0):
+//
+//	source body | encoded body | after two-pass decode
+//	------------+--------------+----------------------
+//	' x '       | \' x \'      | ' x '
+//	'\\'        | \'\\\\\'     | '\\'
+//	'\''        | \'\\\'\'     | '\''
+//
+// All three round-trip cleanly through vitess after decoding.
+func decodeGenerationExpr(s string) string {
+	s = strings.ReplaceAll(s, `\\`, `\`)
+	s = strings.ReplaceAll(s, `\'`, `'`)
+	return s
 }
