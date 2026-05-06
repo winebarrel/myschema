@@ -187,10 +187,10 @@ verbatim, so the round-trip closes immediately).
 `id INT CHECK (id > 0)`, `id INT NOT NULL CHECK (id > 0)`,
 `id INT PRIMARY KEY CHECK (id > 0)` — and stores the constraint
 under an auto-generated name `<table>_chk_<n>`. **vitess does
-not** parse the column-level form: every variant returns
+not** parse the column-level form: every variant fails with
 `syntax error near 'CHECK'`. myschema therefore rejects the
-shape at parse time and the user sees the vitess error
-verbatim.
+shape at parse time, surfacing vitess's error wrapped by
+`ParseSQL` as `failed to parse SQL: syntax error …`.
 
 **Workaround.** Move the CHECK out of the column spec into a
 table-level constraint clause:
