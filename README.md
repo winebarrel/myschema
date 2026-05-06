@@ -56,6 +56,8 @@ Commands:
 
   dump --dsn=STRING [flags]
     Dump the current database schema as SQL.
+
+Run "myschema <command> --help" for more information on a command.
 ```
 
 ### `dump` — serialize the live schema
