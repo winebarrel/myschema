@@ -455,11 +455,14 @@ encoding rule is ambiguous in pathological cases — if a
 literal contains both quotes and backslashes in non-trivial
 mixes, the decoded form may not match the parser side and
 you'll see persistent drift. The escape hatch is
-`myschema dump > desired.sql` — `dump` emits the catalog-side
-form straight back, so the round-trip closes immediately.
-Generated bodies whose literals are simple ASCII (`' '`,
-`' x '`, `'-'`, `' / '`) round-trip cleanly with no special
-handling.
+`myschema dump > desired.sql` — `dump` emits the **decoded**
+form (what the catalog reader produced after running
+`decodeGenerationExpr` over the raw
+`GENERATION_EXPRESSION`), so feeding the dump straight back
+into the parser closes the round-trip even when the raw
+catalog bytes wouldn't have parsed. Generated bodies whose
+literals are simple ASCII (`' '`, `' x '`, `'-'`, `' / '`)
+round-trip cleanly with no special handling.
 
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 

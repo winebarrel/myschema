@@ -54,7 +54,57 @@ func canonicalExpr(s string) (string, bool) {
 	if !ok {
 		return s, false
 	}
-	return strings.ToLower(sqlparser.String(stripped)), true
+	return lowerOutsideStringLiterals(sqlparser.String(stripped)), true
+}
+
+// lowerOutsideStringLiterals lower-cases every byte except the
+// content of single-quoted string literals. Naïve `strings.ToLower`
+// would canonicalise `DEFAULT 'X'` and `DEFAULT 'x'` to the same
+// string, hiding a real case-sensitive value change. Function names,
+// keywords, and unquoted identifiers still need lowering because
+// vitess preserves their case from the input. The state machine
+// tracks the in-literal flag and respects both backslash escapes
+// (`\'`) and SQL-standard doubled quotes (`”`) so the literal
+// boundaries are recognised correctly.
+func lowerOutsideStringLiterals(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c != '\'' {
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		// Opening quote — copy verbatim and walk to the matching close.
+		b.WriteByte(c)
+		i++
+		for i < len(s) {
+			c2 := s[i]
+			b.WriteByte(c2)
+			i++
+			if c2 == '\\' && i < len(s) {
+				// Backslash escape — copy the escaped byte verbatim.
+				b.WriteByte(s[i])
+				i++
+				continue
+			}
+			if c2 == '\'' {
+				// Either closing quote or a doubled-quote escape (`''`).
+				if i < len(s) && s[i] == '\'' {
+					b.WriteByte(s[i])
+					i++
+					continue
+				}
+				break
+			}
+		}
+	}
+	return b.String()
 }
 
 // stripIntroducers walks the expression and replaces every

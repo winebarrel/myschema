@@ -82,6 +82,46 @@ func TestEqualExpr(t *testing.T) {
 			"concat(upper(concat(`a`,_utf8mb4' ',`b`)),`c`)",
 			true,
 		},
+
+		// String-literal case is part of the value, not the
+		// canonical form. Earlier `canonicalExpr` lower-cased the
+		// entire restored expression with `strings.ToLower`, which
+		// canonicalised `'X'` and `'x'` to the same string and
+		// hid real case-sensitive default changes.
+		{
+			"upper-case literal vs lower-case literal — different values",
+			"'X'",
+			"'x'",
+			false,
+		},
+		{
+			"function name case is canonicalised, literal case isn't",
+			"CONCAT(a, 'X')",
+			"concat(a, 'X')",
+			true,
+		},
+		{
+			"function name case canonicalised, literal mismatch survives",
+			"CONCAT(a, 'X')",
+			"concat(a, 'x')",
+			false,
+		},
+		{
+			// Backslash-escaped quote inside literal must not
+			// confuse the literal-boundary tracking.
+			"backslash escape inside literal",
+			`CONCAT(a, 'O\'Brien')`,
+			`concat(a, 'O\'Brien')`,
+			true,
+		},
+		{
+			// SQL-standard doubled-quote escape inside literal
+			// must not be mistaken for a closing quote.
+			"doubled-quote escape inside literal",
+			`CONCAT(a, 'O''Brien')`,
+			`concat(a, 'O''Brien')`,
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
