@@ -166,13 +166,14 @@ prints in the catalog-friendly form. The trade-offs and rough edges:
 **In scope (v1):**
 
 - `CREATE TABLE` (columns, PK / UNIQUE / CHECK / FK, secondary indexes,
-  inline column-level PK / UNIQUE, AUTO_INCREMENT, DEFAULT,
-  ON UPDATE, COMMENT, generated columns, column-level INVISIBLE on
-  MySQL 8.0+). Inline column-level `REFERENCES` is **rejected** at
-  parse time — MySQL silently ignores that shape (see CAVEATS.md
-  "Inline column-level REFERENCES is rejected"), so accepting it
-  would mislead the user into thinking they had an FK that MySQL
-  isn't actually creating. Use a table-level
+  inline column-level PK / UNIQUE — including the bare `KEY` form
+  that MySQL treats as a `PRIMARY KEY` synonym, AUTO_INCREMENT,
+  DEFAULT, ON UPDATE, COMMENT, generated columns, column-level
+  INVISIBLE on MySQL 8.0+). Inline column-level `REFERENCES` is
+  **rejected** at parse time — MySQL silently ignores that shape
+  (see CAVEATS.md "Inline column-level REFERENCES is rejected"),
+  so accepting it would mislead the user into thinking they had
+  an FK that MySQL isn't actually creating. Use a table-level
   `[CONSTRAINT name] FOREIGN KEY (col) REFERENCES other(col)`
   clause instead.
 - `CREATE INDEX` and `ALTER TABLE … ADD CONSTRAINT` in desired-side SQL

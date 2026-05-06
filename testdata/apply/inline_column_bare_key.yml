@@ -1,0 +1,27 @@
+# Coverage: inline column-level bare `KEY` round-trips end-to-end.
+# MySQL accepts `col INT KEY` as a synonym for `col INT PRIMARY KEY`
+# (probed: SHOW CREATE TABLE on `CREATE TABLE t (id INT KEY)` shows
+# `PRIMARY KEY (id)`). myschema previously dropped the declaration
+# silently — `applyInlineColumnKey` had no `ColKey` arm, so the
+# user's PK never reached the model and the emitted CREATE TABLE
+# had no PRIMARY KEY and no NOT NULL on the column. Pin the
+# corrected promotion (parser/parser.go) here so a regression
+# surfaces in the integration suite as well as the unit tests
+# (TestParseInlineColumnBareKeyIsPrimaryKey).
+
+init: |
+
+desired: |
+  CREATE TABLE t (
+      id INT KEY,
+      name VARCHAR(64)
+  );
+
+applied: |
+  CREATE TABLE t (
+      id int NOT NULL,
+      name varchar(64),
+      PRIMARY KEY (id)
+  );
+
+verify_no_drift: true
