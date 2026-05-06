@@ -24,6 +24,18 @@ for a ten-minute walkthrough.
 
 <img width="800" src="https://github.com/user-attachments/assets/87c6512b-2a2b-42e5-8774-4a85c4670c90" />
 
+## Installation
+
+### Homebrew
+
+```bash
+brew install winebarrel/myschema/myschema
+```
+
+### Download binary
+
+Download the latest binary from [Releases](https://github.com/winebarrel/myschema/releases).
+
 ## Usage
 
 Set the DSN once via env (or pass `--dsn=…` on every command):
