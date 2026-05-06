@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -104,6 +105,9 @@ ORDER  BY t.TABLE_NAME`
 			return nil, err
 		}
 		if err := c.loadForeignKeys(ctx, t); err != nil {
+			return nil, err
+		}
+		if err := c.loadSpatialSRIDs(ctx, t); err != nil {
 			return nil, err
 		}
 	}
@@ -494,6 +498,45 @@ ORDER  BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`
 		t.ForeignKeys.Set(n, fks[n].fk)
 	}
 	return nil
+}
+
+// loadSpatialSRIDs populates `Column.SRID` for spatial columns from
+// `information_schema.ST_GEOMETRY_COLUMNS`. The view holds one row per
+// GEOMETRY (or per-shape subtype) column; the column's SRS_ID is NULL
+// when the user didn't write `SRID N`, and 0 / a positive integer when
+// they did. NULL → leave Column.SRID = nil; explicit value → store as
+// *uint32 so a `SRID 0` declaration round-trips as a real value
+// distinct from "unset."
+func (c *Catalog) loadSpatialSRIDs(ctx context.Context, t *model.Table) error {
+	q := `
+SELECT COLUMN_NAME, SRS_ID
+FROM   information_schema.ST_GEOMETRY_COLUMNS
+WHERE  TABLE_SCHEMA = ? AND TABLE_NAME = ?`
+	rows, err := c.conn.QueryContext(ctx, q, t.Database, t.Name)
+	if err != nil {
+		return fmt.Errorf("catalog: list spatial columns for %s: %w", t.FQTN(), err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	for rows.Next() {
+		var (
+			name  string
+			srsID sql.NullInt64
+		)
+		if err := rows.Scan(&name, &srsID); err != nil {
+			return fmt.Errorf("catalog: scan spatial columns for %s: %w", t.FQTN(), err)
+		}
+		if !srsID.Valid {
+			continue
+		}
+		col, ok := t.Columns.GetOk(name)
+		if !ok {
+			continue
+		}
+		v := uint32(srsID.Int64)
+		col.SRID = &v
+	}
+	return rows.Err()
 }
 
 // normalizeColumnDefault wraps the catalog's bareword default in single

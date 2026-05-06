@@ -268,12 +268,42 @@ func TestColumnDefSQLInvisible(t *testing.T) {
 	})
 }
 
+// TestColumnDefSQLSRID pins SRID emission for spatial columns.
+// `nil` Column.SRID emits nothing; an explicit `*0` emits
+// `SRID 0` (a real declaration distinct from "unset"); a non-zero
+// value emits `SRID N`.
+func TestColumnDefSQLSRID(t *testing.T) {
+	t.Run("nil emits nothing", func(t *testing.T) {
+		c := &model.Column{Name: "g", TypeName: "geometry"}
+		assert.NotContains(t, model.ColumnDefSQL(c), "SRID")
+	})
+	t.Run("SRID 0 is emitted (not skipped as zero-value)", func(t *testing.T) {
+		v := uint32(0)
+		c := &model.Column{Name: "g", TypeName: "point", SRID: &v}
+		assert.Contains(t, model.ColumnDefSQL(c), "SRID 0")
+	})
+	t.Run("SRID 4326 emits the value", func(t *testing.T) {
+		v := uint32(4326)
+		c := &model.Column{Name: "g", TypeName: "geometry", NotNull: true, SRID: &v}
+		out := model.ColumnDefSQL(c)
+		assert.Contains(t, out, "SRID 4326")
+		// Slot pinning: SRID sits between NOT NULL and DEFAULT in
+		// MySQL's SHOW CREATE TABLE ordering. Independent ordering
+		// pin lives in TestColumnDefSQLFullOrdering; this just
+		// verifies the SRID-after-NOT-NULL invariant in isolation.
+		nn := strings.Index(out, "NOT NULL")
+		s := strings.Index(out, "SRID")
+		require.True(t, nn >= 0 && s >= 0)
+		assert.Less(t, nn, s, "SRID must follow NOT NULL")
+	})
+}
+
 // TestColumnDefSQLFullOrdering pins every emitted attribute's
 // position with index-comparison so a future reorder of
 // `columnDefSQL` fails a specific edge here instead of silently
 // shipping wrong-order DDL. PR #84 pinned only INVISIBLE's slot;
 // extend the pin to the full chain (CHARSET → COLLATE → GENERATED
-// → STORED|VIRTUAL → NOT NULL → DEFAULT → ON UPDATE →
+// → STORED|VIRTUAL → NOT NULL → SRID → DEFAULT → ON UPDATE →
 // AUTO_INCREMENT → INVISIBLE → COMMENT). The constructed column
 // intentionally combines attributes MySQL would reject together
 // (e.g. BIGINT + CHARACTER SET, AUTO_INCREMENT + GENERATED) so a
@@ -287,6 +317,7 @@ func TestColumnDefSQLFullOrdering(t *testing.T) {
 	def := "0"
 	gen := "id + 1"
 	comment := "audit"
+	srid := uint32(4326)
 
 	// AUTO_INCREMENT and a generated column are mutually exclusive
 	// in MySQL but `columnDefSQL` is a pure formatter — it doesn't
@@ -300,6 +331,7 @@ func TestColumnDefSQLFullOrdering(t *testing.T) {
 		Generated:     &gen,
 		Stored:        true,
 		NotNull:       true,
+		SRID:          &srid,
 		Default:       &def,
 		OnUpdate:      &def,
 		AutoIncrement: true,
@@ -310,7 +342,7 @@ func TestColumnDefSQLFullOrdering(t *testing.T) {
 
 	tokens := []string{
 		"CHARACTER SET", "COLLATE", "GENERATED ALWAYS AS", "STORED",
-		"NOT NULL", "DEFAULT", "ON UPDATE", "AUTO_INCREMENT",
+		"NOT NULL", "SRID", "DEFAULT", "ON UPDATE", "AUTO_INCREMENT",
 		"INVISIBLE", "COMMENT",
 	}
 	pos := make([]int, len(tokens))

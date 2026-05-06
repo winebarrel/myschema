@@ -557,6 +557,18 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 		c.Generated = &expr
 		c.Stored = opts.Storage == sqlparser.StoredStorage
 	}
+	// SRID on spatial columns (`GEOMETRY ... SRID 4326`). vitess parks
+	// the value as a *Literal whose Val is the integer text. SRID 0 is
+	// a valid explicit declaration (distinct from "no SRID"), so we
+	// preserve a *uint32 zero rather than nil.
+	if opts.SRID != nil {
+		n, err := strconv.ParseUint(opts.SRID.Val, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("column %s: SRID %q is not a valid uint32: %w", c.Name, opts.SRID.Val, err)
+		}
+		v := uint32(n)
+		c.SRID = &v
+	}
 
 	return c, nil
 }

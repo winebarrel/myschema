@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/winebarrel/orderedmap"
@@ -156,6 +157,13 @@ func columnDefSQL(col *Column) string {
 	}
 	if col.NotNull {
 		b.WriteString(" NOT NULL")
+	}
+	// SRID slot — between NOT NULL and DEFAULT, matching MySQL's
+	// SHOW CREATE TABLE column-attribute order. nil means no SRID was
+	// declared; *0 is a real declaration (distinct from "unset"), so
+	// we emit `SRID 0` when the pointer is non-nil regardless of value.
+	if col.SRID != nil {
+		fmt.Fprintf(&b, " SRID %d", *col.SRID)
 	}
 	if col.Default != nil {
 		b.WriteString(" DEFAULT ")

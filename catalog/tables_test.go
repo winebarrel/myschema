@@ -352,6 +352,46 @@ CREATE TABLE gen (
 	assert.False(t, virtual.Stored, "VIRTUAL column has Stored=false")
 }
 
+// TestSpatialSRIDRoundTrip pins SRID round-trip from
+// information_schema.ST_GEOMETRY_COLUMNS through loadSpatialSRIDs
+// onto Column.SRID. Three cases per the catalog probe:
+//   - explicit SRID 4326 (typical EPSG WGS84) — populated to *uint32(4326)
+//   - explicit SRID 0 — distinct from "unset", populated to *uint32(0)
+//   - GEOMETRY column with no SRID clause — leaves Column.SRID == nil
+//     (catalog returns NULL SRS_ID, which the loader skips)
+func TestSpatialSRIDRoundTrip(t *testing.T) {
+	db := testutil.ConnectDB(t)
+	ctx := context.Background()
+	testutil.SetupDB(t, ctx, db, `
+CREATE TABLE places (
+    id INT NOT NULL,
+    g_wgs84 GEOMETRY NOT NULL SRID 4326,
+    g_zero  POINT SRID 0,
+    g_unset GEOMETRY NOT NULL,
+    PRIMARY KEY (id)
+);
+`)
+	cat := catalog.NewCatalog(db, testutil.DefaultDB)
+	tables, err := cat.Tables(ctx)
+	require.NoError(t, err)
+	tbl, ok := tables.GetOk("myschema_test.places")
+	require.True(t, ok)
+
+	wgs, ok := tbl.Columns.GetOk("g_wgs84")
+	require.True(t, ok)
+	require.NotNil(t, wgs.SRID)
+	assert.Equal(t, uint32(4326), *wgs.SRID)
+
+	zero, ok := tbl.Columns.GetOk("g_zero")
+	require.True(t, ok)
+	require.NotNil(t, zero.SRID, "SRID 0 must populate as *uint32(0), not nil")
+	assert.Equal(t, uint32(0), *zero.SRID)
+
+	unset, ok := tbl.Columns.GetOk("g_unset")
+	require.True(t, ok)
+	assert.Nil(t, unset.SRID, "no SRID clause must leave Column.SRID == nil")
+}
+
 // TestIndexCatalogQuirks exercises the STATISTICS branches that were
 // previously untested: prefix length, multi-column, and FULLTEXT.
 // (DESC index and INVISIBLE index require column hardware that's flaky
