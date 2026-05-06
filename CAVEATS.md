@@ -424,7 +424,7 @@ different shape, the diff will fire a no-op `MODIFY COLUMN` on
 `GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED` against
 a fresh table. `SHOW CREATE TABLE` returns the full clause as
 
-```
+```sql
 GENERATED ALWAYS AS (concat(`email`,_utf8mb4' ',`name`)) STORED
 ```
 
@@ -447,12 +447,18 @@ actually compares against. The systematic transformations:
 4. **Whitespace around commas / operators → tightened.** `, ' '`
    becomes `,_utf8mb4' '` (no leading space).
 
-myschema's parser preserves whatever the user wrote (the only
-normalisation it applies is vitess's `String()` round-trip, which
-covers function-name casing but not items 2–4). The catalog
-reader takes the canonical form verbatim from MySQL. So the two
-sides disagree by design unless the desired SQL is already in
-the canonical form.
+What myschema actually compares: the **vitess-restored** form of
+the desired-side expression (parser stores `sqlparser.String(opts.As)`,
+which re-renders the parsed AST and is not the user's original
+text — whitespace and some identifier quoting may be rewritten by
+vitess) against the **catalog-side** `GENERATION_EXPRESSION`
+verbatim from MySQL. vitess's restoration handles a few of the
+items above (function-name casing, vitess-reserved-word identifier
+back-ticking) but not the rest (every-identifier back-ticking,
+charset introducers, whitespace tightening). The two
+normalisations aren't equivalent, so the two sides disagree by
+design unless the desired SQL is already in MySQL's canonical
+form.
 
 **Recommendation: don't handwrite generated-column expressions.**
 Run `myschema dump > desired.sql` against the live database
