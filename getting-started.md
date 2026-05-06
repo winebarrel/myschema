@@ -11,20 +11,7 @@ managed schema in about ten minutes. By the end you'll have:
 
 ## 1. Install
 
-```sh
-go install github.com/winebarrel/myschema/cmd/myschema@latest
-```
-
-Or build from source:
-
-```sh
-git clone https://github.com/winebarrel/myschema
-cd myschema
-make build      # produces ./myschema
-```
-
-Requirements: **MySQL 8.0+**, Go 1.26+ to build. See `README.md`
-for the full list.
+See [`README.md`](README.md#installation) for installation options.
 
 ## 2. Point myschema at a database
 
