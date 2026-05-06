@@ -30,5 +30,4 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
 
 ## Low — tests / docs / release
 
-- `.goreleaser.yml`.
 - Renovate / dependabot config.
