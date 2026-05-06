@@ -5,6 +5,22 @@
 # KEY-named-after-its-column doesn't compete for the column
 # rename's directive, and so on.
 #
+# What this fixture actually pins at the apply layer:
+#   - column directive  → emits ALTER TABLE … RENAME COLUMN
+#   - index directive   → emits ALTER TABLE … RENAME INDEX
+#   - FK directive      → DROP+ADD (MySQL has no RENAME FOREIGN KEY)
+#   - CHECK directive   → DROP+ADD (MySQL has no RENAME CONSTRAINT)
+# The FK and CHECK directives are *not* observable in the emitted
+# DDL — diffForeignKeys / diffConstraints emit the same DROP+ADD
+# whether or not RenameFrom is set, because their only role is the
+# typo guard. To prove the FK / CHECK directives are actually
+# recognized, the apply-level coverage lives in:
+#   - error_inline_rename_fk_typo.yml    (typo guard fires for FK)
+#   - error_inline_rename_check_typo.yml (typo guard fires for CHECK)
+# and at the parser level, the bucket routing is pinned by
+# parser/directive_test.go::TestExtractInlineRenamesAllKindsInOneTable
+# with per-bucket length checks.
+#
 # Caveat: the CHECK references `id` (not the renamed `user_id`)
 # because MySQL refuses to RENAME COLUMN that's referenced by an
 # active CHECK constraint, and the diff layer's pass-order
