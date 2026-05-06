@@ -411,6 +411,54 @@ CREATE TABLE t (id INT(5) UNSIGNED ZEROFILL NOT NULL);
 `varchar`, etc. don't trigger drift — both sides are lower-cased
 before comparison. Write whichever you find readable.
 
+## Generated column expression bodies must match MySQL's canonical form
+
+**Rule.** The expression inside `GENERATED ALWAYS AS (...)` in
+your desired SQL must match the form MySQL stores in
+`information_schema.COLUMNS.GENERATION_EXPRESSION` after its own
+canonicalisation. If you handwrite a generated column body in a
+different shape, the diff will fire a no-op `MODIFY COLUMN` on
+**every** plan and `apply` never converges.
+
+**What MySQL canonicalises.** Try writing
+`GENERATED ALWAYS AS (CONCAT(email, ' ', name)) STORED` against a
+fresh table — `SHOW CREATE TABLE` returns it as
+``concat(`email`,_utf8mb4' ',`name`)``. The systematic
+transformations:
+
+1. **Function names → lower-case.** `CONCAT` → `concat`.
+2. **All identifiers → back-tick-quoted**, regardless of whether
+   the name is a reserved word. `email` → `` `email` ``.
+3. **String literals → prefixed with a charset introducer**, e.g.
+   `' '` → `_utf8mb4' '`. The introducer is the session's
+   `character_set_connection` *at CREATE TIME* — **not** the
+   column's or table's `CHARACTER SET`. A connection that ran
+   `SET NAMES latin1` before the `CREATE TABLE` produces
+   `_latin1' '`. Default MySQL 8.0 connections give `_utf8mb4'`,
+   but `mysqldump --default-character-set=latin1` and any code
+   path that touches `SET NAMES` can produce a different prefix.
+4. **Whitespace around commas / operators → tightened.** `, ' '`
+   becomes `,_utf8mb4' '` (no leading space).
+
+myschema's parser preserves whatever the user wrote (the only
+normalisation it applies is vitess's `String()` round-trip, which
+covers function-name casing but not items 2–4). The catalog
+reader takes the canonical form verbatim from MySQL. So the two
+sides disagree by design unless the desired SQL is already in
+the canonical form.
+
+**Recommendation: don't handwrite generated-column expressions.**
+Run `myschema dump > desired.sql` against the live database
+(after applying once with whatever expression you wrote) and
+edit from there. `dump` emits exactly what MySQL stored, so the
+round-trip closes on the next plan.
+
+If you really need to handwrite, mirror what `SHOW CREATE TABLE`
+would emit: lowercase function names, every identifier
+back-ticked, every string literal prefixed with the
+`character_set_connection` introducer, no whitespace around
+commas.
+
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 
 **Behaviour.** `model.Column.TypeName` holds the rendered type
