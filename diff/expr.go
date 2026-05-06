@@ -64,8 +64,9 @@ func canonicalExpr(s string) (string, bool) {
 // keywords, and unquoted identifiers still need lowering because
 // vitess preserves their case from the input. The state machine
 // tracks the in-literal flag and respects both backslash escapes
-// (`\'`) and SQL-standard doubled quotes (`”`) so the literal
-// boundaries are recognised correctly.
+// (`\'`) and the SQL-standard doubled-apostrophe escape (two
+// consecutive `'` characters meaning one literal apostrophe) so
+// the literal boundaries are recognised correctly.
 func lowerOutsideStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

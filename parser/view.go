@@ -64,8 +64,8 @@ func restoreSelectLower(node sqlparser.SQLNode) (string, error) {
 //     the rendered output
 //
 // Without this, the catalog form
-// (`select \`db\`.\`t\`.\`c\` AS \`c\` from \`db\`.\`t\“) wouldn't compare
-// equal to the parser form (`select \`c\` from \`t\“).
+// ( select `db`.`t`.`c` AS `c` from `db`.`t` ) wouldn't compare
+// equal to the parser form ( select `c` from `t` ).
 func NormalizeViewDefinition(def, defaultDB string) (string, error) {
 	if def == "" {
 		return "", nil

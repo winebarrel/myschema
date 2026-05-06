@@ -625,8 +625,8 @@ func normalizeMatch(s string) string {
 // vitess-parseable form. MySQL stores generated bodies with every
 // `\` doubled to `\\` and every `'` (string-literal delimiter or
 // content) preceded by `\`, so a source clause
-// `CONCAT(name, ' x ', name)` round-trips as
-// “concat(`name`,_utf8mb4\' x \',`name`)“. vitess refuses the
+// CONCAT(name, ' x ', name) round-trips as the literal byte
+// sequence  concat(`name`,_utf8mb4\' x \',`name`) . vitess refuses the
 // `\'`-as-delimiter form ("syntax error near '\\'"), and without
 // decoding `equalExprPtr` falls back to byte equality and fires a
 // no-op MODIFY COLUMN on every plan.
