@@ -11,20 +11,7 @@ managed schema in about ten minutes. By the end you'll have:
 
 ## 1. Install
 
-```sh
-go install github.com/winebarrel/myschema/cmd/myschema@latest
-```
-
-Or build from source:
-
-```sh
-git clone https://github.com/winebarrel/myschema
-cd myschema
-make build      # produces ./myschema
-```
-
-Requirements: **MySQL 8.0+**, Go 1.26+ to build. See `README.md`
-for the full list.
+See [`README.md`](README.md#installation) for installation options.
 
 ## 2. Point myschema at a database
 
@@ -239,11 +226,49 @@ common ones:
   ```
 
 - **`-- myschema:convert-charset`** — opt into the rebuild form of
-  charset change (`ALTER TABLE … CONVERT TO CHARACTER SET …`)
-  instead of the default two-stage flow.
+  charset change. By default, changing a table's `DEFAULT CHARSET`
+  takes two applies (table default first, then per-column
+  `MODIFY COLUMN` to inherit it). With this directive on the line
+  above the `CREATE TABLE`, myschema emits a single
+  `ALTER TABLE … CONVERT TO CHARACTER SET <new> [COLLATE <new>]`
+  that rewrites stored bytes and per-column charset metadata in
+  one statement:
+
+  ```sql
+  -- myschema:convert-charset
+  CREATE TABLE users (
+      id BIGINT NOT NULL,
+      name VARCHAR(64),
+      PRIMARY KEY (id)
+  ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  ```
+
+  Heavyweight (full table rebuild), and column-level explicit
+  `CHARACTER SET` clauses get clobbered — re-declare them in
+  desired SQL if needed.
+
 - **`-- myschema:execute <check-sql>`** — escape hatch for objects
-  myschema doesn't model (triggers, routines, events). The check
-  SQL decides whether the guarded statement runs.
+  myschema doesn't model (triggers, routines, events, grants). The
+  guarded statement runs only when the check SQL returns zero
+  rows, so the directive is idempotent across re-applies:
+
+  ```sql
+  CREATE TABLE t (
+      id BIGINT NOT NULL,
+      val INT,
+      PRIMARY KEY (id)
+  );
+
+  -- myschema:execute SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_NAME='trg' AND TRIGGER_SCHEMA=DATABASE()
+  CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.val = 0;
+  ```
+
+  First apply: the check returns no rows, so the `CREATE TRIGGER`
+  runs. Second apply: the trigger now exists, the check returns a
+  row, the guarded statement is skipped. The check SQL must be a
+  single read-only `SELECT`; the guarded payload must contain no
+  internal `;` (so single-statement `FOR EACH ROW SET …` triggers
+  fit, but `BEGIN … END` bodies need to be applied by hand).
 
 `AGENTS.md` lists every directive and `CAVEATS.md` documents the
 sharp edges.
