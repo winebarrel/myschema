@@ -412,6 +412,53 @@ CREATE TABLE wide (
 	assert.True(t, full.Stored, "STORED generated column")
 }
 
+// TestParseColumnSRID pins SRID parsing for spatial columns. vitess
+// parses `GEOMETRY ... SRID N` into `cd.Type.Options.SRID` as a
+// *Literal whose Val is the integer text; parseColumnDef converts
+// to *uint32 on Column.SRID. Three sub-tests:
+//   - SRID 4326 (typical EPSG WGS84 declaration)
+//   - SRID 0 (valid explicit declaration distinct from "unset")
+//   - no SRID at all (nil pointer survives)
+func TestParseColumnSRID(t *testing.T) {
+	sql := `
+CREATE TABLE places (
+    id INT NOT NULL,
+    g_wgs84 GEOMETRY NOT NULL SRID 4326,
+    g_zero  POINT SRID 0,
+    g_unset GEOMETRY NOT NULL,
+    PRIMARY KEY (id)
+);
+`
+	r, err := parser.ParseSQL(sql, "app")
+	require.NoError(t, err)
+	tbl, _ := r.Tables.GetOk("app.places")
+
+	wgs, _ := tbl.Columns.GetOk("g_wgs84")
+	require.NotNil(t, wgs.SRID, "explicit SRID 4326 must reach the model")
+	assert.Equal(t, uint32(4326), *wgs.SRID)
+
+	zero, _ := tbl.Columns.GetOk("g_zero")
+	require.NotNil(t, zero.SRID, "SRID 0 is a real declaration, not unset")
+	assert.Equal(t, uint32(0), *zero.SRID)
+
+	unset, _ := tbl.Columns.GetOk("g_unset")
+	assert.Nil(t, unset.SRID, "no SRID clause must leave Column.SRID == nil")
+}
+
+// TestParseColumnSRIDOverflow: vitess accepts arbitrary integer
+// text in the SRID literal, but `Column.SRID` is *uint32 so a
+// value over uint32 max must error at parse time. MySQL would
+// reject the same SQL at apply, so erroring here surfaces the
+// problem to the user via plan output instead of a server
+// round-trip.
+func TestParseColumnSRIDOverflow(t *testing.T) {
+	sql := `CREATE TABLE t (id INT, g GEOMETRY SRID 4294967296);` // uint32 max + 1
+	_, err := parser.ParseSQL(sql, "app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SRID")
+	assert.Contains(t, err.Error(), "uint32")
+}
+
 // TestParseColumnDefaultNullSkipped pins the parser-side fix for
 // the "TIMESTAMP NULL DEFAULT NULL drift" gap: an explicit
 // `DEFAULT NULL` (vitess hands it back as *sqlparser.NullVal) must

@@ -491,6 +491,29 @@ func TestColumnEqual(t *testing.T) {
 		a.Collation = new("utf8mb4_bin")
 		assert.False(t, diff.ColumnEqual(a, b))
 	})
+	t.Run("SRID differs (4326 vs 3857)", func(t *testing.T) {
+		a, b := base(), base()
+		v1, v2 := uint32(4326), uint32(3857)
+		a.SRID = &v1
+		b.SRID = &v2
+		assert.False(t, diff.ColumnEqual(a, b))
+	})
+	t.Run("SRID set vs unset", func(t *testing.T) {
+		a, b := base(), base()
+		v := uint32(4326)
+		a.SRID = &v
+		assert.False(t, diff.ColumnEqual(a, b))
+	})
+	t.Run("SRID 0 vs unset", func(t *testing.T) {
+		// `SRID 0` is a real declaration (catalog stores SRS_ID=0,
+		// distinct from NULL). It must compare unequal to "no SRID
+		// clause" so a desired going from declared-zero to unset
+		// fires a MODIFY COLUMN.
+		a, b := base(), base()
+		zero := uint32(0)
+		a.SRID = &zero
+		assert.False(t, diff.ColumnEqual(a, b))
+	})
 }
 
 func TestConstraintEqual(t *testing.T) {

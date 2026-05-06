@@ -429,6 +429,9 @@ func columnEqual(a, b *model.Column) bool {
 	if a.Invisible != b.Invisible {
 		return false
 	}
+	if !ptrEq(a.SRID, b.SRID) {
+		return false
+	}
 	return true
 }
 

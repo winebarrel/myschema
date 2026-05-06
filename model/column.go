@@ -19,6 +19,13 @@ type Column struct {
 	// reader populates this from `information_schema.COLUMNS.EXTRA`,
 	// which surfaces "INVISIBLE" alongside other extras.
 	Invisible bool
+	// SRID mirrors MySQL 8.0+ `SRID N` on a spatial column (GEOMETRY
+	// and the per-shape subtypes — POINT / LINESTRING / POLYGON / etc.).
+	// nil means no SRID was declared; *0 is a valid explicit declaration
+	// distinct from "unset" (catalog stores 0 in
+	// `information_schema.ST_GEOMETRY_COLUMNS.SRS_ID` for `SRID 0`,
+	// NULL when no SRID was declared).
+	SRID *uint32
 	// RenameFrom: previous column name from a `-- myschema:renamed-from`
 	// inline directive in CREATE TABLE. Drives ALTER TABLE … RENAME COLUMN
 	// in the diff. Always nil on the catalog side.

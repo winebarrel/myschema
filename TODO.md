@@ -22,17 +22,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   `slices.Equal(a.Cols, b.Cols)` check in `diff/views.go`'s
   `viewEqual`.
 
-- **`SRID <n>` on spatial columns is silently dropped.** vitess
-  parses it into `cd.Type.Options.SRID` (a `*Literal`) but
-  `parseColumnDef` doesn't read it. AGENTS.md "In scope (v1)"
-  lists GEOMETRY columns and SPATIAL INDEX (sakila exercises
-  both), but the SRID attribute on the column is lost on
-  round-trip — and the catalog *does* surface SRID via
-  `information_schema.ST_GEOMETRY_COLUMNS`, so a desired-side
-  schema with `SRID 4326` constants drifts forever. Fix: add
-  SRID to `model.Column`, emit in `columnDefSQL`, populate from
-  the spatial catalog view. Found during the PR #81 audit.
-
 - **Table-level storage / encryption options are silently
   dropped.** `applyTableOption` only handles `ENGINE`, `CHARSET`,
   `COLLATE`, `COMMENT`, `AUTO_INCREMENT`. Real production

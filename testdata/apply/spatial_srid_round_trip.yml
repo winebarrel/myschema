@@ -1,0 +1,34 @@
+# Spatial SRID round-trip fixture. Pre-fix, the desired-side
+# `SRID 4326` was silently dropped by parseColumnDef and the catalog
+# side never read SRS_ID, so a desired schema with SRID constants
+# drifted forever. Now:
+#   - parser: cd.Type.Options.SRID → Column.SRID
+#   - catalog: information_schema.ST_GEOMETRY_COLUMNS.SRS_ID → Column.SRID
+#   - emit: SRID N between NOT NULL and DEFAULT
+#   - diff: columnEqual compares SRID
+#
+# init = desired = three spatial columns covering the three states
+# (explicit non-zero, explicit zero, unset). applied=""; re-plan
+# under verify_no_drift must be empty.
+
+init: |
+  CREATE TABLE places (
+      id INT NOT NULL,
+      g_wgs84 GEOMETRY NOT NULL SRID 4326,
+      g_zero  POINT SRID 0,
+      g_unset GEOMETRY NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+desired: |
+  CREATE TABLE places (
+      id INT NOT NULL,
+      g_wgs84 GEOMETRY NOT NULL SRID 4326,
+      g_zero  POINT SRID 0,
+      g_unset GEOMETRY NOT NULL,
+      PRIMARY KEY (id)
+  );
+
+applied: ""
+
+verify_no_drift: true
