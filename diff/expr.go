@@ -19,11 +19,17 @@ import (
 // a desired-side body like `CONCAT(a, ' ', b)` round-trips on the
 // catalog side as `concat(a, _utf8mb4' ', b)` and the diff would
 // otherwise fire `MODIFY COLUMN` on every plan. Stripping the
-// introducer from both sides closes the loop. The trade-off is
-// documented in CAVEATS.md "Charset introducer differences in
-// generated bodies are not detected" — a deliberate
-// `_latin1` → `_utf8mb4` change in a generated body looks identical
-// to myschema after this strip.
+// introducer from both sides closes the loop.
+//
+// **Scope.** The strip applies to *every* expression comparison
+// that flows through this helper — DEFAULT, ON UPDATE, CHECK, and
+// GENERATED — because they all share `canonicalExpr`. A deliberate
+// introducer-only change in any of those slots (e.g.
+// `DEFAULT _latin1'foo'` → `DEFAULT _utf8mb4'foo'`) is therefore
+// invisible to the diff. The trade-off is documented in CAVEATS.md
+// "Generated column expression bodies that contain string literals"
+// → "charset-introducer-only changes are invisible across the
+// entire diff."
 //
 // Returns the original string and false if parsing fails so callers
 // can fall back to byte equality.

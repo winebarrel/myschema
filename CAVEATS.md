@@ -414,35 +414,52 @@ before comparison. Write whichever you find readable.
 ## Generated column expression bodies that contain string literals
 
 **Default behaviour: drift-free.** myschema canonicalises both the
-desired-side body (vitess parse → restore) and the catalog-side body
-(`information_schema.COLUMNS.GENERATION_EXPRESSION` → MySQL escape
-decode → vitess parse → restore) before comparison, then strips
-charset introducers (`_utf8mb4`, `_latin1`, …) on both sides. So a
-desired-side `CONCAT(email, ' ', name)` round-trips clean against a
-catalog body of `concat(\`email\`,_utf8mb4\\\' \\\',\`name\`)` —
-re-plans are empty.
+desired-side body (vitess parse → restore) and the catalog-side
+body (`information_schema.COLUMNS.GENERATION_EXPRESSION` → MySQL
+escape decode → vitess parse → restore) before comparison, then
+strips charset introducers (`_utf8mb4`, `_latin1`, …) on both
+sides. So a desired-side `CONCAT(email, ' ', name)` round-trips
+clean against the catalog body MySQL stores —
 
-**Limitation: charset-introducer-only changes are invisible.** The
-strip is **symmetric and unconditional**, so a deliberate
-`CONCAT(a, _latin1' ', b)` ↔ `CONCAT(a, _utf8mb4' ', b)` change
-in a generated body looks identical to myschema's diff. If you
-need to pin a specific charset for a literal in a generated
-expression, manage that change out-of-band (run the `ALTER TABLE`
-by hand, or use `-- myschema:execute`).
+```
+concat(`email`,_utf8mb4\' \',`name`)
+```
+
+— and re-plans are empty.
+
+**Limitation: charset-introducer-only changes are invisible
+across the entire diff.** The strip lives in
+`diff/expr.go::canonicalExpr`, which is the shared canonicaliser
+for **every** SQL expression comparison: column DEFAULT, ON
+UPDATE, CHECK, and generated bodies all flow through it. A
+deliberate change like `DEFAULT _latin1'foo'` →
+`DEFAULT _utf8mb4'foo'` (or the same shape inside a CHECK
+expression, or inside a generated body) is therefore invisible
+to the diff. If you need to pin a specific charset for a
+literal in any of these expression slots, manage that change
+out-of-band — run the `ALTER TABLE` by hand, or use
+`-- myschema:execute`.
+
+The trade-off is intentional: introducer-only differences are
+vanishingly rare in practice, and an introducer mismatch on the
+catalog side (where MySQL inserts the connection charset by
+default) was the source of a no-op `MODIFY COLUMN` /
+`ALTER TABLE` reshape on every plan for the common case.
 
 **Limitation: literals containing `'` or `\` aren't fully
-round-tripped.** myschema's escape-decoder
-(`catalog.decodeGenerationExpr`) translates MySQL's storage form
-(`\\\\` for one backslash, `\\\'` for one apostrophe) back into
-SQL-standard form before vitess parses it, but the encoding rule
-is ambiguous in pathological cases — if your literal contains
-both quotes and backslashes in non-trivial mixes, the decoded
-form may not match the parser side and you'll see persistent
-drift. The escape hatch is `myschema dump > desired.sql` — `dump`
-emits the catalog-side form straight back, so the round-trip
-closes immediately. Generated bodies whose literals are simple
-ASCII (`' '`, `' x '`, `'-'`, `' / '`) round-trip cleanly with
-no special handling.
+round-tripped on generated columns.** myschema's escape-decoder
+(`catalog.decodeGenerationExpr`) translates MySQL's storage
+form (`\\` for one backslash, `\'` for one apostrophe) back
+into SQL-standard form before vitess parses it, but the
+encoding rule is ambiguous in pathological cases — if a
+literal contains both quotes and backslashes in non-trivial
+mixes, the decoded form may not match the parser side and
+you'll see persistent drift. The escape hatch is
+`myschema dump > desired.sql` — `dump` emits the catalog-side
+form straight back, so the round-trip closes immediately.
+Generated bodies whose literals are simple ASCII (`' '`,
+`' x '`, `'-'`, `' / '`) round-trip cleanly with no special
+handling.
 
 ## `ENUM` / `SET` element-list changes are diffed as one opaque string
 
