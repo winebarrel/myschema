@@ -109,8 +109,6 @@ CREATE TABLE posts (
 	}
 }
 
-// TestParseInlineForeignKey checks the column-level `REFERENCES other(col)`
-// shorthand: parser should auto-name the FK as `<table>_ibfk_<col>`.
 // TestParseInlineColumnReferencesRejected: MySQL parses inline
 // column-level `REFERENCES` (e.g. `user_id BIGINT REFERENCES
 // users(id)`) but silently ignores it (dev.mysql.com docs

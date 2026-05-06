@@ -138,13 +138,35 @@ CREATE TABLE posts (
     CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
--- Accept (table-level, unnamed — MySQL auto-names `posts_ibfk_<n>`):
+-- Accept (table-level, unnamed):
 CREATE TABLE posts (
     user_id BIGINT NOT NULL,
     ...,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
 ```
+
+**Note on the unnamed table-level form.** When MySQL itself
+creates an unnamed `FOREIGN KEY (...)` it picks
+`<table>_ibfk_<n>` (numeric, declaration-order). myschema's
+parser instead picks `<table>_ibfk_<first_col>`. Two
+consequences:
+
+- Within a myschema-managed flow (`apply` from scratch, or
+  `dump → apply`) the parser's name is what ends up in the
+  catalog, and re-plans are clean.
+- Importing an externally-created schema where the catalog
+  already has `<table>_ibfk_<n>` and writing the desired SQL
+  with an unnamed `FOREIGN KEY (...)` produces a one-shot
+  no-op DROP+ADD on the first plan: the diff sees one FK with
+  the catalog's numeric name and another with the parser's
+  column-shaped name. After that first apply the names align
+  and re-plans are empty.
+
+If the one-shot drift is a problem, write the FK with an
+explicit `CONSTRAINT fk_xxx` name (or run `myschema dump >
+desired.sql` first — `dump` emits the catalog's actual name
+verbatim, so the round-trip closes immediately).
 
 ## Foreign keys to tables in another database are passed through, not managed
 
