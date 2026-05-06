@@ -1,5 +1,8 @@
 # myschema
 
+[![CI](https://github.com/winebarrel/myschema/actions/workflows/ci.yml/badge.svg)](https://github.com/winebarrel/myschema/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/github/winebarrel/myschema/graph/badge.svg?token=6dKYdrOiqP)](https://codecov.io/github/winebarrel/myschema)
+
 Declarative schema management for MySQL. Write the desired schema
 as plain SQL (`CREATE TABLE` / `CREATE VIEW` / etc.); myschema
 reads the current state from `information_schema`, diffs the two,
