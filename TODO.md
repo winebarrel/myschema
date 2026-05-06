@@ -56,20 +56,6 @@ see `CAVEATS.md` → "What myschema deliberately doesn't manage".
   table-level item above but for compressed indexes. Found
   during the PR #81 audit.
 
-- **Inline column-level `REFERENCES` auto-names the FK as
-  `<table>_ibfk_<col>` but MySQL auto-names it `<table>_ibfk_<n>`
-  (numeric).** Parser-side `posts_ibfk_user_id` vs catalog-side
-  `posts_ibfk_1` for `user_id BIGINT REFERENCES users(id)` —
-  every plan emits a redundant `ALTER TABLE posts ADD CONSTRAINT
-  posts_ibfk_user_id …`. Workaround: write the FK explicitly as
-  `CONSTRAINT fk_<name> FOREIGN KEY (...) REFERENCES …` and the
-  names align. Fix options: (a) parser auto-naming matches
-  MySQL's numeric scheme (fragile — need next free number), (b)
-  catalog reader recognises the `_ibfk_<n>` pattern and rewrites
-  to match parser's column-shaped naming, (c) docs recommend
-  always-explicit FK names. Found during the kitchen-sink fixture
-  work for the test-coverage audit.
-
 - **Generated-column expression drifts when the body references a
   vitess-keyword identifier.** `GENERATED ALWAYS AS (CONCAT(email,
   ' ', name)) STORED` round-trips as

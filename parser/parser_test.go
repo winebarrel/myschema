@@ -111,7 +111,17 @@ CREATE TABLE posts (
 
 // TestParseInlineForeignKey checks the column-level `REFERENCES other(col)`
 // shorthand: parser should auto-name the FK as `<table>_ibfk_<col>`.
-func TestParseInlineForeignKey(t *testing.T) {
+// TestParseInlineColumnReferencesRejected: MySQL parses inline
+// column-level `REFERENCES` (e.g. `user_id BIGINT REFERENCES
+// users(id)`) but silently ignores it (dev.mysql.com docs
+// ansi-diff-foreign-keys: "no actual effect … serves only as a
+// memo or comment"). myschema previously rescued the clause by
+// promoting it to an explicit-named FK, but that diverged from
+// MySQL's behaviour and the rescue's auto-name (`_ibfk_<col>`)
+// drifted against MySQL's auto-name (`_ibfk_<n>`) for any catalog
+// state created outside myschema. Reject the shape outright so
+// the user spells out the table-level form they actually want.
+func TestParseInlineColumnReferencesRejected(t *testing.T) {
 	sql := `
 CREATE TABLE users (id BIGINT NOT NULL, PRIMARY KEY (id));
 CREATE TABLE posts (
@@ -120,13 +130,11 @@ CREATE TABLE posts (
     PRIMARY KEY (id)
 );
 `
-	r, err := parser.ParseSQL(sql, "app")
-	require.NoError(t, err)
-	posts, _ := r.Tables.GetOk("app.posts")
-	fk, ok := posts.ForeignKeys.GetOk("posts_ibfk_user_id")
-	require.True(t, ok, "auto-named FK should exist")
-	assert.Equal(t, "users", fk.RefTable)
-	assert.Equal(t, "CASCADE", fk.OnDelete)
+	_, err := parser.ParseSQL(sql, "app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inline column-level REFERENCES")
+	assert.Contains(t, err.Error(), "FOREIGN KEY",
+		"error must point to the table-level alternative")
 }
 
 // TestParseInlineColumnPrimaryKey: vitess parses `id INT PRIMARY KEY`

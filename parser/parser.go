@@ -408,20 +408,6 @@ func parseCreateTable(s *sqlparser.CreateTable, defaultDB string) (*model.Table,
 		}
 		t.Columns.Set(c.Name, c)
 
-		// Inline column-level FK (`col INT REFERENCES other(id)`).
-		if cd.Type.Options != nil && cd.Type.Options.Reference != nil {
-			fk, err := buildFK("", t, []string{c.Name}, cd.Type.Options.Reference, defaultDB)
-			if err != nil {
-				return nil, err
-			}
-			if fk.Name == "" {
-				fk.Name = autoFKName(t.Name, c.Name)
-			}
-			if _, dup := t.ForeignKeys.GetOk(fk.Name); !dup {
-				t.ForeignKeys.Set(fk.Name, fk)
-			}
-		}
-
 		// Inline column-level PRIMARY KEY / UNIQUE
 		// (`col INT PRIMARY KEY`, `col VARCHAR(64) UNIQUE`).
 		// vitess parses these as a column attribute (KeyOpt) rather
@@ -504,6 +490,20 @@ func parseColumnDef(cd *sqlparser.ColumnDefinition) (*model.Column, error) {
 	opts := cd.Type.Options
 	if opts == nil {
 		return c, nil
+	}
+
+	// MySQL parses but ignores inline column-level REFERENCES — the
+	// dev.mysql.com docs (ansi-diff-foreign-keys) call it "a memo or
+	// comment". A previous version of myschema rescued the clause by
+	// promoting it to an explicit-named ALTER TABLE ADD CONSTRAINT,
+	// but that diverged from MySQL's semantics: the user thought
+	// they'd written a working FK, and the rescue's auto-name
+	// (`<table>_ibfk_<col>`) drifted against MySQL's auto-name
+	// (`<table>_ibfk_<n>`) for any catalog state created outside
+	// myschema. Reject the shape outright so the desired SQL spells
+	// out the table-level form the user actually wants.
+	if opts.Reference != nil {
+		return nil, fmt.Errorf("inline column-level REFERENCES is silently ignored by MySQL (see dev.mysql.com docs ansi-diff-foreign-keys); declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY (col) REFERENCES other(col)` clause instead")
 	}
 
 	if opts.Null != nil && !*opts.Null {

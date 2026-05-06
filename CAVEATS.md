@@ -86,6 +86,66 @@ against the live database first and use that output as your starting
 point — every implicit FK covering index will be materialised in the
 output, so the first `apply` is a no-op.
 
+## Inline column-level REFERENCES is rejected
+
+**Behaviour.** Inline column-level `REFERENCES` written as part of
+a column specification (e.g. `user_id BIGINT REFERENCES
+users(id)`) errors at parse time:
+
+```
+inline column-level REFERENCES is silently ignored by MySQL …;
+declare the FK as a table-level `[CONSTRAINT name] FOREIGN KEY
+(col) REFERENCES other(col)` clause instead
+```
+
+**Why.** The MySQL 8.0 reference manual
+(`ansi-diff-foreign-keys.html`) states:
+
+> MySQL parses but ignores "inline `REFERENCES` specifications"
+> (as defined in the SQL standard) where the references are
+> defined as part of the column specification. … Defining a
+> column to use a `REFERENCES tbl_name(col_name)` clause has no
+> actual effect and serves only as a memo or comment …
+
+Earlier myschema versions tried to *rescue* the inline form by
+promoting it to an explicit-named `ALTER TABLE … ADD CONSTRAINT
+… FOREIGN KEY (…)`, which let the FK actually exist. Two
+problems made that a footgun rather than a kindness:
+
+- The user thinks they wrote a working FK; in reality MySQL
+  alone wouldn't have created one. myschema's own desired-side
+  SQL diverged from "what MySQL would do with this same SQL."
+- The rescued FK's auto-name (`<table>_ibfk_<col>`) didn't match
+  MySQL's auto-name for any FK that DID exist on the catalog
+  side from external tools (`<table>_ibfk_<n>`, numeric), so a
+  user importing an externally-managed schema saw a one-shot
+  no-op DROP+ADD on first plan.
+
+Rejecting the shape outright is honest and trivially fixable —
+move the clause to its proper place:
+
+```sql
+-- Reject:
+CREATE TABLE posts (
+    user_id BIGINT NOT NULL REFERENCES users (id),
+    ...
+);
+
+-- Accept (table-level, named):
+CREATE TABLE posts (
+    user_id BIGINT NOT NULL,
+    ...,
+    CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+-- Accept (table-level, unnamed — MySQL auto-names `posts_ibfk_<n>`):
+CREATE TABLE posts (
+    user_id BIGINT NOT NULL,
+    ...,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+```
+
 ## Foreign keys to tables in another database are passed through, not managed
 
 **Behaviour.** A foreign key whose target lives in a different
