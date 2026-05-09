@@ -23,11 +23,9 @@ jobs:
           - mysql_label: "8"
             mysql_service: mysql8
             mysql_port: 3306
-            upload_codecov: true
           - mysql_label: "9"
             mysql_service: mysql9
             mysql_port: 3307
-            upload_codecov: false
     name: test (mysql ${{ matrix.mysql_label }})
     env:
       MYSQL_PORT: ${{ matrix.mysql_port }}
@@ -46,7 +44,7 @@ jobs:
           timeout 120 bash -c 'until mysqladmin ping -h 127.0.0.1 -P "${{ matrix.mysql_port }}" -u root --silent; do sleep 2; done'
       - run: make TEST_OPTS='-coverprofile=coverage.txt'
       - run: make test-scenario
-      - if: ${{ matrix.upload_codecov }}
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          flags: ${{ matrix.mysql_service }}
