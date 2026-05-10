@@ -52,6 +52,10 @@ lint:
 fix:
 	golangci-lint run --fix
 
+.PHONY: deadcode
+deadcode:
+	go tool deadcode ./cmd/myschema
+
 .PHONY: test-scenario
 test-scenario:
 	bash test/scenario/run.sh
