@@ -56,12 +56,16 @@ fix:
 # Reachability from the production binary's main, with no test-mode
 # fallback — anything reported here is genuinely unused in production.
 # Test-only fixtures must live in _test.go so they're excluded from this
-# analysis (see diff.AllowList for the pattern). The wrapper makes
-# findings fail the run — `go tool deadcode` itself exits 0 even when it
-# reports unreachable funcs.
+# analysis (see diff.AllowList for the pattern).
+#
+# `out=$$(...)` swallows the inner command's exit status (assignment
+# always succeeds), so capture $$? explicitly and fail on either a
+# non-zero rc (tool missing, build error, …) or a non-empty stdout
+# (deadcode itself exits 0 even when reporting findings). Fold stderr
+# into stdout so an analysis-time error reaches the operator.
 deadcode:
-	@out=$$(go tool deadcode ./cmd/myschema); \
-	if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
+	@out=$$(go tool deadcode ./cmd/myschema 2>&1); rc=$$?; \
+	if [ "$$rc" -ne 0 ] || [ -n "$$out" ]; then printf '%s\n' "$$out"; exit 1; fi
 
 .PHONY: test-scenario
 test-scenario:
