@@ -1330,13 +1330,9 @@ CREATE TABLE products (
     CHECK (qty >= 0)
 );
 `, "app")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	tbl, ok := r.Tables.GetOk("app.products")
-	if !ok {
-		t.Fatal("table app.products not parsed")
-	}
+	require.True(t, ok, "table app.products not parsed")
 	_, ok = tbl.Constraints.GetOk("products_chk_1")
 	assert.True(t, ok, "first unnamed CHECK should be auto-named products_chk_1")
 	_, ok = tbl.Constraints.GetOk("products_chk_2")
