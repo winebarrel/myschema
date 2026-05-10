@@ -18,7 +18,17 @@ var (
 	ConsumeKeywordSequence          = consumeKeywordSequence
 	LeadingBacktickedIdent          = leadingBacktickedIdent
 	Tokenize                        = tokenize
+	ReadSQLFile                     = readSQLFile
+	ValidateDirectives              = validateDirectives
+	ExtractExecuteDirective         = extractExecuteDirective
+	ExtractStmtRenameFrom           = extractStmtRenameFrom
+	ExtractStmtConvertCharset       = extractStmtConvertCharset
+	ExtractInlineRenames            = extractInlineRenames
 )
+
+// InlineRenames is a type alias so external tests can keep constructing
+// `&parser.InlineRenames{...}` after the type itself was unexported.
+type InlineRenames = inlineRenames
 
 // InlineKind constants (re-exported as ints so external tests can
 // assert on them without depending on the unexported enum type).

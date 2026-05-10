@@ -39,7 +39,7 @@ type TableDiffResult struct {
 // for production use; the constraint matters mainly for tests that
 // share fixtures across subtests.
 func DiffTables(current, desired *orderedmap.Map[string, *model.Table], dc DropChecker) (*TableDiffResult, error) {
-	dc = NormalizeDropChecker(dc)
+	dc = normalizeDropChecker(dc)
 	res := &TableDiffResult{}
 
 	// Rename pass first: ALTER TABLE … RENAME TO is applied before any

@@ -27,8 +27,8 @@ type ParseResult struct {
 	Executes []*model.ExecuteGroup
 }
 
-// ReadSQLFile reads a SQL file (or "-" for stdin).
-func ReadSQLFile(path string) (string, error) {
+// readSQLFile reads a SQL file (or "-" for stdin).
+func readSQLFile(path string) (string, error) {
 	var (
 		data []byte
 		err  error
@@ -49,7 +49,7 @@ func ReadSQLFile(path string) (string, error) {
 func ParseSQLFiles(paths []string, defaultDB string) (*ParseResult, error) {
 	var sqls []string
 	for _, p := range paths {
-		s, err := ReadSQLFile(p)
+		s, err := readSQLFile(p)
 		if err != nil {
 			return nil, err
 		}
@@ -64,7 +64,7 @@ func newParser() (*sqlparser.Parser, error) {
 
 // ParseSQL parses a SQL string into a ParseResult.
 func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
-	if err := ValidateDirectives(sql); err != nil {
+	if err := validateDirectives(sql); err != nil {
 		return nil, err
 	}
 	p, err := newParser()
@@ -92,7 +92,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		// plan / apply talk to MySQL directly. Done before the rename
 		// extractors so an `execute` block doesn't waste cycles
 		// looking for renames inside an opaque payload.
-		checkSQL, executeSQL, ok, err := ExtractExecuteDirective(piece)
+		checkSQL, executeSQL, ok, err := extractExecuteDirective(piece)
 		if err != nil {
 			return nil, err
 		}
@@ -102,15 +102,15 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			// them is ambiguous. Reject upfront instead of silently
 			// dropping one — the rename branch wouldn't run anyway
 			// because we short-circuit the vitess parse below.
-			if stmtRename, rErr := ExtractStmtRenameFrom(piece); rErr != nil {
+			if stmtRename, rErr := extractStmtRenameFrom(piece); rErr != nil {
 				return nil, rErr
 			} else if stmtRename != "" {
 				return nil, fmt.Errorf("-- myschema:execute %q and -- myschema:renamed-from %q in the same statement: directives cannot be combined", checkSQL, stmtRename)
 			}
-			if inline := ExtractInlineRenames(piece); len(inline.Columns)+len(inline.Indexes)+len(inline.Constraints)+len(inline.ForeignKeys)+len(inline.Unsupported) > 0 {
+			if inline := extractInlineRenames(piece); len(inline.Columns)+len(inline.Indexes)+len(inline.Constraints)+len(inline.ForeignKeys)+len(inline.Unsupported) > 0 {
 				return nil, fmt.Errorf("-- myschema:execute %q: -- myschema:renamed-from cannot appear inside an execute payload (the payload is held as raw SQL and never parsed)", checkSQL)
 			}
-			if cc, ccErr := ExtractStmtConvertCharset(piece); ccErr != nil {
+			if cc, ccErr := extractStmtConvertCharset(piece); ccErr != nil {
 				return nil, fmt.Errorf("-- myschema:execute %q: %w", checkSQL, ccErr)
 			} else if cc {
 				return nil, fmt.Errorf("-- myschema:execute %q and -- myschema:convert-charset in the same statement: directives cannot be combined", checkSQL)
@@ -153,15 +153,15 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 		// and an index that share a name (which happens when a KEY is
 		// auto-named after its first column) don't compete for the same
 		// directive.
-		stmtRename, err := ExtractStmtRenameFrom(piece)
+		stmtRename, err := extractStmtRenameFrom(piece)
 		if err != nil {
 			return nil, err
 		}
-		stmtConvertCharset, err := ExtractStmtConvertCharset(piece)
+		stmtConvertCharset, err := extractStmtConvertCharset(piece)
 		if err != nil {
 			return nil, err
 		}
-		inlineRenames := ExtractInlineRenames(piece)
+		inline := extractInlineRenames(piece)
 		// ParseStrictDDL (vs Parse) bypasses vitess's partial-DDL
 		// fallback. Parse2 — which Parse calls under the hood —
 		// swallows syntax errors as a WARN log and returns the
@@ -204,7 +204,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				}
 				t.ConvertCharset = true
 			}
-			for name, old := range inlineRenames.Columns {
+			for name, old := range inline.Columns {
 				c, ok := t.Columns.GetOk(name)
 				if !ok {
 					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target column %q not found in CREATE TABLE", t.FQTN(), old, name)
@@ -212,7 +212,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				o := old
 				c.RenameFrom = &o
 			}
-			for name, old := range inlineRenames.Indexes {
+			for name, old := range inline.Indexes {
 				idx, ok := t.Indexes.GetOk(name)
 				if !ok {
 					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target index %q not found in CREATE TABLE", t.FQTN(), old, name)
@@ -220,7 +220,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				o := old
 				idx.RenameFrom = &o
 			}
-			for name, old := range inlineRenames.Constraints {
+			for name, old := range inline.Constraints {
 				con, ok := t.Constraints.GetOk(name)
 				if !ok {
 					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target constraint %q not found in CREATE TABLE", t.FQTN(), old, name)
@@ -228,7 +228,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				o := old
 				con.RenameFrom = &o
 			}
-			for name, old := range inlineRenames.ForeignKeys {
+			for name, old := range inline.ForeignKeys {
 				fk, ok := t.ForeignKeys.GetOk(name)
 				if !ok {
 					return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: target foreign key %q not found in CREATE TABLE", t.FQTN(), old, name)
@@ -236,8 +236,8 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				o := old
 				fk.RenameFrom = &o
 			}
-			if len(inlineRenames.Unsupported) > 0 {
-				u := inlineRenames.Unsupported[0]
+			if len(inline.Unsupported) > 0 {
+				u := inline.Unsupported[0]
 				return nil, fmt.Errorf("table %s: -- myschema:renamed-from %s: %s", t.FQTN(), u.OldName, u.Reason)
 			}
 			if _, dup := tables.GetOk(t.FQTN()); dup {
@@ -249,7 +249,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			if err := applyAlterTable(tables, s, defaultDB); err != nil {
 				return nil, err
 			}
-			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "ALTER TABLE"); err != nil {
+			if err := rejectMisplacedRenameDirectives(stmtRename, inline, "ALTER TABLE"); err != nil {
 				return nil, err
 			}
 			if err := rejectMisplacedConvertCharset(stmtConvertCharset, "ALTER TABLE"); err != nil {
@@ -265,7 +265,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 				return nil, fmt.Errorf("duplicate view: %s", v.FQVN())
 			}
 			views.Set(v.FQVN(), v)
-			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, "CREATE VIEW"); err != nil {
+			if err := rejectMisplacedRenameDirectives(stmtRename, inline, "CREATE VIEW"); err != nil {
 				return nil, err
 			}
 			if err := rejectMisplacedConvertCharset(stmtConvertCharset, "CREATE VIEW"); err != nil {
@@ -276,7 +276,7 @@ func ParseSQL(sql, defaultDB string) (*ParseResult, error) {
 			// Skip statements we don't model (CREATE DATABASE, COMMENT, SET,
 			// GRANT, etc).
 			kind := fmt.Sprintf("unsupported statement (%T)", s)
-			if err := rejectMisplacedRenameDirectives(stmtRename, inlineRenames, kind); err != nil {
+			if err := rejectMisplacedRenameDirectives(stmtRename, inline, kind); err != nil {
 				return nil, err
 			}
 			if err := rejectMisplacedConvertCharset(stmtConvertCharset, kind); err != nil {
@@ -343,7 +343,7 @@ func rejectMisplacedConvertCharset(found bool, stmtKind string) error {
 // Only `CREATE TABLE` participates today; anywhere else, a directive
 // would be silently dropped on the floor and the corresponding rename
 // would degrade into a destructive DROP+CREATE on the next plan.
-func rejectMisplacedRenameDirectives(stmtRename string, inline *InlineRenames, stmtKind string) error {
+func rejectMisplacedRenameDirectives(stmtRename string, inline *inlineRenames, stmtKind string) error {
 	switch {
 	case stmtRename != "":
 		return fmt.Errorf("-- myschema:renamed-from %s: directive is only supported on CREATE TABLE, not %s", stmtRename, stmtKind)

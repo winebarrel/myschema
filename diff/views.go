@@ -33,7 +33,7 @@ type ViewDiffResult struct {
 //   - Drops are emitted in **reverse** topological order of the *current*
 //     state, so a view that depends on another isn't left dangling.
 func DiffViews(current, desired *orderedmap.Map[string, *model.View], database string, dc DropChecker) (*ViewDiffResult, error) {
-	dc = NormalizeDropChecker(dc)
+	dc = normalizeDropChecker(dc)
 	res := &ViewDiffResult{}
 	viewAllowed := dc.IsDropAllowed("view")
 

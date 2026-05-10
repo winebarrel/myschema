@@ -28,4 +28,5 @@ var (
 	CanonicalComment           = canonicalComment
 	UniqueKeyPartitionCoverGap = uniqueKeyPartitionCoverGap
 	PartitionRequiredColumns   = partitionRequiredColumns
+	NormalizeDropChecker       = normalizeDropChecker
 )
