@@ -101,7 +101,7 @@ func TestIndexSQL(t *testing.T) {
 // a future reorder of Index.SQL() fails this test instead of
 // silently shipping wrong-order DDL. The single-attribute tests
 // above use Contains and are order-blind. Built parallel to the
-// columnDefSQL ordering pin in model/table_test.go.
+// ColumnDefSQL ordering pin in model/table_test.go.
 func TestIndexSQLAttributeOrdering(t *testing.T) {
 	c := "primary lookup"
 	idx := &model.Index{

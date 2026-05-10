@@ -300,7 +300,7 @@ func TestColumnDefSQLSRID(t *testing.T) {
 
 // TestColumnDefSQLFullOrdering pins every emitted attribute's
 // position with index-comparison so a future reorder of
-// `columnDefSQL` fails a specific edge here instead of silently
+// `ColumnDefSQL` fails a specific edge here instead of silently
 // shipping wrong-order DDL. PR #84 pinned only INVISIBLE's slot;
 // extend the pin to the full chain (CHARSET → COLLATE → GENERATED
 // → STORED|VIRTUAL → NOT NULL → SRID → DEFAULT → ON UPDATE →
@@ -320,7 +320,7 @@ func TestColumnDefSQLFullOrdering(t *testing.T) {
 	srid := uint32(4326)
 
 	// AUTO_INCREMENT and a generated column are mutually exclusive
-	// in MySQL but `columnDefSQL` is a pure formatter — it doesn't
+	// in MySQL but `ColumnDefSQL` is a pure formatter — it doesn't
 	// validate semantic combinations, just emits whatever fields
 	// are set. Set both so the ordering pin covers their slots.
 	c := &model.Column{
