@@ -53,11 +53,14 @@ fix:
 	golangci-lint run --fix
 
 .PHONY: deadcode
-# `-test ./...` walks tests too, so test-only fixtures (e.g. diff.AllowList)
-# don't show up as unreachable. The wrapper makes findings fail the run —
-# `go tool deadcode` itself exits 0 even when it reports unreachable funcs.
+# Reachability from the production binary's main, with no test-mode
+# fallback — anything reported here is genuinely unused in production.
+# Test-only fixtures must live in _test.go so they're excluded from this
+# analysis (see diff.AllowList for the pattern). The wrapper makes
+# findings fail the run — `go tool deadcode` itself exits 0 even when it
+# reports unreachable funcs.
 deadcode:
-	@out=$$(go tool deadcode -test ./...); \
+	@out=$$(go tool deadcode ./cmd/myschema); \
 	if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
 
 .PHONY: test-scenario
