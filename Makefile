@@ -52,6 +52,10 @@ lint:
 fix:
 	golangci-lint run --fix
 
+.PHONY: deadcode
+deadcode:
+	@./script/deadcode.sh
+
 .PHONY: test-scenario
 test-scenario:
 	bash test/scenario/run.sh

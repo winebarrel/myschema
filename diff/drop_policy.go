@@ -12,21 +12,6 @@ type AllowAll struct{}
 
 func (AllowAll) IsDropAllowed(string) bool { return true }
 
-// AllowList allows only the listed kinds. The token "all" matches every kind.
-type AllowList struct {
-	Kinds map[string]bool
-}
-
-func (a *AllowList) IsDropAllowed(kind string) bool {
-	if a == nil {
-		return false
-	}
-	if a.Kinds["all"] {
-		return true
-	}
-	return a.Kinds[kind]
-}
-
 // normalizeDropChecker substitutes AllowAll for nil so callers don't have to
 // nil-check.
 func normalizeDropChecker(dc DropChecker) DropChecker {
