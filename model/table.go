@@ -83,7 +83,7 @@ func (t *Table) SQL() string {
 		}
 		first = false
 		b.WriteString("    ")
-		b.WriteString(columnDefSQL(col))
+		b.WriteString(ColumnDefSQL(col))
 	}
 	for _, con := range t.Constraints.CollectValues() {
 		if !first {
@@ -130,9 +130,7 @@ func (t *Table) SQL() string {
 // set of attributes. The order matches MySQL's SHOW CREATE TABLE
 // output and is pinned by index-comparison assertions in
 // `model/table_test.go`.
-func ColumnDefSQL(col *Column) string { return columnDefSQL(col) }
-
-func columnDefSQL(col *Column) string {
+func ColumnDefSQL(col *Column) string {
 	var b strings.Builder
 	b.WriteString(Ident(col.Name))
 	b.WriteString(" ")
