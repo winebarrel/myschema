@@ -27,9 +27,9 @@ func (a *AllowList) IsDropAllowed(kind string) bool {
 	return a.Kinds[kind]
 }
 
-// NormalizeDropChecker substitutes AllowAll for nil so callers don't have to
+// normalizeDropChecker substitutes AllowAll for nil so callers don't have to
 // nil-check.
-func NormalizeDropChecker(dc DropChecker) DropChecker {
+func normalizeDropChecker(dc DropChecker) DropChecker {
 	if dc == nil {
 		return AllowAll{}
 	}

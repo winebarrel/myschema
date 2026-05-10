@@ -18,7 +18,7 @@ var knownDirectives = map[string]bool{
 var (
 	// anyDirectivePattern matches a single-line comment of the form
 	// `-- myschema:<name> ...` (with optional leading whitespace and any
-	// number of dashes ≥ 2). Used by ValidateDirectives to flag typos.
+	// number of dashes ≥ 2). Used by validateDirectives to flag typos.
 	// Allows optional whitespace between the colon and the directive
 	// name so a slip like `-- myschema: renamed-from old` is still
 	// recognised — the per-directive regex (renameDirectivePattern)
@@ -56,7 +56,7 @@ var (
 	convertCharsetDirectivePattern = regexp.MustCompile(`(?m)^\s*--+\s*myschema:convert-charset\s*$`)
 )
 
-// ValidateDirectives scans rawSQL for any -- myschema:<name> comment and
+// validateDirectives scans rawSQL for any -- myschema:<name> comment and
 // returns an error if (a) <name> isn't in knownDirectives, or (b) the
 // directive line is recognised but doesn't match the syntax for that
 // directive. Call this once over the whole input before per-statement
@@ -70,7 +70,7 @@ var (
 // a directive after `/* header */` or after a block-close on the same
 // line still gets validated — keeping validator and extractor in
 // agreement on what counts as a "directive line".
-func ValidateDirectives(rawSQL string) error {
+func validateDirectives(rawSQL string) error {
 	var inBlock bool
 	for line := range strings.SplitSeq(rawSQL, "\n") {
 		if inBlock {
@@ -112,13 +112,13 @@ func ValidateDirectives(rawSQL string) error {
 	return nil
 }
 
-// ExtractExecuteDirective looks at the first non-blank, non-comment-
+// extractExecuteDirective looks at the first non-blank, non-comment-
 // stripped line of piece and, if it is an `-- myschema:execute
 // <check-sql>` directive, returns the check-SQL body and the
 // remainder of the piece (the SQL statement that the directive
 // guards) with the directive line removed.
 //
-// Comment handling mirrors ExtractStmtRenameFrom / ValidateDirectives:
+// Comment handling mirrors extractStmtRenameFrom / validateDirectives:
 // `--` line comments, `#` line comments, and `/* … */` block comments
 // (single-line *and* multi-line) are skipped without breaking the
 // directive's anchor, and a directive after a `*/` on the same line
@@ -130,15 +130,15 @@ func ValidateDirectives(rawSQL string) error {
 //
 // Multiple `-- myschema:execute` directives in the same leading
 // comment block return an error — ambiguous and almost always a typo,
-// matching ExtractStmtRenameFrom's "multiple directives" guard.
+// matching extractStmtRenameFrom's "multiple directives" guard.
 //
 // `ok` is false when the piece doesn't start with an execute
 // directive; the caller falls through to the regular vitess parse
 // path in that case.
-func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool, err error) {
+func extractExecuteDirective(piece string) (checkSQL, remainder string, ok bool, err error) {
 	// Walk the leading lines to find either the execute directive or
 	// the first real SQL line. Only an execute directive that sits
-	// before any SQL line counts — same shape as ExtractStmtRenameFrom,
+	// before any SQL line counts — same shape as extractStmtRenameFrom,
 	// where the directive must precede the statement it guards.
 	lines := strings.Split(piece, "\n")
 	var inBlock bool
@@ -199,7 +199,7 @@ func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool,
 	return "", "", false, nil
 }
 
-// ExtractStmtRenameFrom returns the old name from a leading
+// extractStmtRenameFrom returns the old name from a leading
 // `-- myschema:renamed-from <old>` comment block at the top of stmtSQL,
 // or "" if no such directive is present. The "leading block" includes
 // blank lines, `--` line comments, `#` line comments, and `/* … */`
@@ -212,7 +212,7 @@ func ExtractExecuteDirective(piece string) (checkSQL, remainder string, ok bool,
 // Returns an error if more than one renamed-from directive appears in
 // the leading block — multiple sources is ambiguous and almost always
 // a typo, and silently letting the last one win would mask the mistake.
-func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
+func extractStmtRenameFrom(stmtSQL string) (string, error) {
 	var oldName string
 	var inBlock bool
 	stop := false
@@ -261,9 +261,9 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 	return oldName, nil
 }
 
-// ExtractStmtConvertCharset returns true when the leading comment block
+// extractStmtConvertCharset returns true when the leading comment block
 // of stmtSQL contains a `-- myschema:convert-charset` directive. Same
-// scanner shape as ExtractStmtRenameFrom (blank / `--` / `#` / single-
+// scanner shape as extractStmtRenameFrom (blank / `--` / `#` / single-
 // and multi-line `/* … */` lines all skipped) but unlike that
 // extractor it keeps scanning past the first real SQL line so that
 // a directive misplaced *inside* or *after* the CREATE TABLE body
@@ -271,7 +271,7 @@ func ExtractStmtRenameFrom(stmtSQL string) (string, error) {
 // directive only attaches to the leading comment block, and a stray
 // copy is almost always a typo. Multiple directives in the leading
 // block are likewise rejected.
-func ExtractStmtConvertCharset(stmtSQL string) (bool, error) {
+func extractStmtConvertCharset(stmtSQL string) (bool, error) {
 	var found, sawSQL, inBlock bool
 	for line := range strings.SplitSeq(stmtSQL, "\n") {
 		if inBlock {
@@ -359,9 +359,9 @@ func reduceLeadingBlocks(trim string) (rest string, opened bool) {
 	return trim, false
 }
 
-// InlineRenames separates inline rename directives by the kind of object
+// inlineRenames separates inline rename directives by the kind of object
 // they attach to. Each supported map is keyed by the new (desired) name.
-type InlineRenames struct {
+type inlineRenames struct {
 	Columns     map[string]string // new column name → old column name
 	Indexes     map[string]string // new index  name → old index  name
 	Constraints map[string]string // new CHECK constraint name → old name
@@ -377,16 +377,16 @@ type InlineRenames struct {
 	// plan time (the source name must exist on the current side) but
 	// the diff still emits DROP+ADD because MySQL has no in-place
 	// RENAME CONSTRAINT / RENAME FOREIGN KEY.
-	Unsupported []UnsupportedRename
+	Unsupported []unsupportedRename
 }
 
-// UnsupportedRename is a single inline directive that couldn't be applied.
-type UnsupportedRename struct {
+// unsupportedRename is a single inline directive that couldn't be applied.
+type unsupportedRename struct {
 	OldName string
 	Reason  string
 }
 
-// ExtractInlineRenames walks the body of stmtSQL line by line. Each
+// extractInlineRenames walks the body of stmtSQL line by line. Each
 // `-- myschema:renamed-from <old>` directive line attaches to the next
 // non-comment / non-blank line; the resolved kind comes from inspecting
 // that line. Whitespace between tokens (KEY/INDEX/CONSTRAINT prefixes
@@ -395,14 +395,14 @@ type UnsupportedRename struct {
 //
 // Directives that appear in the leading-comment block (before the first
 // SQL line) are statement-level — they're handled by
-// ExtractStmtRenameFrom, not here, so this function ignores them.
+// extractStmtRenameFrom, not here, so this function ignores them.
 //
 // Comment skipping covers `--` line comments, `# ...` line comments,
 // and `/* ... */` block comments — both single-line and multi-line.
 // A pending directive is preserved across skipped comment lines so it
 // still attaches to the next real target line.
-func ExtractInlineRenames(stmtSQL string) *InlineRenames {
-	out := &InlineRenames{
+func extractInlineRenames(stmtSQL string) *inlineRenames {
+	out := &inlineRenames{
 		Columns:     map[string]string{},
 		Indexes:     map[string]string{},
 		Constraints: map[string]string{},
@@ -437,7 +437,7 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 		// otherwise lost.
 		if strings.HasPrefix(trim, "--") {
 			if !sawSQL {
-				continue // leading directives belong to ExtractStmtRenameFrom
+				continue // leading directives belong to extractStmtRenameFrom
 			}
 			if m := renameDirectivePattern.FindStringSubmatch(trim); m != nil {
 				if pending != "" {
@@ -445,7 +445,7 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 					// the first never attached to anything. Surface as
 					// Unsupported so the parser errors out instead of
 					// silently dropping the earlier directive.
-					out.Unsupported = append(out.Unsupported, UnsupportedRename{
+					out.Unsupported = append(out.Unsupported, unsupportedRename{
 						OldName: pending,
 						Reason:  "directive was followed by another -- myschema:renamed-from before any SQL line attached it",
 					})
@@ -475,7 +475,7 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 		case inlineKindFK:
 			out.ForeignKeys[name] = pending
 		default:
-			out.Unsupported = append(out.Unsupported, UnsupportedRename{
+			out.Unsupported = append(out.Unsupported, unsupportedRename{
 				OldName: pending,
 				Reason:  "directive does not attach to a renameable target on the next line",
 			})
@@ -486,7 +486,7 @@ func ExtractInlineRenames(stmtSQL string) *InlineRenames {
 		// Loop ended (statement body ran out) before the trailing
 		// directive saw any SQL line to attach to. Surface so the
 		// parser errors instead of silently dropping the directive.
-		out.Unsupported = append(out.Unsupported, UnsupportedRename{
+		out.Unsupported = append(out.Unsupported, unsupportedRename{
 			OldName: pending,
 			Reason:  "directive at end of statement has no following SQL line to attach to",
 		})
