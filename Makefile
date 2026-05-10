@@ -58,12 +58,16 @@ fix:
 # Test-only fixtures must live in _test.go so they're excluded from this
 # analysis (see diff.AllowList for the pattern).
 #
-# `out=$$(...)` swallows the inner command's exit status (assignment
-# always succeeds), so capture $$? explicitly and fail on either a
-# non-zero rc (tool missing, build error, …) or a non-empty stdout
-# (deadcode itself exits 0 even when reporting findings). Fold stderr
-# into stdout so an analysis-time error reaches the operator.
+# `go mod download` runs first to warm the module + tool cache, so a
+# fresh runner's `go: downloading …` lines don't get folded into the
+# captured stderr below and look like a finding. Then `out=$$(...)`
+# swallows the inner command's exit status (assignment always
+# succeeds), so capture $$? explicitly and fail on either a non-zero
+# rc (tool missing, build error, …) or a non-empty stdout (deadcode
+# itself exits 0 even when reporting findings). Fold stderr into
+# stdout so an analysis-time error reaches the operator.
 deadcode:
+	@go mod download
 	@out=$$(go tool deadcode ./cmd/myschema 2>&1); rc=$$?; \
 	if [ "$$rc" -ne 0 ] || [ -n "$$out" ]; then printf '%s\n' "$$out"; exit 1; fi
 
