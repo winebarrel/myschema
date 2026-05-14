@@ -8,7 +8,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/winebarrel/orderedmap v1.7.0
 	gopkg.in/yaml.v3 v3.0.1
-	vitess.io/vitess v0.24.0
+	vitess.io/vitess v0.24.1
 )
 
 require (
