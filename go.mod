@@ -1,6 +1,6 @@
 module github.com/winebarrel/myschema
 
-go 1.26.2
+go 1.26.4
 
 require (
 	github.com/alecthomas/kong v1.15.0
@@ -8,7 +8,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/winebarrel/orderedmap v1.7.0
 	gopkg.in/yaml.v3 v3.0.1
-	vitess.io/vitess v0.24.1
+	vitess.io/vitess v0.24.2
 )
 
 require (
