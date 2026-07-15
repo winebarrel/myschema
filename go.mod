@@ -3,7 +3,7 @@ module github.com/winebarrel/myschema
 go 1.26.4
 
 require (
-	github.com/alecthomas/kong v1.15.0
+	github.com/alecthomas/kong v1.16.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/stretchr/testify v1.11.1
 	github.com/winebarrel/orderedmap v1.7.0
