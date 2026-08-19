@@ -5,9 +5,8 @@ go 1.26.4
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/go-sql-driver/mysql v1.10.0
-	github.com/stretchr/testify v1.12.0
+	github.com/stretchr/testify v1.12.1
 	github.com/winebarrel/orderedmap v1.7.0
-	github.com/winebarrel/orderedmap/v2 v2.0.0
 	gopkg.in/yaml.v3 v3.0.1
 	vitess.io/vitess v0.24.2
 )
@@ -19,6 +18,7 @@ require (
 	github.com/mattn/go-isatty v0.0.21 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20250313105119-ba97887b0a25 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
