@@ -4,10 +4,9 @@ go 1.27
 
 require (
 	github.com/alecthomas/kong v1.16.1
-	github.com/go-sql-driver/mysql v1.10.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/stretchr/testify v1.12.1
 	github.com/winebarrel/orderedmap v1.7.0
-	github.com/winebarrel/orderedmap/v2 v2.1.0
 	gopkg.in/yaml.v3 v3.0.1
 	vitess.io/vitess v0.24.2
 )
