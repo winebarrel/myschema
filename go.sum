@@ -34,7 +34,6 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/winebarrel/orderedmap v1.7.0 h1:SWe+CApXxqqWiXT+G9KoSy15YMNzgJbBMNU4IhP15rA=
 github.com/winebarrel/orderedmap v1.7.0/go.mod h1:/LvVD4ZrMGgzoV9UkbzWSTy1yGVjnBImC6SmJvH1eeM=
-github.com/winebarrel/orderedmap/v2 v2.1.0/go.mod h1:ljWUDX2Nj10EuOJYMtGvWhnvYojbWCWsqTLKhhdCZJk=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
@@ -64,5 +63,5 @@ gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 h1:qIbj1fsPNlZgppZ+VLlY7N33
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
-vitess.io/vitess v0.24.2 h1:0PJyoM6BavL7Xwm53SUgWx8V3UTHzV6m5ZYBcQ9PMdA=
-vitess.io/vitess v0.24.2/go.mod h1:xijWgNv7ok7lCr7/fswd2fL4Xd+45HHDA/PQu3BFGX8=
+vitess.io/vitess v0.24.3 h1:UUXqCk4jGsI4GvpLqXqcJYYbgjoYmTBEsdJ3OX4w9QU=
+vitess.io/vitess v0.24.3/go.mod h1:z2atFe1ce0Ci1gVWu80pvjFpIzfUmn2y6vEbqPIQ+P0=
