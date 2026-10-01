@@ -7,9 +7,8 @@ require (
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/stretchr/testify v1.12.1
 	github.com/winebarrel/orderedmap v1.7.0
-	github.com/winebarrel/orderedmap/v2 v2.3.0
 	gopkg.in/yaml.v3 v3.0.1
-	vitess.io/vitess v0.24.3
+	vitess.io/vitess v0.24.4
 )
 
 require (
