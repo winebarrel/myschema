@@ -63,5 +63,5 @@ gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 h1:qIbj1fsPNlZgppZ+VLlY7N33
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
-vitess.io/vitess v0.24.4 h1:fjIFc28fGYF6Bxu4heHsKvx+huPbA4NmIeLJL4clbc8=
-vitess.io/vitess v0.24.4/go.mod h1:RBAgMy0bUlfA3PfcZzmMbd0Cf4p09kSwQUV+9ft9DIs=
+vitess.io/vitess v0.24.5 h1:MYmyGJpqRCs8GSnAyrrzC1ISldWeS5v76QPW7fcngXI=
+vitess.io/vitess v0.24.5/go.mod h1:J5PrduqQRzSHoR2ffkTuBAEW4jDncK33KxY12bvg1Ds=
